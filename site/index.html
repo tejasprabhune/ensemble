@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ensemble</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site">
+    <div class="title">Ensemble</div>
+    <nav>
+      <a href="index.html" class="active">overview</a>
+      <a href="scenarios.html">scenarios</a>
+      <a href="plank.html">plank</a>
+      <a href="personas.html">personas</a>
+      <a href="docs.html">docs</a>
+    </nav>
+  </header>
+
+  <main class="wide">
+    <h1>[copy: one-line overview, eg. "A framework for building multi-user, multi-agent RL environments."]</h1>
+    <p class="lead">[copy: short paragraph describing what Ensemble is and isn't. Aim for a sentence about the worked example (Plank), a sentence about the framework, and a sentence about who it's for.]</p>
+
+    <h2>install</h2>
+<pre><code>uv add ensemble                # python sdk + native bindings
+uv add 'ensemble-train[torch]' # post-training pipeline (optional)
+cargo install --path crates/ensemble-cli  # the `ensemble` cli</code></pre>
+
+    <h2>refund storm, replayed</h2>
+    <p>The trace below is a deterministic mock run of Plank's <code>refund_storm</code> scenario: three users, two agents, sqlite-backed world. Scrub the timeline to step through events; the right-hand panel shows tool effects on world state.</p>
+
+    <div class="viewer" id="viewer">
+      <div class="controls">
+        <button id="playBtn">play</button>
+        <button id="prevBtn">&larr;</button>
+        <button id="nextBtn">&rarr;</button>
+        <input type="range" id="slider" min="0" max="0" value="0">
+        <span id="tickLabel">0 / 0</span>
+      </div>
+      <div class="stage">
+        <div class="panel" id="messagesPanel"><h4>actors</h4></div>
+        <div class="panel" id="toolsPanel"><h4>tool calls</h4></div>
+        <div class="panel" id="diffPanel"><h4>state changes</h4></div>
+      </div>
+    </div>
+
+    <p class="lead">[copy: a sentence explaining what a viewer sees here. Mention that the agents are LLMs in the real run; this baked transcript uses a mock backend for reproducibility.]</p>
+
+    <h2>what's in the box</h2>
+    <ul>
+      <li><a href="scenarios.html">scenarios</a>: <code>@scenario</code> decorator, <code>async with world.simulate()</code>, TOML manifests.</li>
+      <li><a href="plank.html">plank</a>: the worked example world. SQLite state, six tools, five personas.</li>
+      <li><a href="personas.html">personas</a>: persona TOML spec, DPO+LoRA training via Modal or SkyPilot.</li>
+      <li><a href="docs.html">docs</a>: world authoring, tool registration, snapshot/restore, trace format.</li>
+    </ul>
+  </main>
+
+  <footer class="site">
+    [copy: footer line. Maybe a contact link or a sentence about the repo's status.]
+  </footer>
+
+  <script src="viewer.js"></script>
+</body>
+</html>

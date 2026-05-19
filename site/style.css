@@ -1,0 +1,222 @@
+/* Site styles. Small serif headers, generous line height, prose-heavy.
+   Two columns on wide screens, single column on narrow. No framework. */
+
+:root {
+  --ink: #1a1a1a;
+  --ink-soft: #4a4a4a;
+  --ink-faint: #8a8a8a;
+  --bg: #fafaf7;
+  --rule: #d8d6cf;
+  --accent: #6a4d1a;
+  --code-bg: #f2f0ea;
+  --max-col: 36rem;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Iowan Old Style", "Charter", "Bitstream Charter", "Georgia", serif;
+  font-size: 17px;
+  line-height: 1.65;
+}
+
+body {
+  padding: 3rem 1.5rem 6rem;
+}
+
+main {
+  max-width: var(--max-col);
+  margin: 0 auto;
+}
+
+main.wide {
+  max-width: 60rem;
+}
+
+header.site {
+  max-width: var(--max-col);
+  margin: 0 auto 2.5rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+header.site .title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+nav a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  margin-left: 1.1rem;
+  border-bottom: 1px solid transparent;
+  font-size: 0.95rem;
+}
+nav a:hover { color: var(--ink); border-bottom-color: var(--rule); }
+nav a.active { color: var(--ink); border-bottom-color: var(--ink); }
+
+h1, h2, h3 {
+  font-family: "Iowan Old Style", "Charter", "Georgia", serif;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+}
+h1 { font-size: 1.6rem; margin: 0 0 1rem; line-height: 1.25; }
+h2 { font-size: 1.15rem; margin: 2.5rem 0 0.75rem; }
+h3 { font-size: 1rem; margin: 1.75rem 0 0.5rem; color: var(--ink-soft); }
+
+p { margin: 0.85rem 0; }
+p.lead { font-size: 1.05rem; color: var(--ink-soft); }
+
+a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+a:hover { color: var(--ink); }
+
+code, pre, kbd, samp {
+  font-family: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+  font-size: 0.85rem;
+}
+
+p code, li code {
+  background: var(--code-bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  line-height: 1.55;
+  margin: 1rem 0 1.25rem;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--rule);
+  margin: 3rem 0;
+}
+
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.25rem 0; }
+
+footer.site {
+  max-width: var(--max-col);
+  margin: 4rem auto 0;
+  font-size: 0.85rem;
+  color: var(--ink-faint);
+}
+
+/* --- Trace viewer --- */
+.viewer {
+  margin: 2rem auto;
+  max-width: 56rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: white;
+}
+
+.viewer .controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.viewer button {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.7rem;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.viewer button:hover { border-color: var(--ink-soft); }
+
+.viewer input[type=range] { flex: 1; }
+
+.viewer .stage {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0;
+  min-height: 24rem;
+}
+.viewer .panel {
+  padding: 0.75rem 0.9rem;
+  border-right: 1px solid var(--rule);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  overflow-y: auto;
+  max-height: 28rem;
+}
+.viewer .panel:last-child { border-right: none; }
+.viewer .panel h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.actor-msg {
+  margin: 0.35rem 0;
+  padding: 0.35rem 0.55rem;
+  border-left: 3px solid var(--rule);
+  background: #fcfbf7;
+}
+.actor-msg .who {
+  font-weight: 600;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+.actor-msg .text { color: var(--ink); }
+
+.tool-line { margin: 0.35rem 0; }
+.tool-line .name { font-weight: 600; }
+.tool-line .args, .tool-line .res { color: var(--ink-soft); font-family: "JetBrains Mono", monospace; font-size: 0.78rem; }
+
+table.diff {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+table.diff th, table.diff td {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px dotted var(--rule);
+  vertical-align: top;
+}
+table.diff th {
+  font-weight: 600;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+}
+
+/* Personas chart placeholder */
+.chart-placeholder {
+  height: 16rem;
+  border: 1px dashed var(--rule);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-faint);
+  font-size: 0.85rem;
+  margin: 1.5rem 0;
+}

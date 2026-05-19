@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ensemble &middot; docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site">
+    <div class="title">Ensemble</div>
+    <nav>
+      <a href="index.html">overview</a>
+      <a href="scenarios.html">scenarios</a>
+      <a href="plank.html">plank</a>
+      <a href="personas.html">personas</a>
+      <a href="docs.html" class="active">docs</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>docs</h1>
+    <p class="lead">[copy: one paragraph framing the docs as authoring-side: how to build a world, register tools, and plug into the trace viewer.]</p>
+
+    <h2>writing a world</h2>
+    <p>A world is a Rust struct that implements the <code>WorldState</code> trait. The trait has three associated types and three methods:</p>
+<pre><code>pub trait WorldState: Send + Sync + 'static {
+    type ToolCall:  DeserializeOwned + Send;
+    type ToolEffect: Serialize + Send;
+    type Diff:       Serialize + Send;
+
+    fn apply(&amp;mut self, call: Self::ToolCall)
+        -&gt; Result&lt;(Self::ToolEffect, Self::Diff), ToolError&gt;;
+
+    fn snapshot(&amp;self) -&gt; Vec&lt;u8&gt;;
+    fn restore(&amp;mut self, snapshot: &amp;[u8]) -&gt; Result&lt;(), RestoreError&gt;;
+}</code></pre>
+    <p>The <code>Diff</code> is what the trace viewer renders in the right-hand panel. Make it rich enough to reconstruct what changed (table, row id, field, old, new).</p>
+
+    <h2>registering tools</h2>
+    <p>Tools are Rust closures the agent can call by name. Each tool has a JSON Schema for its parameters and a closure that maps args to an effect.</p>
+<pre><code>tools.register(Tool::new(
+    "lookup_user",
+    "Look up a user by id.",
+    json!({"type":"object","properties":{"user_id":{"type":"string"}}}),
+    |args| {
+        let user_id = args["user_id"].as_str().unwrap();
+        let rec = state.lock().lookup_user(user_id)?;
+        Ok(json!({"ok": true, "data": rec}))
+    },
+));</code></pre>
+
+    <h2>scaffold a new world</h2>
+<pre><code>ensemble init my_world
+cd my_world
+cargo build
+ensemble run my_world.smoke</code></pre>
+
+    <h2>trace format</h2>
+    <p>Traces are JSONL. One line per event; events are ordered by tick.</p>
+<pre><code>{
+  "tick": 7,
+  "ts_ms": 1716000123,
+  "actor": "rep1",
+  "message_id": "msg-...",
+  "payload": {
+    "kind": "tool_call",
+    "name": "issue_refund",
+    "args": {"user_id": "u-alice", "amount_cents": 15000, "reason": "..."}
+  }
+}</code></pre>
+    <p>Event kinds: <code>user_message</code>, <code>agent_message</code>, <code>tool_call</code>, <code>tool_result</code>, <code>state_diff</code>, <code>system</code>.</p>
+
+    <h2>hidden state and persona prompts</h2>
+    <p>Personas (prompted or trained) hold hidden state that is injected into the system prompt inside an unambiguous tag. Non-revelation is a training problem in v0; see the <a href="personas.html">personas page</a>.</p>
+
+    <h2>known limits (v0)</h2>
+    <ul>
+      <li>No streaming LLM responses.</li>
+      <li>One trainer (TRL + DPO + LoRA); no verl, no prime-rl.</li>
+      <li>No hosted platform: everything is local + Modal/SkyPilot.</li>
+      <li>Persona consistency evaluator is not implemented (page is a placeholder).</li>
+    </ul>
+  </main>
+
+  <footer class="site">[copy: footer]</footer>
+</body>
+</html>

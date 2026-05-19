@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ensemble &middot; plank</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site">
+    <div class="title">Ensemble</div>
+    <nav>
+      <a href="index.html">overview</a>
+      <a href="scenarios.html">scenarios</a>
+      <a href="plank.html" class="active">plank</a>
+      <a href="personas.html">personas</a>
+      <a href="docs.html">docs</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>plank</h1>
+    <p class="lead">[copy: 2-3 sentences on what Plank is and why it's a useful first world to build with Ensemble. Mention SaaS customer-support setting and shared world state.]</p>
+
+    <h2>state</h2>
+    <p>An in-memory SQLite database with five tables:</p>
+<pre><code>users         (id, name, email, plan)
+tickets       (id, user_id, subject, status, opened_at)
+subscriptions (user_id, plan)
+kb            (id, title, body)
+audit_log     (id, ts, who, action, payload)
+refunds       (id, user_id, amount_cents, reason, ts)</code></pre>
+    <p>State is bundled into a <code>WorldState</code> trait impl in Rust; the scenario authors only see the tools that operate on it.</p>
+
+    <h2>tools</h2>
+    <ul>
+      <li><code>lookup_user(user_id)</code> &mdash; fetch a user record</li>
+      <li><code>lookup_ticket(ticket_id)</code> &mdash; fetch a ticket</li>
+      <li><code>issue_refund(user_id, amount_cents, reason)</code> &mdash; one per user per run; second call errors</li>
+      <li><code>escalate(ticket_id, to_team)</code> &mdash; sets status to <code>escalated</code></li>
+      <li><code>search_kb(query)</code> &mdash; case-insensitive substring search</li>
+      <li><code>update_subscription(user_id, plan)</code> &mdash; switch a user's plan</li>
+    </ul>
+
+    <h2>scenarios shipped</h2>
+    <ul>
+      <li><code>plank.single_ticket</code> &mdash; 1 user, 1 agent. Sanity check.</li>
+      <li><code>plank.refund_storm</code> &mdash; 3 users, 2 agents. The hero demo on the front page.</li>
+      <li><code>plank.enterprise_audit</code> &mdash; <code>async with</code> path with mid-run intervention.</li>
+    </ul>
+
+    <h2>run it</h2>
+<pre><code>cargo build --release
+ensemble run plank.refund_storm --world plank
+ensemble trace view traces/plank_refund_storm.jsonl</code></pre>
+
+    <p>[copy: a sentence pointing readers at the source tree (examples/plank/) and what to read first.]</p>
+  </main>
+
+  <footer class="site">[copy: footer]</footer>
+</body>
+</html>

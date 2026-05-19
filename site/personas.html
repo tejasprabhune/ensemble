@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ensemble &middot; personas</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site">
+    <div class="title">Ensemble</div>
+    <nav>
+      <a href="index.html">overview</a>
+      <a href="scenarios.html">scenarios</a>
+      <a href="plank.html">plank</a>
+      <a href="personas.html" class="active">personas</a>
+      <a href="docs.html">docs</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>personas</h1>
+    <p class="lead">[copy: a paragraph on the two modes: prompted personas (system-prompt only) and trained personas (DPO+LoRA on a base model). Mention that trained personas serve from a vLLM endpoint and look identical to the rest of the framework.]</p>
+
+    <h2>spec format</h2>
+<pre><code>[persona]
+name = "frustrated_power_user"
+mode = "trained"
+description = "Long-tenured paid user with low patience."
+
+[persona.style]
+tone     = "frustrated"
+verbosity = "high"
+
+[persona.demographics]
+plan          = "team"
+tenure_months = 36
+
+[persona.hidden_state.schema]
+mood       = { type = "string", default = "annoyed" }
+hidden_goal = { type = "string", default = "refund_3mo" }
+
+[persona.system_prompt]
+template = """
+You are a long-tenured Plank customer. You want a refund...
+"""
+
+[persona.training]
+base_model     = "Qwen/Qwen2.5-7B-Instruct"
+backend        = "modal"
+dataset        = "spec_only"
+adapter_name   = "ensemble-plank-frustrated-power-user"
+
+[persona.training.lora] # forwarded to peft.LoraConfig
+r = 16
+alpha = 32
+dropout = 0.05
+
+[persona.training.dpo]  # forwarded to trl.DPOConfig
+beta = 0.1
+epochs = 1
+learning_rate = 5e-6</code></pre>
+
+    <h2>training a persona</h2>
+<pre><code>uv add 'ensemble-train[torch]'
+ensemble train examples/plank/personas/frustrated_power_user.toml \
+  --backend modal</code></pre>
+    <p>If the spec marks <code>dataset = "spec_only"</code>, the pipeline runs a self-play loop to build a DPO preference dataset before training. The breaker is a frontier model that tries to push the persona out of character; in-character continuations become <code>chosen</code>, breaks become <code>rejected</code>.</p>
+
+    <h2>consistency benchmark</h2>
+    <p>[copy: paragraph explaining how persona consistency is scored. Note this page is a placeholder until the evaluator lands.]</p>
+    <div class="chart-placeholder">[chart: consistency vs. adversarial turns, by persona]</div>
+
+    <h2>shipped personas (plank)</h2>
+    <ul>
+      <li><code>frustrated_power_user</code> &mdash; trained, DPO+LoRA on Qwen2.5-7B.</li>
+      <li><code>confused_new_user</code> &mdash; prompted.</li>
+      <li><code>enterprise_admin</code> &mdash; prompted.</li>
+      <li><code>patient_retail</code> &mdash; prompted.</li>
+      <li><code>chatty_neutral</code> &mdash; prompted.</li>
+    </ul>
+  </main>
+
+  <footer class="site">[copy: footer]</footer>
+</body>
+</html>
