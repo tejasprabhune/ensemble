@@ -6,6 +6,7 @@ use ensemble_core::actor::{Actor, ActorKind};
 use ensemble_core::bus::{Bus, Envelope, Message, Recipient};
 use ensemble_core::error::CoreError;
 use ensemble_core::event::EventPayload;
+
 use ensemble_core::ids::ActorId;
 
 use crate::backend::{ChatMessage, CompletionRequest, SharedBackend};
@@ -38,6 +39,7 @@ impl Actor for UserActor {
     fn kind(&self) -> ActorKind { ActorKind::User }
 
     async fn step(&self, bus: &Bus, envelope: Envelope) -> Result<(), CoreError> {
+        let from = envelope.from.clone();
         let incoming = match envelope.message {
             Message::AgentMessage { text } => text,
             Message::UserMessage { text } => text,
@@ -55,16 +57,24 @@ impl Actor for UserActor {
             messages,
             ..Default::default()
         };
-        let resp = self
-            .backend
-            .complete(req)
-            .await
-            .map_err(|e| CoreError::Other(format!("backend: {e}")))?;
+        let resp = match self.backend.complete(req).await {
+            Ok(r) => r,
+            Err(e) => {
+                bus.append_event(
+                    Some(self.id.clone()),
+                    EventPayload::System {
+                        note: format!("backend error ({}): {e}", self.model),
+                    },
+                )
+                .await;
+                return Ok(());
+            }
+        };
         self.history.lock().push(ChatMessage::assistant(resp.text.clone()));
         if !resp.text.is_empty() {
             bus.send(
                 self.id.clone(),
-                Recipient::Broadcast,
+                Recipient::Actor(from),
                 Message::UserMessage { text: resp.text },
             )
             .await?;
@@ -107,6 +117,7 @@ impl Actor for AgentActor {
     fn kind(&self) -> ActorKind { ActorKind::Agent }
 
     async fn step(&self, bus: &Bus, envelope: Envelope) -> Result<(), CoreError> {
+        let from = envelope.from.clone();
         let incoming = match envelope.message {
             Message::UserMessage { text } => text,
             Message::AgentMessage { text } => text,
@@ -115,65 +126,85 @@ impl Actor for AgentActor {
             }
             Message::System { .. } | Message::ToolCall { .. } => return Ok(()),
         };
-        {
-            let mut h = self.history.lock();
-            h.push(ChatMessage::user(incoming));
-        }
-        let messages = self.history.lock().clone();
-        let req = CompletionRequest {
-            model: self.model.clone(),
-            messages,
-            tools: self.tools.schemas(),
-            ..Default::default()
-        };
-        let resp = self
-            .backend
-            .complete(req)
-            .await
-            .map_err(|e| CoreError::Other(format!("backend: {e}")))?;
+        self.history.lock().push(ChatMessage::user(incoming));
 
-        if !resp.text.is_empty() {
-            self.history.lock().push(ChatMessage::assistant(resp.text.clone()));
-            bus.send(
-                self.id.clone(),
-                Recipient::Broadcast,
-                Message::AgentMessage { text: resp.text },
-            )
-            .await?;
-        }
-
-        for call in resp.tool_calls {
-            bus.append_event(
-                Some(self.id.clone()),
-                EventPayload::ToolCall {
-                    name: call.name.clone(),
-                    args: call.args.clone(),
-                },
-            )
-            .await;
-            match self.tools.dispatch(&call.name, &call.args) {
-                Ok(effect) => {
-                    self.history.lock().push(ChatMessage::tool(format!(
-                        "tool {} -> {}",
-                        call.name, effect
-                    )));
-                    bus.append_event(
-                        Some(self.id.clone()),
-                        EventPayload::ToolResult {
-                            name: call.name,
-                            result: effect,
-                        },
-                    )
-                    .await;
-                }
+        // Standard tool-use loop: each iteration is one model turn.
+        // We send any text immediately, dispatch any tool calls, and
+        // stop when the model produces a turn with no tool calls.
+        // The cap is a safety belt against runaway scripts; six is
+        // enough for most multi-step plans.
+        const MAX_TOOL_TURNS: usize = 8;
+        for _ in 0..MAX_TOOL_TURNS {
+            let messages = self.history.lock().clone();
+            let req = CompletionRequest {
+                model: self.model.clone(),
+                messages,
+                tools: self.tools.schemas(),
+                ..Default::default()
+            };
+            let resp = match self.backend.complete(req).await {
+                Ok(r) => r,
                 Err(e) => {
                     bus.append_event(
                         Some(self.id.clone()),
                         EventPayload::System {
-                            note: format!("tool error: {e}"),
+                            note: format!("backend error ({}): {e}", self.model),
                         },
                     )
                     .await;
+                    return Ok(());
+                }
+            };
+
+            if !resp.text.is_empty() {
+                self.history
+                    .lock()
+                    .push(ChatMessage::assistant(resp.text.clone()));
+                bus.send(
+                    self.id.clone(),
+                    Recipient::Actor(from.clone()),
+                    Message::AgentMessage { text: resp.text },
+                )
+                .await?;
+            }
+
+            if resp.tool_calls.is_empty() {
+                break;
+            }
+
+            for call in resp.tool_calls {
+                bus.append_event(
+                    Some(self.id.clone()),
+                    EventPayload::ToolCall {
+                        name: call.name.clone(),
+                        args: call.args.clone(),
+                    },
+                )
+                .await;
+                match self.tools.dispatch(&call.name, &call.args) {
+                    Ok(effect) => {
+                        self.history.lock().push(ChatMessage::tool(format!(
+                            "tool {} -> {}",
+                            call.name, effect
+                        )));
+                        bus.append_event(
+                            Some(self.id.clone()),
+                            EventPayload::ToolResult {
+                                name: call.name,
+                                result: effect,
+                            },
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        bus.append_event(
+                            Some(self.id.clone()),
+                            EventPayload::System {
+                                note: format!("tool error: {e}"),
+                            },
+                        )
+                        .await;
+                    }
                 }
             }
         }

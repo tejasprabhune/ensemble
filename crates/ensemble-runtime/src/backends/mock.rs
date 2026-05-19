@@ -30,6 +30,21 @@ impl MockTurn {
             stop_reason: Some("tool_use".into()),
         }
     }
+
+    /// A turn that emits text and a tool call in the same step. Mirrors
+    /// how real frontier models often say "Let me look that up" right
+    /// before issuing the tool call.
+    pub fn say_then_tool(
+        text: impl Into<String>,
+        tool: impl Into<String>,
+        args: serde_json::Value,
+    ) -> Self {
+        Self {
+            text: text.into(),
+            tool_calls: vec![ProposedToolCall { name: tool.into(), args }],
+            stop_reason: Some("tool_use".into()),
+        }
+    }
 }
 
 /// A scripted sequence of responses, optionally keyed by model name.

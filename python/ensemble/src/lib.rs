@@ -204,6 +204,25 @@ impl World {
         self.inner.lock().script.push_for(model, MockTurn::text(text));
     }
 
+    /// Test-only: queue a canned mock turn that emits both text and a
+    /// tool call in one step. Matches how real frontier models often
+    /// preface a tool use.
+    fn _mock_say_then_tool(
+        &self,
+        model: &str,
+        text: &str,
+        tool: &str,
+        args_json: &str,
+    ) -> PyResult<()> {
+        let args: serde_json::Value = serde_json::from_str(args_json)
+            .map_err(|e| PyValueError::new_err(format!("bad json: {e}")))?;
+        self.inner
+            .lock()
+            .script
+            .push_for(model, MockTurn::say_then_tool(text, tool, args));
+        Ok(())
+    }
+
     /// Test-only: queue a canned mock tool call for a given model.
     fn _mock_tool(&self, model: &str, tool: &str, args_json: &str) -> PyResult<()> {
         let args: serde_json::Value = serde_json::from_str(args_json)
@@ -555,13 +574,25 @@ fn build_backend(
             BackendKind::Mock,
         ),
         "anthropic" => {
-            let be = AnthropicBackend::from_env()
+            let mut be = AnthropicBackend::from_env()
                 .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+            let url = base_url
+                .map(str::to_string)
+                .or_else(|| std::env::var("ANTHROPIC_BASE_URL").ok());
+            if let Some(url) = url {
+                be = be.with_base_url(url);
+            }
             (Arc::new(be) as SharedBackend, BackendKind::Anthropic)
         }
         "openai" => {
-            let be = OpenAIBackend::from_env()
+            let mut be = OpenAIBackend::from_env()
                 .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+            let url = base_url
+                .map(str::to_string)
+                .or_else(|| std::env::var("OPENAI_BASE_URL").ok());
+            if let Some(url) = url {
+                be = be.with_base_url(url);
+            }
             (Arc::new(be) as SharedBackend, BackendKind::OpenAI)
         }
         "vllm" => {
