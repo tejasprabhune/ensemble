@@ -88,7 +88,11 @@ impl LLMBackend for OpenAIBackend {
                     "parameters": t.parameters,
                 }
             })).collect::<Vec<_>>(),
-            "max_tokens": request.max_tokens.unwrap_or(1024),
+            // Newer OpenAI / Azure models (gpt-5, o1, ...) reject the
+            // legacy `max_tokens` field and require `max_completion_tokens`.
+            // The new field has been accepted by every chat-completions
+            // model since mid-2024, so we always emit it.
+            "max_completion_tokens": request.max_tokens.unwrap_or(1024),
             "temperature": request.temperature.unwrap_or(0.7),
         });
 
