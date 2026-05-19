@@ -3,38 +3,65 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ensemble</title>
+  <title>ensemble</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <header class="site">
-    <div class="title">Ensemble</div>
+<body class="wide">
+  <header>
+    <a class="wordmark" href="index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
     <nav>
-      <a href="index.html" class="active">overview</a>
-      <a href="scenarios.html">scenarios</a>
-      <a href="plank.html">plank</a>
-      <a href="personas.html">personas</a>
-      <a href="docs.html">docs</a>
+      <a href="index.html" class="active">Overview</a>
+      <a href="docs.html">Docs</a>
+      <a href="scenarios.html">Scenarios</a>
+      <a href="plank.html">Plank</a>
+      <a href="personas.html">Personas</a>
     </nav>
   </header>
 
-  <main class="wide">
-    <h1>[copy: one-line overview, eg. "A framework for building multi-user, multi-agent RL environments."]</h1>
-    <p class="lead">[copy: short paragraph describing what Ensemble is and isn't. Aim for a sentence about the worked example (Plank), a sentence about the framework, and a sentence about who it's for.]</p>
+  <section>
+    <h2>What it is</h2>
+    <p>
+      Ensemble is a framework for building RL environments where multiple simulated users
+      and multiple agents share a single typed world. You write the world in Rust, the
+      scenarios in Python, and the framework handles message routing, tool dispatch, the
+      trace log, and the grader. Plank is the worked example: a small fake SaaS with
+      SQLite-backed state, six tools, and five personas.
+    </p>
+    <p>
+      The framework is small on purpose. The core scheduler is one tokio task per actor
+      and an event log; the LLM layer is a single <code>LLMBackend</code> trait with
+      Anthropic, OpenAI, vLLM, and mock implementations; the Python sdk is one
+      <code>@scenario</code> decorator and a <code>World</code> handle.
+    </p>
+  </section>
 
-    <h2>install</h2>
-<pre><code>uv add ensemble                # python sdk + native bindings
-uv add 'ensemble-train[torch]' # post-training pipeline (optional)
-cargo install --path crates/ensemble-cli  # the `ensemble` cli</code></pre>
+  <section>
+    <h2>Install</h2>
+<pre><code>uv sync
+cargo build -p ensemble-cli</code></pre>
+    <p>
+      <code>uv sync</code> builds the native extension via maturin and installs the
+      Python sdk, the Plank example, and the training package. <code>cargo build</code>
+      produces the <code>ensemble</code> CLI under <code>./target/debug/</code>.
+    </p>
+    <p>The <a href="docs.html">docs page</a> has a longer quickstart and walks through each part of the architecture.</p>
+  </section>
 
-    <h2>refund storm, replayed</h2>
-    <p>The trace below is a deterministic mock run of Plank's <code>refund_storm</code> scenario: three users, two agents, sqlite-backed world. Scrub the timeline to step through events; the right-hand panel shows tool effects on world state.</p>
+  <section>
+    <h2>Refund storm, replayed</h2>
+    <p>
+      The trace below is a deterministic mock run of <code>plank.refund_storm</code>:
+      three users, two agents, shared SQLite world. Scrub the timeline to step through
+      events; the right panel shows tool effects on world state.
+    </p>
 
     <div class="viewer" id="viewer">
       <div class="controls">
         <button id="playBtn">play</button>
-        <button id="prevBtn">&larr;</button>
-        <button id="nextBtn">&rarr;</button>
+        <button id="prevBtn">prev</button>
+        <button id="nextBtn">next</button>
         <input type="range" id="slider" min="0" max="0" value="0">
         <span id="tickLabel">0 / 0</span>
       </div>
@@ -45,19 +72,24 @@ cargo install --path crates/ensemble-cli  # the `ensemble` cli</code></pre>
       </div>
     </div>
 
-    <p class="lead">[copy: a sentence explaining what a viewer sees here. Mention that the agents are LLMs in the real run; this baked transcript uses a mock backend for reproducibility.]</p>
+    <p class="muted">
+      In a real run the agents are LLMs. This baked transcript uses the mock backend
+      for reproducibility, so the trace is identical across machines.
+    </p>
+  </section>
 
-    <h2>what's in the box</h2>
+  <section>
+    <h2>What's in the box</h2>
     <ul>
-      <li><a href="scenarios.html">scenarios</a>: <code>@scenario</code> decorator, <code>async with world.simulate()</code>, TOML manifests.</li>
-      <li><a href="plank.html">plank</a>: the worked example world. SQLite state, six tools, five personas.</li>
-      <li><a href="personas.html">personas</a>: persona TOML spec, DPO+LoRA training via Modal or SkyPilot.</li>
-      <li><a href="docs.html">docs</a>: world authoring, tool registration, snapshot/restore, trace format.</li>
+      <li><a href="docs.html">docs</a>, quickstart and architecture walk-through.</li>
+      <li><a href="scenarios.html">scenarios</a>, the <code>@scenario</code> decorator and the <code>async with world.simulate()</code> power-user path.</li>
+      <li><a href="plank.html">plank</a>, the worked example world.</li>
+      <li><a href="personas.html">personas</a>, persona TOML spec and the DPO+LoRA training pipeline.</li>
     </ul>
-  </main>
+  </section>
 
   <footer class="site">
-    [copy: footer line. Maybe a contact link or a sentence about the repo's status.]
+    Source on <a href="https://github.com/tejasprabhune">tejasprabhune</a>. Built in Rust and Python.
   </footer>
 
   <script src="viewer.js"></script>

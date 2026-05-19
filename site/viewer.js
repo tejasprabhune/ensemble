@@ -19,8 +19,6 @@
   let position = 0;
   let playTimer = null;
 
-  // --- Load --------------------------------------------------------
-
   async function load() {
     let text = '';
     try {
@@ -60,8 +58,6 @@
     }
     return order;
   }
-
-  // --- Render ------------------------------------------------------
 
   function setPosition(p) {
     position = clamp(p, 0, Math.max(events.length - 1, 0));
@@ -177,8 +173,6 @@
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;');
   }
-
-  // --- Controls ----------------------------------------------------
 
   els.slider.addEventListener('input', () => setPosition(Number(els.slider.value)));
   els.prevBtn.addEventListener('click', () => setPosition(position - 1));

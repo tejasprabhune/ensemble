@@ -41,11 +41,11 @@ async def test_two_users_one_agent_with_tool_dispatch():
         assert "kind" in e["payload"]
 
     # State-diff completeness: agent's lookup_user tool call produced a
-    # tool_result. (Plank tools don't currently emit a typed Diff
-    # through the registry — the StateDiff event is reserved for the
+    # tool_result. Plank tools don't currently emit a typed Diff through
+    # the registry; the StateDiff event is reserved for the
     # WorldState::apply path used by world authors writing in Rust.
     # The tool dispatch path emits a ToolResult, which is what the
-    # trace viewer renders as a state change line.)
+    # trace viewer renders as a state change line.
     tool_calls = [e for e in result.trace if e["payload"]["kind"] == "tool_call"]
     tool_results = [e for e in result.trace if e["payload"]["kind"] == "tool_result"]
     assert any(tc["payload"]["name"] == "lookup_user" for tc in tool_calls)
