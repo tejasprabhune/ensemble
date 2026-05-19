@@ -34,6 +34,7 @@
         <a href="docs.html#power-user">Mid-run intervention</a>
         <a href="docs.html#toml">TOML scenarios</a>
         <a href="docs.html#cli">CLI</a>
+        <a href="docs.html#training">Training personas</a>
         <a href="docs.html#architecture">Architecture</a>
         <a href="docs.html#trace-format">Trace format</a>
         <a href="docs.html#contributing">Contributing</a>
@@ -640,6 +641,204 @@ no_double_refund = "not had_double_refund"</code></pre>
       </table>
     </section>
 
+    <section id="training">
+      <h2>Training personas</h2>
+      <p>
+        Prompted personas are a fine starting point but they drift. As
+        a conversation goes on, the model's training distribution pulls
+        it back toward the helpful-assistant voice, the hidden state
+        block in the prompt gets ignored, and adversarial users can
+        break the persona with a couple of pointed questions.
+        Post-training a small model on a preference dataset that
+        rewards in-character continuations and punishes breaks keeps
+        the persona stable over long runs.
+      </p>
+      <p>
+        The pipeline lives in <code>ensemble-train</code>, a separate
+        uv workspace member because its dependencies are heavy. It
+        does three things, each in its own module.
+      </p>
+      <p>
+        <code>spec.py</code> loads a persona TOML into a typed
+        <code>PersonaSpec</code>. If the TOML has a
+        <code>[persona.training]</code> table, <code>spec.is_trainable</code>
+        is true and <code>spec.training</code> holds the LoRA and DPO
+        hyperparameters along with the base model and adapter name.
+      </p>
+      <p>
+        <code>self_play.py</code> turns the spec into a list of
+        <code>PreferencePair</code>s. Each pair carries a prompt, a
+        chosen continuation that stays in character, and a rejected
+        continuation that breaks character. The default generator is
+        an offline heuristic that builds five prompt and pair
+        templates from the persona's style fields. For real runs, pass
+        a <code>breaker</code> callable that drives a frontier model
+        against the persona and uses a small judge prompt to label
+        which continuations are breaks.
+      </p>
+      <p>
+        <code>trainer.py</code> runs TRL's <code>DPOTrainer</code> over
+        a LoRA adapter on the configured base model. It saves the
+        adapter to <code>output_dir/</code> and emits a
+        <code>persona-card.md</code> summary of the run. When
+        <code>HF_USERNAME</code> is set in the environment and the
+        spec names an <code>adapter_name</code>, the adapter is
+        pushed to the Hugging Face hub at completion.
+      </p>
+
+      <h3>Minimal example</h3>
+      <p>
+        Building the preference dataset needs no GPU and no Torch, so
+        it is the easiest entry point:
+      </p>
+<pre><code class="language-python">from ensemble_train import generate_preferences, load_persona
+
+spec = load_persona("examples/plank/personas/frustrated_power_user.toml")
+pairs = generate_preferences(spec, n=128, seed=0)
+
+print(f"{len(pairs)} preference pairs")
+print("prompt: ", pairs[0].prompt)
+print("chosen: ", pairs[0].chosen)
+print("rejected:", pairs[0].rejected[:80])</code></pre>
+      <p>
+        The training step needs the Torch extras and a GPU (or a tiny
+        base model for CPU smoke tests). Wire it together end to end:
+      </p>
+<pre><code class="language-python">from pathlib import Path
+
+from ensemble_train import generate_preferences, load_persona
+from ensemble_train.trainer import TrainedAdapter, train
+
+spec = load_persona("examples/plank/personas/frustrated_power_user.toml")
+pairs = generate_preferences(spec)
+adapter: TrainedAdapter = train(
+    spec,
+    pairs,
+    output_dir=Path("checkpoints/frustrated_power_user"),
+)
+
+print(f"trained {adapter.persona_name} on {adapter.base_model}")
+print(f"adapter saved to {adapter.output_dir}")
+if adapter.pushed_to_hub:
+    print(f"pushed to {adapter.pushed_to_hub}")</code></pre>
+      <p>
+        The same flow from the command line, via the
+        <code>ensemble-train</code> entry point:
+      </p>
+<pre><code class="language-bash">uv pip install 'ensemble-train[torch]'
+uv run ensemble-train \
+  examples/plank/personas/frustrated_power_user.toml \
+  --backend local \
+  --output checkpoints/</code></pre>
+      <p>
+        Or via the main CLI, which is a thin shell over the same
+        command:
+      </p>
+<pre><code class="language-bash">./target/debug/ensemble train \
+  examples/plank/personas/frustrated_power_user.toml --backend local</code></pre>
+
+      <h3>Backends</h3>
+      <p>
+        Three backends ship out of the box. They share the same
+        <code>train(spec, pairs, output_dir)</code> signature and
+        produce the same <code>TrainedAdapter</code> result, so you
+        can swap between them without touching scenario code.
+      </p>
+      <p>
+        <strong>Local.</strong> Runs the trainer in process. CPU works
+        for smoke tests against a tiny base model; GPU works for
+        everything else. This is the backend to reach for when you
+        are iterating on the data pipeline or the training loop.
+      </p>
+      <p>
+        <strong>Modal.</strong> Ships the trainer to Modal on an
+        A100, with a one-hour default timeout. The stub installs
+        Torch, Transformers, TRL, PEFT, and Accelerate on a fresh
+        <code>debian_slim</code> image and runs <code>train(...)</code>
+        inside the container. When the <code>modal</code> package is
+        not installed locally, the backend falls back to a dry-run
+        that writes <code>DRY_RUN.json</code> describing what it would
+        have submitted, so the rest of the pipeline still works.
+      </p>
+      <p>
+        <strong>SkyPilot.</strong> Renders a SkyPilot YAML next to the
+        persona and calls <code>sky launch -y</code> if <code>sky</code>
+        is on PATH. When it is not, the backend writes the YAML and
+        prints the dispatch command for you to run manually. This is
+        the backend to use when you want spot capacity, or when you
+        are sharing infrastructure with other SkyPilot jobs.
+      </p>
+
+      <h3>Custom breakers</h3>
+      <p>
+        The offline breaker is deliberately small: five prompt
+        templates that try to drop the persona, paired with
+        in-character continuations sampled from the persona's style
+        fields and rejected continuations that reveal the system
+        prompt. This is enough to exercise the pipeline end to end
+        without API keys.
+      </p>
+      <p>
+        For real runs you pass a <code>breaker</code> callable that
+        drives a frontier model:
+      </p>
+<pre><code class="language-python">from ensemble_train import PersonaSpec, PreferencePair, generate_preferences, load_persona
+
+
+def my_breaker(spec: PersonaSpec, seed: int) -> list[PreferencePair]:
+    """Run adversarial dialogues against `spec` using a frontier
+    model. Classify each turn with a judge prompt. Return
+    PreferencePair(prompt, chosen, rejected) for every break."""
+    ...
+
+
+spec = load_persona("examples/plank/personas/frustrated_power_user.toml")
+pairs = generate_preferences(spec, breaker=my_breaker, seed=0)</code></pre>
+      <p>
+        The framework deliberately does not ship a frontend for
+        orchestrating breaker rollouts. That part is moving quickly
+        and the prompt strategy matters more than the wiring; the
+        framework provides the hook and the trainer.
+      </p>
+
+      <h3>Serving a trained persona</h3>
+      <p>
+        After training, the adapter lives at
+        <code>checkpoints/&lt;persona&gt;/</code>. Two paths take it
+        from there back into a scenario.
+      </p>
+      <p>
+        The first is the Hugging Face hub. With
+        <code>HF_USERNAME</code> set, the trainer pushes the adapter
+        on completion under the name given in the persona TOML. From
+        there you can pull it onto any vLLM server.
+      </p>
+      <p>
+        The second is local. Run a vLLM server with the base model
+        and the LoRA adapter loaded, then point Ensemble at it through
+        the OpenAI-compatible HTTP endpoint:
+      </p>
+<pre><code class="language-python">from ensemble import World
+
+world = World(
+    "plank",
+    backend="vllm",
+    base_url="http://localhost:8000/v1",
+)
+alice = world.spawn_user(
+    id="alice",
+    persona="frustrated_power_user",
+    model="ensemble-plank-frustrated-power-user",
+)</code></pre>
+      <p>
+        Inside the runtime, <code>LocalAdapterBackend</code> posts to
+        a standard OpenAI Chat Completions endpoint with the adapter
+        name in the <code>model</code> field. vLLM and other
+        OpenAI-compatible servers (LM Studio, OpenRouter, and
+        similar) route requests to the right adapter on that basis.
+      </p>
+    </section>
+
     <section id="architecture">
       <h2>Architecture</h2>
       <p>
@@ -710,14 +909,12 @@ no_double_refund = "not had_double_refund"</code></pre>
       <h3>ensemble-train</h3>
       <p>
         The training package is a separate uv workspace member because
-        its dependencies are heavy. <code>spec.py</code> loads a persona
-        TOML into typed dataclasses. <code>self_play.py</code> turns a
-        persona spec into a list of preference pairs, using a
-        deterministic offline heuristic by default or a pluggable
-        breaker model for real runs. <code>trainer.py</code> runs TRL's
-        <code>DPOTrainer</code> on a LoRA adapter, saves to
-        <code>checkpoints/</code>, and optionally pushes to the Hugging
-        Face hub. Three backends ship: <code>local</code>,
+        its dependencies are heavy. The full walkthrough lives in the
+        <a href="#training">Training personas</a> section; in short,
+        <code>spec.py</code> loads a persona TOML, <code>self_play.py</code>
+        produces preference pairs, and <code>trainer.py</code> wraps
+        TRL's <code>DPOTrainer</code> over a LoRA adapter. Three
+        backends ship out of the box: <code>local</code>,
         <code>modal</code>, and <code>skypilot</code>.
       </p>
 
