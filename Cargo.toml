@@ -1,11 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/ensemble-core",
-    "crates/ensemble-runtime",
-    "crates/ensemble-cli",
-    "examples/plank/world",
-]
+members = ["crates/ensemble-core"]
 
 [workspace.package]
 version = "0.1.0"
