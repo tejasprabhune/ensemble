@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/ensemble-core",
     "crates/ensemble-runtime",
+    "crates/ensemble-cli",
     "python/ensemble",
     "examples/plank/world",
 ]
