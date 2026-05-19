@@ -2,7 +2,10 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::bus::Bus;
 use crate::error::{RestoreError, ToolError};
+use crate::event::EventPayload;
+use crate::ids::ActorId;
 
 pub trait WorldState: Send + Sync + 'static {
     type ToolCall: DeserializeOwned + Send;
@@ -58,6 +61,43 @@ impl<S: WorldState> WorldHandle<S> {
     pub async fn with<R>(&self, f: impl FnOnce(&S) -> R) -> R {
         let guard = self.inner.lock().await;
         f(&*guard)
+    }
+
+    /// Apply a tool call and emit `ToolResult` + `StateDiff` events on
+    /// the bus. The caller still owns whatever happens to the
+    /// `ToolEffect` value (returned for further use), but the diff is
+    /// already serialized into the log.
+    pub async fn apply_and_log(
+        &self,
+        bus: &Bus,
+        actor: ActorId,
+        tool_name: &str,
+        call: S::ToolCall,
+    ) -> Result<S::ToolEffect, ToolError>
+    where
+        S::ToolEffect: Clone,
+    {
+        let (effect, diff) = self.apply(call).await?;
+        let effect_json = serde_json::to_value(&effect).map_err(|e| {
+            ToolError::Execution(format!("could not serialize tool effect: {e}"))
+        })?;
+        let diff_json = serde_json::to_value(&diff).map_err(|e| {
+            ToolError::Execution(format!("could not serialize diff: {e}"))
+        })?;
+        bus.append_event(
+            Some(actor.clone()),
+            EventPayload::ToolResult {
+                name: tool_name.into(),
+                result: effect_json,
+            },
+        )
+        .await;
+        bus.append_event(
+            Some(actor),
+            EventPayload::StateDiff { diff: diff_json },
+        )
+        .await;
+        Ok(effect)
     }
 }
 
