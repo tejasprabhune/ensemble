@@ -1,20 +1,3 @@
-"""Like hello_world.py, but Alice has a real persona.
-
-The previous demo gave both actors the same model and no system
-prompt, so Alice would just echo the agent's question back. Here we
-load one of the shipped Plank persona TOMLs through ensemble_train
-and pass the rendered system prompt to spawn_user, which keeps Alice
-firmly in character for the whole rollout.
-
-Run from the demo/ directory so the .env in this folder is picked up:
-
-    cd demo
-    uv run persona_demo.py
-
-If your shell already has OPENAI_API_KEY exported (and it differs
-from .env), unset it first or pass dotenv="override" to World.
-"""
-
 from pathlib import Path
 
 from ensemble import RunResult, World, run_scenario, scenario
@@ -68,12 +51,7 @@ if __name__ == "__main__":
         payload = event["payload"]
         kind = payload["kind"]
         actor = event.get("actor") or "-"
-        body = (
-            payload.get("text")
-            or payload.get("name")
-            or payload.get("note")
-            or ""
-        )
+        body = payload.get("text") or payload.get("name") or payload.get("note") or ""
         print(f"  [{event['tick']:>3}] {actor:6} {kind:14} {str(body)[:120]}")
 
     out = Path("traces/persona_demo.jsonl")

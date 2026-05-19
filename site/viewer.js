@@ -1,6 +1,7 @@
 // Trace viewer. Loads ./trace.jsonl, parses one event per line, and
-// renders three panels (actors / tools / state changes) up to the
-// timeline slider's current position. No framework.
+// renders two views: a three-panel timeline (actors, tools, state
+// changes) and a linear chat feed. The slider scrubs through events
+// for both views. No framework.
 
 (function () {
   const els = {
@@ -12,12 +13,20 @@
     messages:  document.getElementById('messagesPanel'),
     tools:     document.getElementById('toolsPanel'),
     diff:      document.getElementById('diffPanel'),
+    timeline:  document.getElementById('timelineStage'),
+    chat:      document.getElementById('chatStage'),
+    chatFeed:  document.getElementById('chatFeed'),
+    tabTimeline: document.getElementById('tabTimeline'),
+    tabChat:     document.getElementById('tabChat'),
+    traceLabel:  document.getElementById('traceLabel'),
   };
 
   let events = [];
   let actors = [];
+  let actorKinds = {};
   let position = 0;
   let playTimer = null;
+  let view = 'timeline';
 
   async function load() {
     let text = '';
@@ -33,17 +42,15 @@
       .split('\n')
       .map((s) => s.trim())
       .filter(Boolean)
-      .map((s) => {
-        try {
-          return JSON.parse(s);
-        } catch (e) {
-          return null;
-        }
-      })
+      .map((s) => { try { return JSON.parse(s); } catch { return null; } })
       .filter(Boolean);
     actors = collectActors(events);
+    actorKinds = inferActorKinds(events);
     els.slider.max = String(Math.max(events.length - 1, 0));
     els.slider.value = '0';
+    if (els.traceLabel) {
+      els.traceLabel.textContent = `${events.length} events  ·  ${actors.length} actors`;
+    }
     setPosition(events.length > 0 ? events.length - 1 : 0);
   }
 
@@ -59,6 +66,23 @@
     return order;
   }
 
+  // Guess whether each actor is a user or an agent by looking at what
+  // kinds of payloads they produce. Agents emit tool_call or
+  // agent_message; users emit user_message.
+  function inferActorKinds(events) {
+    const kinds = {};
+    for (const e of events) {
+      if (!e.actor) continue;
+      const k = e.payload && e.payload.kind;
+      if (k === 'agent_message' || k === 'tool_call' || k === 'tool_result') {
+        kinds[e.actor] = 'agent';
+      } else if (k === 'user_message' && !kinds[e.actor]) {
+        kinds[e.actor] = 'user';
+      }
+    }
+    return kinds;
+  }
+
   function setPosition(p) {
     position = clamp(p, 0, Math.max(events.length - 1, 0));
     els.slider.value = String(position);
@@ -72,9 +96,13 @@
 
   function render() {
     const upTo = events.slice(0, position + 1);
-    renderMessages(upTo);
-    renderTools(upTo);
-    renderDiff(upTo);
+    if (view === 'timeline') {
+      renderMessages(upTo);
+      renderTools(upTo);
+      renderDiff(upTo);
+    } else {
+      renderChat(upTo);
+    }
   }
 
   function renderMessages(slice) {
@@ -84,11 +112,7 @@
       const k = e.payload && e.payload.kind;
       if (k !== 'user_message' && k !== 'agent_message') continue;
       const who = e.actor || '?';
-      (cols[who] = cols[who] || []).push({
-        kind: k,
-        text: e.payload.text || '',
-        tick: e.tick,
-      });
+      (cols[who] = cols[who] || []).push({ kind: k, text: e.payload.text || '', tick: e.tick });
     }
     const html = ['<h4>actors</h4>'];
     for (const a of actors) {
@@ -118,31 +142,17 @@
   }
 
   function renderDiff(slice) {
-    // Synthesize a small "what changed" table from state_diff + tool_result
-    // payloads. Mirrors the boring table the spec asks for.
     const rows = [];
     for (const e of slice) {
       const k = e.payload && e.payload.kind;
       if (k === 'state_diff' && e.payload.diff) {
         const d = e.payload.diff;
-        rows.push({
-          who: e.actor || '?',
-          table: d.table || (d.field || ''),
-          field: d.field || '',
-          old: stringify(d.old),
-          new: stringify(d.new),
-        });
+        rows.push({ who: e.actor || '?', table: d.table || (d.field || ''), field: d.field || '', old: stringify(d.old), new: stringify(d.new) });
       } else if (k === 'tool_result' && e.payload.result) {
         const r = e.payload.result;
         if (r && r.data && typeof r.data === 'object') {
           for (const [k2, v2] of Object.entries(r.data)) {
-            rows.push({
-              who: e.actor || '?',
-              table: e.payload.name,
-              field: k2,
-              old: '',
-              new: stringify(v2),
-            });
+            rows.push({ who: e.actor || '?', table: e.payload.name, field: k2, old: '', new: stringify(v2) });
           }
         }
       }
@@ -161,6 +171,59 @@
     els.diff.innerHTML = html.join('');
   }
 
+  // Linear chat feed: user messages right-aligned, agent messages
+  // left-aligned, tool calls and tool results rendered inline as small
+  // italicized rows so the flow stays readable.
+  function renderChat(slice) {
+    const html = [];
+    for (const e of slice) {
+      const p = e.payload || {};
+      const k = p.kind;
+      const who = e.actor || '';
+      const kind = actorKinds[who] || (k === 'user_message' ? 'user' : 'agent');
+      if (k === 'user_message') {
+        html.push(bubble(who, p.text || '', 'user', e.tick));
+      } else if (k === 'agent_message') {
+        html.push(bubble(who, p.text || '', 'agent', e.tick));
+      } else if (k === 'tool_call') {
+        const args = compactJson(p.args);
+        html.push(`<div class="chat-tool ${kind === 'user' ? 'right' : 'left'}"><span class="chat-tool-arrow">&rarr;</span> <strong>${escape(who)}</strong> called <code>${escape(p.name)}</code>(${escape(args)})</div>`);
+      } else if (k === 'tool_result') {
+        const res = compactJson(p.result, 200);
+        html.push(`<div class="chat-tool ${kind === 'user' ? 'right' : 'left'}"><span class="chat-tool-arrow">&larr;</span> <code>${escape(p.name)}</code> returned <span class="chat-tool-res">${escape(res)}</span></div>`);
+      } else if (k === 'state_diff' && p.diff) {
+        const d = p.diff;
+        const summary = `${d.table || d.field || 'state'}.${d.field || ''}: ${stringify(d.old)} → ${stringify(d.new)}`;
+        html.push(`<div class="chat-note">state &middot; ${escape(summary)}</div>`);
+      } else if (k === 'system') {
+        html.push(`<div class="chat-note">${escape(p.note || '')}</div>`);
+      }
+    }
+    if (html.length === 0) {
+      html.push('<div class="chat-note">no events yet</div>');
+    }
+    els.chatFeed.innerHTML = html.join('');
+    els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
+  }
+
+  function bubble(who, text, side, tick) {
+    const sideClass = side === 'user' ? 'right' : 'left';
+    return `<div class="chat-row ${sideClass}">
+      <div class="chat-bubble ${sideClass}">
+        <div class="chat-meta">${escape(who)} &middot; tick ${tick}</div>
+        <div class="chat-text">${escapeMultiline(text)}</div>
+      </div>
+    </div>`;
+  }
+
+  function compactJson(v, max = 120) {
+    if (v == null) return '';
+    let s;
+    try { s = JSON.stringify(v); } catch { s = String(v); }
+    if (s && s.length > max) s = s.slice(0, max) + '…';
+    return s || '';
+  }
+
   function stringify(v) {
     if (v == null) return '';
     if (typeof v === 'string') return v;
@@ -172,6 +235,10 @@
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;');
+  }
+
+  function escapeMultiline(s) {
+    return escape(s).replaceAll('\n', '<br>');
   }
 
   els.slider.addEventListener('input', () => setPosition(Number(els.slider.value)));
@@ -197,10 +264,25 @@
     }, 1000);
   });
 
+  if (els.tabTimeline && els.tabChat) {
+    els.tabTimeline.addEventListener('click', () => switchView('timeline'));
+    els.tabChat.addEventListener('click', () => switchView('chat'));
+  }
+
+  function switchView(next) {
+    view = next;
+    if (els.tabTimeline) els.tabTimeline.classList.toggle('active', next === 'timeline');
+    if (els.tabChat) els.tabChat.classList.toggle('active', next === 'chat');
+    if (els.timeline) els.timeline.style.display = next === 'timeline' ? '' : 'none';
+    if (els.chat) els.chat.style.display = next === 'chat' ? '' : 'none';
+    render();
+  }
+
   function showError(msg) {
-    els.messages.innerHTML = '<h4>actors</h4><div class="who">' + escape(msg) + '</div>';
-    els.tools.innerHTML = '<h4>tool calls</h4>';
-    els.diff.innerHTML = '<h4>state changes</h4>';
+    if (els.messages) els.messages.innerHTML = '<h4>actors</h4><div class="who">' + escape(msg) + '</div>';
+    if (els.tools) els.tools.innerHTML = '<h4>tool calls</h4>';
+    if (els.diff) els.diff.innerHTML = '<h4>state changes</h4>';
+    if (els.chatFeed) els.chatFeed.innerHTML = `<div class="chat-note">${escape(msg)}</div>`;
   }
 
   load();
