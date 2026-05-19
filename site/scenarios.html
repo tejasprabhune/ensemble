@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="wide">
   <header>
     <a class="wordmark" href="index.html">ensemble</a>
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
@@ -23,17 +23,26 @@
   <section>
     <h2>What a scenario is</h2>
     <p>
-      A scenario assembles actors, runs them in a shared world, and grades the
-      outcome. The same simulation can be expressed three ways: the yield flavor
-      (most common), the <code>async with</code> flavor (mid-run intervention),
-      and a TOML manifest (declarative matrices).
+      A scenario assembles a set of actors, runs them in a shared world, and
+      grades the outcome. The same simulation can be expressed three ways.
+      The yield flavor covers the common case where you set up the actors,
+      let the simulation run to completion, and then compute a reward.
+      The <code>async with</code> flavor is for runs that need mid-simulation
+      intervention, like changing a persona's hidden state halfway through.
+      The TOML flavor is for declarative matrices of similar scenarios.
     </p>
   </section>
 
   <section>
     <h2>Yield flavor</h2>
-    <p>Spawn actors, yield an <code>until</code>, yield a grader dict.</p>
-<pre><code>@scenario("refund_storm")
+    <p>
+      Spawn actors, yield an until condition, yield a grader dictionary. The
+      first yield starts the scheduler and runs the simulation until the
+      condition fires. The second yield produces the reward.
+    </p>
+<pre><code class="language-python">from ensemble import scenario
+
+@scenario("refund_storm")
 async def refund_storm(world):
     alice = world.spawn_user(persona="frustrated_power_user",
                               hidden_goal="refund_3mo")
@@ -46,7 +55,7 @@ async def refund_storm(world):
     yield world.until(world.turn_count &gt; 30)
 
     yield {
-        "alice_refund_resolved": 1.0 if alice.hidden_goal_resolved() else 0.0,
+        "alice_refund_resolved": float(alice.hidden_goal_resolved()),
         "no_double_refunds":     float(not world.had_double_refund()),
     }</code></pre>
   </section>
@@ -54,11 +63,14 @@ async def refund_storm(world):
   <section>
     <h2>Power-user flavor</h2>
     <p>
-      Use <code>async with world.simulate()</code> when you need to intervene mid-run.
-      The scheduler runs on a background tokio task; <code>wait_until</code> blocks
-      until the condition fires.
+      Use <code>async with world.simulate()</code> when you want to inspect
+      or change something while the simulation is in flight. The scheduler
+      runs on a background Tokio task. <code>wait_until</code> blocks the
+      scenario coroutine until the condition fires or a timeout elapses.
+      Between waits you can read hidden state, push a new message into an
+      actor's inbox, or assert intermediate invariants.
     </p>
-<pre><code>@scenario("enterprise_audit")
+<pre><code class="language-python">@scenario("enterprise_audit")
 async def enterprise_audit(world):
     carol = world.spawn_user(persona="enterprise_admin",
                               hidden_goal="audit_log_export")
@@ -77,12 +89,12 @@ async def enterprise_audit(world):
   <section>
     <h2>Declarative TOML</h2>
     <p>
-      Simple scenarios can live in <code>scenarios.toml</code> and compile to the
-      same runtime. Grader expressions are a small safe subset: <code>and</code>,
-      <code>or</code>, <code>not</code>, parens, and named predicates the world
-      exposes.
+      When you want a matrix of similar scenarios without writing one Python
+      function each, declare them in <code>scenarios.toml</code>. The
+      manifest compiles to the same runtime as the Python decorator at load
+      time.
     </p>
-<pre><code>[scenario.refund_storm]
+<pre><code class="language-toml">[scenario.refund_storm]
 world = "plank"
 duration_turns = 30
 
@@ -100,6 +112,13 @@ tools = ["lookup_user", "issue_refund"]
 [scenario.refund_storm.graders]
 alice_resolved   = "hidden_goal_resolved"
 no_double_refund = "not had_double_refund"</code></pre>
+    <p>
+      Grader expressions use a small safe boolean DSL. The parser
+      understands <code>and</code>, <code>or</code>, <code>not</code>,
+      parentheses, and named predicates that the world exposes. Function
+      calls and attribute access are rejected by the parser, so there is no
+      path to <code>eval</code> from a TOML file.
+    </p>
   </section>
 
   <section>
@@ -107,31 +126,36 @@ no_double_refund = "not had_double_refund"</code></pre>
 
     <h3>World</h3>
     <ul>
-      <li><code>World(name)</code>, construct a world by registered name.</li>
-      <li><code>spawn_user(id, persona, hidden_goal, model)</code></li>
-      <li><code>spawn_agent(id, model, tools)</code></li>
-      <li><code>turn_count</code>, sentinel supporting comparison ops, eg. <code>world.turn_count &gt; 30</code>.</li>
-      <li><code>until(condition)</code>, coerce a comparison or <code>Until</code> object.</li>
-      <li><code>simulate()</code>, async context manager for mid-run intervention.</li>
-      <li><code>run(until)</code>, run to completion against the supplied stop condition.</li>
-      <li><code>trace()</code>, list of decoded JSONL events.</li>
+      <li><code>World(name)</code> constructs a world by registered name.</li>
+      <li><code>spawn_user(id, persona, hidden_goal, model)</code> adds a user actor.</li>
+      <li><code>spawn_agent(id, model, tools)</code> adds an agent actor.</li>
+      <li><code>turn_count</code> is a sentinel that supports comparison ops, so <code>world.turn_count &gt; 30</code> evaluates to an until condition.</li>
+      <li><code>until(condition)</code> coerces a comparison or an existing <code>Until</code> object.</li>
+      <li><code>simulate()</code> returns an async context manager for mid-run intervention.</li>
+      <li><code>run(until)</code> runs to completion against the supplied stop condition.</li>
+      <li><code>trace()</code> returns the list of decoded JSONL events.</li>
     </ul>
 
-    <h3>User / Agent</h3>
+    <h3>User and Agent</h3>
     <ul>
-      <li><code>say(target, text)</code>, queue a message before <code>run()</code> or send it immediately while the scheduler is running.</li>
-      <li><code>act(tool, **kwargs)</code>, record a tool call from this actor, useful for seeding the initial state.</li>
+      <li><code>say(target, text)</code> queues a message before <code>run()</code>, or sends it immediately while the scheduler is running.</li>
+      <li><code>act(tool, **kwargs)</code> records a tool call from this actor, which is useful for seeding the initial state.</li>
     </ul>
 
     <h3>Until combinators</h3>
     <ul>
-      <li><code>world.turn_count &gt; n</code>, <code>world.turn_count &gt;= n</code></li>
-      <li><code>any_of(...)</code>, <code>all_of(...)</code> (Rust combinators, exposed to Python as JSON specs).</li>
+      <li><code>world.turn_count &gt; n</code> and <code>world.turn_count &gt;= n</code> are the common cases.</li>
+      <li><code>any_of(...)</code> and <code>all_of(...)</code> compose conditions; in Python they are JSON specs that the Rust side compiles into closures.</li>
     </ul>
   </section>
 
   <footer class="site">
     Source on <a href="https://github.com/tejasprabhune">tejasprabhune</a>. Built in Rust and Python.
   </footer>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script>hljs.highlightAll();</script>
 </body>
 </html>

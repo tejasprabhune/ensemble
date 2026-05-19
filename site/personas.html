@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="wide">
   <header>
     <a class="wordmark" href="index.html">ensemble</a>
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
@@ -23,17 +23,24 @@
   <section>
     <h2>Two modes</h2>
     <p>
-      Prompted personas live entirely in their system prompt. A frontier model plus a
-      hidden-state block is enough for most agent-facing tests. Trained personas swap
-      the frontier model for a smaller fine-tuned one (DPO+LoRA on Qwen-2.5-7B by
-      default), served through a vLLM endpoint. The scenarios don't know which is
-      which; both implement the same <code>LLMBackend</code> trait.
+      A persona is the spec for how a user actor should behave. Ensemble
+      supports two modes. A prompted persona lives entirely in its system
+      prompt, paired with a frontier model. A trained persona swaps the
+      frontier model for a smaller fine-tuned one, served through a vLLM
+      endpoint and pulled in through the same <code>LLMBackend</code> trait.
+      Scenarios cannot tell the difference, which is the point.
     </p>
   </section>
 
   <section>
     <h2>Spec format</h2>
-<pre><code>[persona]
+    <p>
+      A persona is a TOML file. The schema is small and the fields are
+      optional in the obvious way. Trained personas add a
+      <code>[persona.training]</code> table that describes the base model,
+      the backend, and the hyperparameters.
+    </p>
+<pre><code class="language-toml">[persona]
 name = "frustrated_power_user"
 mode = "trained"
 description = "Long-tenured paid user with low patience."
@@ -52,7 +59,7 @@ hidden_goal = { type = "string", default = "refund_3mo" }
 
 [persona.system_prompt]
 template = """
-You are a long-tenured Plank customer. You want a refund...
+You are a long-tenured customer. You want a refund for the last three months.
 """
 
 [persona.training]
@@ -74,33 +81,40 @@ learning_rate = 5e-6</code></pre>
 
   <section>
     <h2>Training a persona</h2>
-<pre><code>uv pip install 'ensemble-train[torch]'
+    <p>
+      The training pipeline lives in <code>ensemble-train</code>. It is a
+      separate uv workspace member because its dependencies (Torch,
+      Transformers, TRL, PEFT) are heavy enough that you would not want
+      them on by default in a Python environment that just authors
+      scenarios. Install the extras when you actually want to train:
+    </p>
+<pre><code class="language-bash">uv pip install 'ensemble-train[torch]'
 ./target/debug/ensemble train \
   examples/plank/personas/frustrated_power_user.toml --backend modal</code></pre>
     <p>
-      When <code>dataset = "spec_only"</code> the pipeline runs a self-play loop to
-      build a DPO preference dataset before training. The breaker is a frontier
-      model that tries to push the persona out of character; in-character
-      continuations become <code>chosen</code>, breaks become <code>rejected</code>.
+      When the spec sets <code>dataset = "spec_only"</code> the pipeline
+      runs a self-play loop to build a preference dataset before training
+      starts. A frontier breaker model tries to push the persona out of
+      character; in-character continuations become the chosen examples,
+      breaks become the rejected ones. The result is fed to TRL's
+      <code>DPOTrainer</code> over a LoRA adapter on the configured base
+      model.
     </p>
     <p>
-      The trainer (TRL <code>DPOTrainer</code> on a LoRA adapter) writes to
-      <code>checkpoints/&lt;persona&gt;/</code> and emits a
-      <code>persona-card.md</code> summarizing the run. If <code>$HF_USERNAME</code>
-      is set, the adapter is pushed to the hub.
+      Training writes to <code>checkpoints/&lt;persona&gt;/</code> and emits
+      a <code>persona-card.md</code> with a short summary of the run. If
+      <code>HF_USERNAME</code> is set in the environment, the adapter is
+      also pushed to the Hugging Face hub.
     </p>
   </section>
 
   <section>
     <h2>Consistency benchmark</h2>
     <p>
-      Persona consistency is evaluated by an adversarial classifier sweep. The
-      breaker model gets N turns to push the persona; the score is the fraction of
-      turns the persona stayed in character.
-    </p>
-    <p class="muted">
-      The evaluator itself is not implemented yet. The chart below is a placeholder
-      until the harness lands.
+      Persona consistency is the fraction of adversarial turns the persona
+      holds together. The intended evaluator runs a fixed breaker for N
+      turns and counts how often the persona stays in character. The
+      placeholder below will become a real chart once the harness lands.
     </p>
     <div class="chart-placeholder">consistency vs. adversarial turns, by persona</div>
   </section>
@@ -108,16 +122,21 @@ learning_rate = 5e-6</code></pre>
   <section>
     <h2>Shipped personas (Plank)</h2>
     <ul>
-      <li><code>frustrated_power_user</code>, trained, DPO+LoRA on Qwen2.5-7B.</li>
-      <li><code>confused_new_user</code>, prompted.</li>
-      <li><code>enterprise_admin</code>, prompted.</li>
-      <li><code>patient_retail</code>, prompted.</li>
-      <li><code>chatty_neutral</code>, prompted.</li>
+      <li><code>frustrated_power_user</code> is trained on Qwen2.5-7B with DPO+LoRA.</li>
+      <li><code>confused_new_user</code> is prompted.</li>
+      <li><code>enterprise_admin</code> is prompted.</li>
+      <li><code>patient_retail</code> is prompted.</li>
+      <li><code>chatty_neutral</code> is prompted.</li>
     </ul>
   </section>
 
   <footer class="site">
     Source on <a href="https://github.com/tejasprabhune">tejasprabhune</a>. Built in Rust and Python.
   </footer>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script>hljs.highlightAll();</script>
 </body>
 </html>

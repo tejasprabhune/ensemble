@@ -22,39 +22,40 @@
 
   <section>
     <h2>What it is</h2>
-    <p>
-      Ensemble is a framework for building RL environments where multiple simulated users
-      and multiple agents share a single typed world. You write the world in Rust, the
-      scenarios in Python, and the framework handles message routing, tool dispatch, the
-      trace log, and the grader. Plank is the worked example: a small fake SaaS with
-      SQLite-backed state, six tools, and five personas.
+    <p class="lead">
+      Ensemble is a framework for building RL environments where several
+      simulated users and several agents share one typed world. You describe
+      the world in Rust, you write the scenarios in Python, and the framework
+      handles message routing, tool dispatch, the trace log, and the grader
+      that turns each rollout into a reward.
     </p>
     <p>
-      The framework is small on purpose. The core scheduler is one tokio task per actor
-      and an event log; the LLM layer is a single <code>LLMBackend</code> trait with
-      Anthropic, OpenAI, vLLM, and mock implementations; the Python sdk is one
-      <code>@scenario</code> decorator and a <code>World</code> handle.
+      Most agent benchmarks model one agent talking to one human in a
+      stateless sandbox. That is not how production support, sales, customer
+      success, or operations actually work. Ensemble lets you build the
+      multi-actor version, run rollouts at scale, and turn the rollouts into
+      training signal.
     </p>
   </section>
 
   <section>
     <h2>Install</h2>
-<pre><code>uv sync
-cargo build -p ensemble-cli</code></pre>
+<pre><code class="language-bash">uv sync                       # build the python extension, install the workspace
+cargo build -p ensemble-cli   # produces ./target/debug/ensemble</code></pre>
     <p>
-      <code>uv sync</code> builds the native extension via maturin and installs the
-      Python sdk, the Plank example, and the training package. <code>cargo build</code>
-      produces the <code>ensemble</code> CLI under <code>./target/debug/</code>.
+      The <a href="docs.html">docs page</a> has the full quickstart, with a
+      walkthrough of how to write a world, a scenario, and a grader, and how
+      to use the framework as an RL environment.
     </p>
-    <p>The <a href="docs.html">docs page</a> has a longer quickstart and walks through each part of the architecture.</p>
   </section>
 
   <section>
     <h2>Refund storm, replayed</h2>
     <p>
-      The trace below is a deterministic mock run of <code>plank.refund_storm</code>:
-      three users, two agents, shared SQLite world. Scrub the timeline to step through
-      events; the right panel shows tool effects on world state.
+      The trace below is a deterministic mock run of
+      <code>plank.refund_storm</code>. Three users, two agents, one shared
+      SQLite world. Scrub the timeline to step through events. The right
+      panel shows tool effects on world state.
     </p>
 
     <div class="viewer" id="viewer">
@@ -73,18 +74,18 @@ cargo build -p ensemble-cli</code></pre>
     </div>
 
     <p class="muted">
-      In a real run the agents are LLMs. This baked transcript uses the mock backend
-      for reproducibility, so the trace is identical across machines.
+      In a real run the agents are language models. This baked transcript
+      uses the mock backend so the trace is identical across machines.
     </p>
   </section>
 
   <section>
-    <h2>What's in the box</h2>
+    <h2>What is in the repo</h2>
     <ul>
-      <li><a href="docs.html">docs</a>, quickstart and architecture walk-through.</li>
-      <li><a href="scenarios.html">scenarios</a>, the <code>@scenario</code> decorator and the <code>async with world.simulate()</code> power-user path.</li>
-      <li><a href="plank.html">plank</a>, the worked example world.</li>
-      <li><a href="personas.html">personas</a>, persona TOML spec and the DPO+LoRA training pipeline.</li>
+      <li><a href="docs.html">Docs</a>, the quickstart and the architecture walkthrough.</li>
+      <li><a href="scenarios.html">Scenarios</a>, the <code>@scenario</code> decorator and the <code>async with world.simulate()</code> power-user path.</li>
+      <li><a href="plank.html">Plank</a>, the worked example world.</li>
+      <li><a href="personas.html">Personas</a>, persona TOML spec and the DPO+LoRA training pipeline.</li>
     </ul>
   </section>
 
@@ -93,5 +94,8 @@ cargo build -p ensemble-cli</code></pre>
   </footer>
 
   <script src="viewer.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script>hljs.highlightAll();</script>
 </body>
 </html>

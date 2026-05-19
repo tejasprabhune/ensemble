@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="wide">
   <header>
     <a class="wordmark" href="index.html">ensemble</a>
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
@@ -23,273 +23,449 @@
   <div class="toc-box">
     <div class="toc-header">On this page</div>
     <ul>
-      <li><a href="#quickstart">Quickstart</a></li>
-      <li><a href="#mental-model">Mental model</a></li>
-      <li><a href="#layout">Repo layout</a></li>
-      <li><a href="#core">ensemble-core, bus + scheduler + world</a></li>
-      <li><a href="#runtime">ensemble-runtime, backends + tools + personas</a></li>
-      <li><a href="#bindings">Python bindings</a></li>
-      <li><a href="#scenarios">Scenarios, yield + async with + TOML</a></li>
-      <li><a href="#plank">Plank, the worked example world</a></li>
-      <li><a href="#training">Training pipeline</a></li>
-      <li><a href="#cli">CLI</a></li>
-      <li><a href="#trace-format">Trace format</a></li>
+      <li><a href="#what-it-is">What Ensemble is</a></li>
+      <li><a href="#mental-model">The mental model</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="#first-scenario">Your first scenario</a></li>
+      <li><a href="#first-world">Your first world</a></li>
+      <li><a href="#tools">Tools and how agents call them</a></li>
+      <li><a href="#users-personas">Users and personas</a></li>
+      <li><a href="#verification">Verification and reward</a></li>
+      <li><a href="#rl">Using Ensemble as an RL environment</a></li>
+      <li><a href="#power-user">Mid-run intervention</a></li>
+      <li><a href="#toml">Declarative TOML scenarios</a></li>
+      <li><a href="#cli">The ensemble CLI</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#trace-format">Trace format reference</a></li>
       <li><a href="#contributing">Contributing</a></li>
     </ul>
   </div>
 
-  <section id="quickstart">
-    <h2>Quickstart</h2>
-    <p>
-      You need Rust 1.80+, Python 3.10+, and <a href="https://docs.astral.sh/uv/">uv</a>.
-      Clone the repo, then:
+  <section id="what-it-is">
+    <h2>What Ensemble is</h2>
+    <p class="lead">
+      Ensemble is a framework for building RL environments in which several
+      simulated users and several agents share one typed, mutable world. You
+      describe the world in Rust, you write the scenarios in Python, and the
+      framework handles message routing, tool dispatch, the trace log, and
+      the grader that turns a finished rollout into a numerical reward.
     </p>
-<pre><code>uv sync                              # build the python extension, install workspace
-cargo build -p ensemble-cli           # produces ./target/debug/ensemble
-cargo test --workspace                # 8 rust tests
-uv run pytest tests/                  # 21 python tests</code></pre>
+    <p>
+      Most agent benchmarks model one agent talking to one human in a stateless
+      sandbox. That is not how production support, sales, customer success, or
+      operations actually work. Real systems have multiple users contending for
+      attention, multiple agents seeing each other's tool calls, shared state
+      that changes underfoot, and policies that only become visible across many
+      turns. Ensemble lets you build that, run rollouts, and turn the rollouts
+      into training signal.
+    </p>
+  </section>
 
-    <p>Run the hero demo against the mock backend:</p>
-<pre><code>uv run python examples/plank/bake_trace.py
-./target/debug/ensemble trace view site/trace.jsonl --site site --port 8765
-# open http://localhost:8765</code></pre>
+  <section id="mental-model">
+    <h2>The mental model</h2>
+    <p>
+      A run of Ensemble is built out of three pieces. The first is the
+      <strong>world</strong>, which is the typed, mutable state of the
+      simulation. The world implements a small Rust trait called
+      <code>WorldState</code>. Plank's world is a SQLite database with tables
+      for users, tickets, subscriptions, knowledge-base articles, and an audit
+      log. Your world might be a fake CRM, a make-believe Linux box, or an
+      in-memory graph; the framework does not care, as long as you can apply a
+      tool call and serialize the resulting diff.
+    </p>
+    <p>
+      The second piece is the set of <strong>actors</strong>. Each actor is a
+      Tokio task with its own inbox. There are two flavors. A user actor wraps
+      a language model and represents a simulated end user. An agent actor
+      wraps the same kind of model and also holds a tool registry, so it can
+      issue tool calls that mutate the world. Actors talk to each other on a
+      shared bus; every message is appended to an event log with a tick number
+      and a timestamp.
+    </p>
+    <p>
+      The third piece is the <strong>scenario</strong>. A scenario decides
+      which world to instantiate, spawns the actors, seeds any initial
+      messages or tool calls, picks an until condition that decides when the
+      simulation stops, and then defines the grader that turns the finished
+      trace into a reward. Most scenarios are eight or ten lines of Python.
+    </p>
+    <p>
+      A finished run produces a trace: a JSONL stream of typed events that you
+      can replay in the browser, ship to a training pipeline, or assert
+      against in tests. The framework treats the trace as the canonical
+      output, not the model's text. Anything you want to grade has to leave a
+      footprint in the trace, which is why every tool call and every state
+      change is logged automatically.
+    </p>
+  </section>
 
-    <p>Run a scenario for real against a registered LLM:</p>
-<pre><code>export ANTHROPIC_API_KEY=...
-./target/debug/ensemble run plank.refund_storm --world plank
-# trace lands at ./traces/plank_refund_storm.jsonl</code></pre>
+  <section id="install">
+    <h2>Install</h2>
+    <p>
+      You need Rust 1.80 or later, Python 3.10 or later, and
+      <a href="https://docs.astral.sh/uv/">uv</a>. Once those are on your
+      machine, clone the repo and run:
+    </p>
+<pre><code class="language-bash">uv sync                       # build the python extension, install the workspace
+cargo build -p ensemble-cli   # produces ./target/debug/ensemble
+cargo test --workspace        # rust tests
+uv run pytest tests/          # python tests</code></pre>
+    <p>
+      <code>uv sync</code> uses maturin to build the native extension that
+      backs the <code>ensemble</code> Python package. It also installs the
+      <code>plank</code> example and the <code>ensemble-train</code> training
+      pipeline as workspace members. Optional Torch dependencies for training
+      are gated behind an extra:
+    </p>
+<pre><code class="language-bash">uv pip install 'ensemble-train[torch]'</code></pre>
+  </section>
 
-    <p>Hello world, the smallest scenario you can write:</p>
-<pre><code>from ensemble import scenario
+  <section id="first-scenario">
+    <h2>Your first scenario</h2>
+    <p>
+      A scenario is a Python coroutine, registered with the
+      <code>@scenario</code> decorator. The smallest interesting one looks
+      like this:
+    </p>
+<pre><code class="language-python">from ensemble import scenario
 
 @scenario("hello")
 async def hello(world):
     alice = world.spawn_user(id="alice", model="user-model")
     rep   = world.spawn_agent(id="rep",  model="agent-model")
     alice.say("rep", "hi")
+
     yield world.until(world.turn_count &gt; 4)
-    yield {"ok": 1.0}</code></pre>
-
+    yield {"saw_reply": 1.0}</code></pre>
     <p>
-      The <code>@scenario</code> decorator registers your function in a global registry.
-      <code>run_scenario("hello")</code> drives it end to end and returns a
-      <code>RunResult</code> with the trace and the grader scores.
+      Three things happen here. First, the scenario sets up the actors and
+      seeds a message. Then it yields an until condition, which is the signal
+      that tells the scheduler to start the simulation and run it until the
+      condition fires. Finally it yields a dictionary of named scores, which
+      becomes the grader output.
     </p>
+    <p>
+      To run the scenario from Python, call the synchronous helper:
+    </p>
+<pre><code class="language-python">from ensemble import run_scenario
+
+result = run_scenario("hello", world_name="noop")
+print(result.scores)              # {'saw_reply': 1.0}
+print(len(result.trace), "events")</code></pre>
+    <p>
+      The <code>noop</code> world is a built-in placeholder with no state and
+      no tools. It is exactly enough to make a scenario run, which makes it
+      useful for tests. Real scenarios target a real world by name, like
+      <code>plank</code>, which is the one we ship with.
+    </p>
+    <p>
+      The same scenario from the command line:
+    </p>
+<pre><code class="language-bash">./target/debug/ensemble run hello --world noop
+# writes ./traces/hello.jsonl</code></pre>
   </section>
 
-  <section id="mental-model">
-    <h2>Mental model</h2>
+  <section id="first-world">
+    <h2>Your first world</h2>
     <p>
-      Three concepts do most of the work.
+      Worlds are written in Rust because they own mutable state and they need
+      to be fast enough to run hundreds of rollouts in parallel. Run
+      <code>ensemble init my_world</code> to get a working skeleton, then open
+      <code>my_world/world/src/lib.rs</code>. A world implements the
+      <code>WorldState</code> trait:
     </p>
-    <p>
-      <strong>The world</strong> is the typed, mutable state of the simulation. You
-      implement <code>WorldState</code> in Rust. Plank's world is SQLite with users,
-      tickets, subscriptions, knowledge-base articles, and an audit log.
-    </p>
-    <p>
-      <strong>Actors</strong> are tokio tasks with mpsc inboxes. A user actor and an
-      agent actor both wrap an <code>LLMBackend</code>. Users emit messages; agents emit
-      messages and tool calls. Each tool call dispatches through a <code>ToolRegistry</code>
-      and produces a <code>ToolResult</code> event on the shared bus.
-    </p>
-    <p>
-      <strong>Scenarios</strong> compose actors, seed initial state, run the simulation
-      until an <code>until</code> condition fires, then compute graders. The same
-      simulation can be driven by a Python function with two yields, an
-      <code>async with</code> block for mid-run intervention, or a TOML manifest with a
-      safe boolean grader DSL.
-    </p>
-  </section>
-
-  <section id="layout">
-    <h2>Repo layout</h2>
-<pre><code>crates/
-  ensemble-core/      simulation primitives (rust)
-  ensemble-runtime/   llm clients, tool runtime, prompted personas
-  ensemble-cli/       the `ensemble` binary
-python/ensemble/      pyo3 bindings + scenario decorators + toml loader
-train/                ensemble_train: spec loader, self-play, dpo+lora trainer
-examples/plank/       worked example world (rust crate + python pkg + personas)
-site/                 static multi-page site (this page lives here)
-tests/                python integration tests
-tests/integration/    end-to-end multi-actor scenarios</code></pre>
-  </section>
-
-  <section id="core">
-    <h2>ensemble-core</h2>
-    <p>
-      Pure simulation primitives. No LLM calls, no HTTP, no Python. Five small modules
-      do all the work:
-    </p>
-    <ul>
-      <li>
-        <code>bus.rs</code>, the message router. Holds per-actor mpsc inboxes and a
-        shared <code>EventLog</code>. Every <code>bus.send</code> writes a typed event
-        to the log and wakes the scheduler watcher via a <code>Notify</code>.
-      </li>
-      <li>
-        <code>scheduler.rs</code>, one tokio task per actor draining its inbox plus a
-        watcher that checks the until predicate after every new event. Halts on the
-        predicate, on a tick or event budget, or on quiescence (no traffic for
-        <code>quiescence_ms</code>). The quiescence path is what keeps tests from
-        deadlocking when a scripted conversation runs out of turns.
-      </li>
-      <li>
-        <code>world.rs</code>, the <code>WorldState</code> trait and a
-        <code>WorldHandle&lt;S&gt;</code> that wraps it behind a tokio mutex.
-        <code>apply_and_log</code> dispatches a tool call and emits both
-        <code>ToolResult</code> and <code>StateDiff</code> events.
-      </li>
-      <li>
-        <code>event.rs</code>, the typed event payload, the <code>EventLog</code>, and
-        JSONL serialization. Events carry tick, timestamp, actor id, message id, and a
-        typed payload (<code>UserMessage</code>, <code>AgentMessage</code>,
-        <code>ToolCall</code>, <code>ToolResult</code>, <code>StateDiff</code>,
-        <code>System</code>).
-      </li>
-      <li>
-        <code>until.rs</code>, the halting-condition combinators. <code>Until</code>
-        is a labelled closure over <code>UntilCtx</code>. Built-ins:
-        <code>turn_count_exceeds</code>, <code>any_of</code>, <code>all_of</code>.
-      </li>
-    </ul>
-    <p>
-      The <code>WorldState</code> trait is the contract a world author implements:
-    </p>
-<pre><code>pub trait WorldState: Send + Sync + 'static {
+<pre><code class="language-rust">pub trait WorldState: Send + Sync + 'static {
     type ToolCall:   DeserializeOwned + Send;
     type ToolEffect: Serialize + Send;
     type Diff:       Serialize + Send;
 
-    fn apply(&amp;mut self, call: Self::ToolCall)
-        -&gt; Result&lt;(Self::ToolEffect, Self::Diff), ToolError&gt;;
+    fn apply(&mut self, call: Self::ToolCall)
+        -> Result<(Self::ToolEffect, Self::Diff), ToolError>;
 
-    fn snapshot(&amp;self) -&gt; Vec&lt;u8&gt;;
-    fn restore(&amp;mut self, snapshot: &amp;[u8]) -&gt; Result&lt;(), RestoreError&gt;;
+    fn snapshot(&self) -> Vec<u8>;
+    fn restore(&mut self, snapshot: &[u8]) -> Result<(), RestoreError>;
 }</code></pre>
     <p>
-      <code>Diff</code> is what the trace viewer renders on the right side. Make it
-      rich enough that a reader of the JSONL can reconstruct exactly what changed.
+      The three associated types let you express what an agent can ask of the
+      world, what it gets back, and what changed. The <code>Diff</code> is the
+      most important of the three. It shows up in the trace as a
+      <code>state_diff</code> event, and the trace viewer renders it on the
+      right-hand side. A good diff identifies the table that changed, the row
+      and field, and the old and new values, so a reader of the JSONL can
+      reconstruct the run without rerunning it.
+    </p>
+    <p>
+      Here is a tiny but complete world that holds a counter:
+    </p>
+<pre><code class="language-rust">use ensemble_core::error::{RestoreError, ToolError};
+use ensemble_core::world::WorldState;
+use serde::{Deserialize, Serialize};
+
+#[derive(Default)]
+pub struct Counter { value: i64 }
+
+#[derive(Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum Call {
+    Inc { by: i64 },
+    Reset,
+}
+
+#[derive(Serialize, Clone)]
+pub struct Effect { new_value: i64 }
+
+#[derive(Serialize)]
+pub struct Diff { field: &'static str, old: i64, new: i64 }
+
+impl WorldState for Counter {
+    type ToolCall   = Call;
+    type ToolEffect = Effect;
+    type Diff       = Diff;
+
+    fn apply(&mut self, call: Call) -> Result<(Effect, Diff), ToolError> {
+        let old = self.value;
+        match call {
+            Call::Inc { by } => self.value += by,
+            Call::Reset      => self.value = 0,
+        }
+        Ok((
+            Effect { new_value: self.value },
+            Diff   { field: "value", old, new: self.value },
+        ))
+    }
+
+    fn snapshot(&self) -> Vec<u8> { serde_json::to_vec(&self.value).unwrap() }
+
+    fn restore(&mut self, snap: &[u8]) -> Result<(), RestoreError> {
+        self.value = serde_json::from_slice(snap)
+            .map_err(|e| RestoreError::Decode(e.to_string()))?;
+        Ok(())
+    }
+}</code></pre>
+    <p>
+      Snapshot and restore exist so the runtime can checkpoint a world before
+      a risky branch and roll back if needed. They are also what let you run
+      counterfactual rollouts from the same starting state during training.
     </p>
   </section>
 
-  <section id="runtime">
-    <h2>ensemble-runtime</h2>
+  <section id="tools">
+    <h2>Tools and how agents call them</h2>
     <p>
-      Everything the core deliberately does not touch.
+      Agents do not poke at the world directly. They issue tool calls, and the
+      tool registry dispatches each call to a closure that mutates the world
+      and returns a JSON effect. The agent sees the effect on its next turn,
+      and the rest of the system sees a pair of <code>tool_call</code> and
+      <code>tool_result</code> events in the trace.
     </p>
-    <ul>
-      <li>
-        <code>backend.rs</code>, the <code>LLMBackend</code> trait, the
-        <code>CompletionRequest</code>/<code>Response</code> shapes, and the
-        <code>SharedBackend = Arc&lt;dyn LLMBackend&gt;</code> alias the actors hold.
-      </li>
-      <li>
-        <code>backends/anthropic.rs</code>, the Anthropic Messages API client. Reads
-        <code>ANTHROPIC_API_KEY</code> from the env. Tool use via the standard
-        <code>tools</code> and <code>tool_use</code> content blocks. Non-streaming.
-      </li>
-      <li>
-        <code>backends/openai.rs</code>, Chat Completions with function calling.
-      </li>
-      <li>
-        <code>backends/vllm.rs</code>, the <code>LocalAdapterBackend</code>. Hits a
-        vLLM-compatible OpenAI-shaped endpoint. Pass an <code>adapter</code> name when
-        one base server serves many trained adapters.
-      </li>
-      <li>
-        <code>backends/mock.rs</code>, the deterministic <code>MockBackend</code>. Takes
-        a <code>MockScript</code> of canned turns keyed by model name. This is what
-        backs every test in the repo, and what bakes the trace on the front page.
-      </li>
-      <li>
-        <code>actors.rs</code>, the concrete <code>UserActor</code> and
-        <code>AgentActor</code>. Both hold a <code>SharedBackend</code> and a chat
-        history. The agent also holds an <code>Arc&lt;ToolRegistry&gt;</code> and
-        dispatches any tool calls the model returns.
-      </li>
-      <li>
-        <code>tools.rs</code>, the <code>Tool</code> + <code>ToolRegistry</code>
-        pair. A tool is a name, a description, a JSON Schema, and a closure that
-        maps parsed args to a JSON effect.
-      </li>
-      <li>
-        <code>persona.rs</code>, <code>PromptedPersona</code> wraps any
-        <code>LLMBackend</code> with a system prompt template and a tagged
-        <code>&lt;hidden_state&gt;</code> block. Non-revelation is a training problem;
-        the wrapper just renders the state.
-      </li>
-    </ul>
-  </section>
+    <p>
+      A tool is a name, a description, a JSON Schema, and a closure:
+    </p>
+<pre><code class="language-rust">use ensemble_runtime::{Tool, ToolRegistry};
+use serde_json::json;
 
-  <section id="bindings">
-    <h2>Python bindings</h2>
+let mut tools = ToolRegistry::new();
+let state = state.clone(); // Arc&lt;Mutex&lt;PlankState&gt;&gt;
+
+tools.register(Tool::new(
+    "lookup_user",
+    "Look up a user by id.",
+    json!({
+        "type": "object",
+        "properties": { "user_id": { "type": "string" } },
+        "required": ["user_id"]
+    }),
+    move |args| {
+        let user_id = args["user_id"].as_str()
+            .ok_or_else(|| ToolError::InvalidArgs("user_id".into()))?;
+        let user = state.lock().lookup_user(user_id)?;
+        Ok(json!({ "ok": true, "data": user }))
+    },
+));</code></pre>
     <p>
-      The <code>ensemble</code> Python package is a maturin-built mixed Rust+Python
-      project. The Rust side lives in <code>python/ensemble/src/lib.rs</code> and
-      exposes three pyo3 classes (<code>World</code>, <code>User</code>,
-      <code>Agent</code>) plus a process-global tokio runtime.
+      The description and the schema are both shipped to the language model
+      whenever it has to decide what to call. The closure runs synchronously
+      on the actor's thread; if you need to do anything that could block, do
+      it inside the lock and keep the critical section short.
     </p>
     <p>
-      The Python side (<code>python/ensemble/scenario.py</code>) wraps those classes
-      with a friendlier surface: the <code>@scenario</code> decorator, an
-      <code>Until</code> dataclass, a <code>TurnCount</code> sentinel that makes
-      <code>world.turn_count &gt; 30</code> evaluate to an <code>Until</code>, and an
-      <code>async with world.simulate()</code> context manager.
-    </p>
-    <p>
-      The native bridge is intentionally small. Scenarios call <code>world.run(until)</code>,
-      which serializes the until spec to JSON, hands it to Rust, and blocks on the global
-      tokio runtime via <code>block_on</code>. For the <code>async with</code> path the
-      bridge starts the scheduler in the background and provides
-      <code>wait_for_until</code>, which the Python side wraps in
-      <code>asyncio.to_thread</code> so the asyncio loop stays responsive.
-    </p>
-    <p>
-      We do not depend on <code>pyo3-asyncio</code>'s python-awaitable bridge. That
-      keeps the call-site small at the cost of one blocking call per
-      <code>wait_until</code>; the trade-off is documented in <a href="https://github.com/tejasprabhune">CHOICES.md</a>.
+      When the agent's model returns a tool call, the agent actor dispatches
+      it through this registry, writes the result to the trace, and feeds the
+      result back into the model on the next turn as a synthetic message. You
+      do not write any of that glue yourself.
     </p>
   </section>
 
-  <section id="scenarios">
-    <h2>Scenarios</h2>
+  <section id="users-personas">
+    <h2>Users and personas</h2>
     <p>
-      Three ways to write the same simulation.
+      A user actor is just a wrapper around an <code>LLMBackend</code>, but in
+      practice you almost always want it to behave like a particular person.
+      That is what personas are for. A persona is a TOML file with a style
+      description, a hidden-state schema, a system prompt template, and
+      optionally a set of training hyperparameters.
     </p>
+<pre><code class="language-toml">[persona]
+name = "frustrated_power_user"
+mode = "trained"          # or "prompted"
+description = "Long-tenured paid user with low patience."
 
-    <h3>Yield flavor</h3>
+[persona.style]
+tone      = "frustrated"
+verbosity = "high"
+
+[persona.hidden_state.schema]
+mood        = { type = "string", default = "annoyed" }
+hidden_goal = { type = "string", default = "refund_3mo" }
+
+[persona.system_prompt]
+template = """
+You are a long-tenured customer. You want a refund for the last three months.
+Do not mention that hidden goal until at least the third turn.
+"""
+
+[persona.training]
+base_model   = "Qwen/Qwen2.5-7B-Instruct"
+backend      = "modal"
+adapter_name = "ensemble-plank-frustrated-power-user"</code></pre>
     <p>
-      The common case. Spawn actors, yield an <code>until</code>, yield the grader dict.
-      The first yield kicks off the scheduler; the second yield returns the scores.
+      Prompted personas live entirely in their system prompt. The framework
+      renders the hidden state into a tagged block, instructs the model not
+      to reveal it, and otherwise gets out of the way. Trained personas swap
+      the frontier model for a smaller fine-tuned one (Qwen-2.5-7B by
+      default), trained with DPO on a preference dataset that rewards
+      in-character continuations. The scenario does not care which kind it
+      got; both implement the same <code>LLMBackend</code> trait.
     </p>
-<pre><code>@scenario("refund_storm")
+    <p>
+      Hidden state is the lever that lets a user actor stay coherent across a
+      long run. The hidden goal travels with the actor; when the scenario's
+      grader needs to check whether Alice actually got what she wanted, it
+      reads <code>alice.hidden_state</code> rather than trying to parse the
+      transcript.
+    </p>
+  </section>
+
+  <section id="verification">
+    <h2>Verification and reward</h2>
+    <p>
+      Verification in Ensemble is the second yield. After the simulation
+      stops, the scenario produces a dictionary of named scalar scores. Each
+      score is a number, conventionally between zero and one, that captures
+      one named outcome. A simple scenario might have one score; the
+      <code>refund_storm</code> scenario produces four, one per user plus a
+      global policy check.
+    </p>
+<pre><code class="language-python">@scenario("refund_storm")
 async def refund_storm(world):
-    alice = world.spawn_user(persona="frustrated_power_user", hidden_goal="refund_3mo")
+    alice = world.spawn_user(persona="frustrated_power_user",
+                              hidden_goal="refund_3mo")
     bob   = world.spawn_user(persona="confused_new_user")
     rep1  = world.spawn_agent(model="claude-sonnet-4-5",
-                               tools=["lookup_user", "issue_refund", "escalate"])
+                               tools=["lookup_user", "issue_refund"])
     alice.act("open_ticket", subject="want my money back")
     bob.act("open_ticket",   subject="how do refunds work")
 
     yield world.until(world.turn_count &gt; 30)
 
     yield {
-        "alice_refund_resolved": 1.0 if alice.hidden_goal_resolved() else 0.0,
+        "alice_refund_resolved": float(alice.hidden_goal_resolved()),
+        "bob_no_upsell":         float(not bob.was_upsold()),
         "no_double_refunds":     float(not world.had_double_refund()),
     }</code></pre>
-
-    <h3>Async with flavor</h3>
     <p>
-      Use this when you need to tweak state mid-run, inject a message, or assert an
-      intermediate invariant. The scheduler runs on the global tokio runtime; the
-      context manager starts and stops it.
+      The grader has three things to look at. The first is hidden actor
+      state, which the persona maintains and updates as the conversation
+      progresses. The second is the world itself, which exposes
+      world-specific predicates like <code>had_double_refund</code> that
+      query the underlying SQLite tables. The third is the trace, which the
+      grader can walk directly when it needs to count tool calls or detect a
+      sequence of events.
     </p>
-<pre><code>@scenario("enterprise_audit")
+    <p>
+      You can split the work however you like. Cheap checks belong in the
+      grader. Expensive ones, including LLM judges, usually live in a
+      separate evaluation pass that consumes the saved trace later. Both
+      produce the same kind of output: a dictionary of named scalars that
+      training code knows how to consume.
+    </p>
+  </section>
+
+  <section id="rl">
+    <h2>Using Ensemble as an RL environment</h2>
+    <p>
+      Every scenario is an RL environment. A rollout is one execution of the
+      scenario from setup through the second yield. The agent acts; the world
+      responds; the rollout terminates when the until condition fires; the
+      grader produces a reward dictionary. Training a policy against the
+      environment is then a question of generating many rollouts, computing
+      reward, and feeding the (trace, reward) pairs into whatever optimizer
+      you favor.
+    </p>
+    <p>
+      The framework makes a few design choices that matter for training:
+    </p>
+    <ul>
+      <li>
+        <strong>Reward is multi-dimensional by default.</strong> Returning a
+        single number throws away signal. If the grader produces five named
+        scores, you can keep them separate, weight them differently per
+        actor, or aggregate them at training time. None of that information
+        is forced together at scenario authoring time.
+      </li>
+      <li>
+        <strong>State is checkpointable.</strong> Because every world
+        implements <code>snapshot</code> and <code>restore</code>, you can
+        branch a rollout, try several agent responses from the same state,
+        and use the divergence in reward as a credit-assignment signal. This
+        is what makes algorithms like DPO and rejection sampling practical.
+      </li>
+      <li>
+        <strong>The trace is the policy's experience.</strong> Anything the
+        agent observes in a real run also shows up in the trace. The trace
+        is therefore directly usable as the experience tape for offline RL,
+        and as the input to a reward model trained on graded rollouts.
+      </li>
+      <li>
+        <strong>The user side is also learnable.</strong> User actors are
+        backed by the same <code>LLMBackend</code> trait as agents, so a
+        trained persona is itself a learned policy. The
+        <code>ensemble-train</code> package ships a DPO+LoRA pipeline that
+        teaches a persona to stay in character against an adversarial
+        breaker.
+      </li>
+    </ul>
+    <p>
+      The minimal training loop looks like this:
+    </p>
+<pre><code class="language-python">from ensemble import run_scenario
+
+def rollout():
+    return run_scenario("plank.refund_storm", world_name="plank")
+
+batch = [rollout() for _ in range(64)]
+for r in batch:
+    reward = r.scores["alice_refund_resolved"] - r.scores.get("policy_violation", 0)
+    optimizer.step(trace=r.trace, reward=reward)</code></pre>
+    <p>
+      Replace the optimizer call with TRL, verl, or whatever you are using.
+      The shape stays the same.
+    </p>
+  </section>
+
+  <section id="power-user">
+    <h2>Mid-run intervention</h2>
+    <p>
+      The yield flavor covers most cases, but sometimes you want to inspect
+      or modify the simulation while it is running. For that, scenarios can
+      use an async context manager:
+    </p>
+<pre><code class="language-python">@scenario("enterprise_audit")
 async def enterprise_audit(world):
-    carol = world.spawn_user(persona="enterprise_admin", hidden_goal="audit_log_export")
-    rep   = world.spawn_agent(model="claude-sonnet-4-5", tools=["escalate", "search_kb"])
+    carol = world.spawn_user(persona="enterprise_admin",
+                              hidden_goal="audit_log_export")
+    rep   = world.spawn_agent(model="claude-sonnet-4-5",
+                               tools=["escalate", "search_kb"])
     carol.say("rep", "i need the q3 audit log exported as csv.")
 
     async with world.simulate() as run:
@@ -298,14 +474,25 @@ async def enterprise_audit(world):
         await run.wait_until(world.turn_count &gt; 18)
 
     return {"escalated_or_promised": 1.0}</code></pre>
-
-    <h3>TOML flavor</h3>
     <p>
-      Declarative scenarios live in <code>scenarios.toml</code> and compile to the
-      same runtime at load time. Useful when you want to enumerate a matrix of
-      similar scenarios without writing one Python function each.
+      Inside the <code>async with</code> block the scheduler runs on a
+      background task. <code>wait_until</code> blocks the scenario coroutine
+      until the condition fires or a timeout elapses. Between the waits you
+      can inspect hidden state, push a new message into an actor's inbox,
+      mutate the world directly, or assert intermediate invariants. When the
+      block exits, the scheduler is stopped and the trace is final.
     </p>
-<pre><code>[scenario.refund_storm]
+  </section>
+
+  <section id="toml">
+    <h2>Declarative TOML scenarios</h2>
+    <p>
+      When you want to enumerate a matrix of similar scenarios without
+      writing one Python function per scenario, you can declare them in
+      <code>scenarios.toml</code>. The TOML compiles to the same runtime as
+      the Python decorator:
+    </p>
+<pre><code class="language-toml">[scenario.refund_storm]
 world = "plank"
 duration_turns = 30
 
@@ -324,95 +511,141 @@ tools = ["lookup_user", "issue_refund"]
 alice_resolved   = "hidden_goal_resolved"
 no_double_refund = "not had_double_refund"</code></pre>
     <p>
-      Grader expressions parse with a hand-rolled recursive descent parser. Supported
-      tokens are <code>and</code>, <code>or</code>, <code>not</code>, parens, and
-      named predicates the world exposes. No <code>eval</code>, no
-      <code>ast.literal_eval</code>, no calls or attribute access.
+      Grader expressions use a small safe boolean DSL. The parser recognizes
+      <code>and</code>, <code>or</code>, <code>not</code>, parentheses, and
+      named predicates that the world exposes. Names that look like
+      function calls are rejected by the parser, and there is no
+      <code>eval</code> or attribute access anywhere in the pipeline. If you
+      need a richer grader, write the scenario in Python.
     </p>
-  </section>
-
-  <section id="plank">
-    <h2>Plank</h2>
-    <p>
-      Plank is a small fake SaaS customer-support tool that doubles as the worked
-      example for Ensemble. State is in-memory SQLite with six tables; six tools
-      operate on them; five personas exercise the agents from different angles.
-    </p>
-<pre><code>users         (id, name, email, plan)
-tickets       (id, user_id, subject, status, opened_at)
-subscriptions (user_id, plan)
-kb            (id, title, body)
-audit_log     (id, ts, who, action, payload)
-refunds       (id, user_id, amount_cents, reason, ts)</code></pre>
-
-    <p>
-      The interesting policy is in <code>issue_refund</code>: it counts a user's
-      prior refunds and rejects a second one. This is what lets the
-      <code>no_double_refunds</code> grader actually measure something.
-    </p>
-    <p>
-      See the <a href="plank.html">plank page</a> for the full tool list and the
-      three shipped scenarios.
-    </p>
-  </section>
-
-  <section id="training">
-    <h2>Training pipeline</h2>
-    <p>
-      <code>ensemble-train</code> is a separate uv workspace member because its
-      torch/transformers stack is heavy. Three layers:
-    </p>
-    <ul>
-      <li>
-        <code>spec.py</code> loads a persona TOML into a typed
-        <code>PersonaSpec</code> with optional <code>TrainingHyperparams</code>.
-      </li>
-      <li>
-        <code>self_play.py</code> turns a persona spec into a list of
-        <code>PreferencePair</code>s. The default is a deterministic offline
-        heuristic; pass a custom breaker callable to plug in a frontier model that
-        tries to push the persona out of character.
-      </li>
-      <li>
-        <code>trainer.py</code> runs TRL's <code>DPOTrainer</code> on a LoRA adapter
-        over the base model, saves to <code>output_dir</code>, optionally pushes to
-        Hugging Face under <code>$HF_USERNAME</code>, and emits a
-        <code>persona-card.md</code>.
-      </li>
-    </ul>
-    <p>Backends live in <code>train/ensemble_train/backends/</code>:</p>
-    <ul>
-      <li><code>local.py</code>, runs in-process; CPU smoke tests against a tiny base model.</li>
-      <li><code>modal.py</code>, ships the trainer to Modal on an A100; falls back to a dry-run when <code>modal</code> isn't installed.</li>
-      <li><code>skypilot.py</code>, renders a SkyPilot YAML and launches via <code>sky launch</code>; dry-runs (writes the YAML) when <code>sky</code> isn't on PATH.</li>
-    </ul>
-    <p>Kick off a real training run:</p>
-<pre><code>uv pip install 'ensemble-train[torch]'
-./target/debug/ensemble train examples/plank/personas/frustrated_power_user.toml \
-  --backend modal</code></pre>
   </section>
 
   <section id="cli">
-    <h2>CLI</h2>
-    <p>The <code>ensemble</code> binary is a thin wrapper around the python and rust libraries.</p>
-<pre><code>ensemble init &lt;name&gt;                  scaffold a new world project
-ensemble run &lt;scenario&gt; [--world W]   run, write trace to ./traces/
-ensemble trace view &lt;path&gt;            serve the trace viewer with the file baked in
-ensemble train &lt;persona.toml&gt;         hand off to ensemble-train</code></pre>
+    <h2>The ensemble CLI</h2>
     <p>
-      <code>run</code> shells out to <code>uv run python -c &lt;script&gt;</code> that
-      imports the scenarios package, calls the scenario via the registry, and writes
-      the trace. <code>train</code> shells out to <code>uv run ensemble-train</code>.
-      <code>trace view</code> serves <code>site/</code> on
-      <code>http://localhost:&lt;port&gt;</code> with the given trace dropped in at
+      The <code>ensemble</code> binary is a thin wrapper around the rest of
+      the framework. Four subcommands cover the common workflows:
+    </p>
+    <table>
+      <thead>
+        <tr><th>command</th><th>what it does</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>ensemble init &lt;name&gt;</code></td>
+          <td>Scaffolds a new world project. Creates a Rust crate with a <code>WorldState</code> stub, a Python scenario file, a persona TOML, and a <code>scenarios.toml</code> manifest.</td>
+        </tr>
+        <tr>
+          <td><code>ensemble run &lt;scenario&gt;</code></td>
+          <td>Looks up the scenario in the registry, runs it against the named world, and writes the trace to <code>./traces/</code>.</td>
+        </tr>
+        <tr>
+          <td><code>ensemble trace view &lt;path&gt;</code></td>
+          <td>Serves the static trace viewer on a local port with the given trace baked in.</td>
+        </tr>
+        <tr>
+          <td><code>ensemble train &lt;persona.toml&gt;</code></td>
+          <td>Hands the persona spec off to the Python training pipeline. Supports <code>--backend modal</code>, <code>--backend skypilot</code>, and <code>--backend local</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="architecture">
+    <h2>Architecture</h2>
+    <p>
+      The framework is small on purpose. Three Rust crates and one Python
+      package do all the work.
+    </p>
+
+    <h3>ensemble-core</h3>
+    <p>
+      The core crate holds the simulation primitives. It has no LLM calls,
+      no HTTP, and no Python. The bus is an mpsc-based router that gives
+      every actor its own inbox and appends every send to a shared event
+      log. The scheduler runs one Tokio task per actor and a watcher that
+      checks the until predicate after every new event. It halts on the
+      predicate, on a tick or event budget, or on quiescence, which is a
+      timeout that fires when no traffic has flowed for a configurable
+      window. Quiescence is what keeps tests from deadlocking when a
+      scripted conversation runs out of turns.
+    </p>
+    <p>
+      The <code>World</code> type wraps your <code>WorldState</code> behind a
+      Tokio mutex. Its <code>apply_and_log</code> method dispatches a tool
+      call, then emits both a <code>tool_result</code> event with the
+      effect and a <code>state_diff</code> event with the diff. The until
+      combinators (<code>turn_count_exceeds</code>, <code>any_of</code>,
+      <code>all_of</code>) are small labelled closures over the log.
+    </p>
+
+    <h3>ensemble-runtime</h3>
+    <p>
+      The runtime crate is everything the core deliberately does not touch.
+      The <code>LLMBackend</code> trait has one method,
+      <code>complete</code>, which takes a <code>CompletionRequest</code>
+      and returns a <code>CompletionResponse</code>. Four implementations
+      ship in the crate: an Anthropic Messages API client, an OpenAI Chat
+      Completions client, a vLLM-shaped local-adapter client for serving
+      trained personas, and a deterministic mock backend that backs every
+      test in the repo.
+    </p>
+    <p>
+      The concrete <code>UserActor</code> and <code>AgentActor</code> live
+      here. Both hold a shared backend and a chat history; the agent also
+      holds a tool registry and dispatches any tool calls the model
+      returns. The <code>PromptedPersona</code> wrapper composes any backend
+      with a system prompt template and a tagged hidden-state block.
+    </p>
+
+    <h3>ensemble-py and the bindings</h3>
+    <p>
+      <code>python/ensemble/</code> is a maturin-built mixed Rust and
+      Python package. The Rust side exposes a small surface of pyo3
+      classes; the Python side wraps those with the friendlier
+      <code>@scenario</code>, <code>World</code>, <code>User</code>, and
+      <code>Agent</code> types you see in scenario code. Everything async
+      runs on a process-global Tokio runtime. <code>world.run(until)</code>
+      blocks the calling thread through <code>block_on</code>;
+      <code>async with world.simulate()</code> spawns the scheduler in the
+      background and exposes <code>wait_until</code> via
+      <code>asyncio.to_thread</code>, which keeps the asyncio event loop
+      responsive while the native scheduler runs.
+    </p>
+
+    <h3>ensemble-train</h3>
+    <p>
+      The training package is a separate uv workspace member because its
+      dependencies are heavy. <code>spec.py</code> loads a persona TOML
+      into typed dataclasses. <code>self_play.py</code> turns a persona
+      spec into a list of preference pairs, using a deterministic offline
+      heuristic by default or a pluggable breaker model for real runs.
+      <code>trainer.py</code> runs TRL's <code>DPOTrainer</code> on a LoRA
+      adapter, saves to <code>checkpoints/</code>, and optionally pushes
+      to the Hugging Face hub. Three backends ship out of the box:
+      <code>local</code>, <code>modal</code>, and <code>skypilot</code>.
+    </p>
+
+    <h3>The CLI</h3>
+    <p>
+      <code>crates/ensemble-cli</code> is a Clap-based binary. It does not
+      contain any business logic of its own. The <code>run</code> command
+      shells out to <code>uv run python</code> with a small script that
+      imports the scenarios package and dispatches through the registry.
+      The <code>train</code> command shells out to
+      <code>uv run ensemble-train</code>. The <code>trace view</code>
+      command is a 90-line static HTTP server that serves the
+      <code>site/</code> directory with the supplied trace dropped in as
       <code>trace.jsonl</code>.
     </p>
   </section>
 
   <section id="trace-format">
-    <h2>Trace format</h2>
-    <p>JSONL, one line per event, ordered by tick.</p>
-<pre><code>{
+    <h2>Trace format reference</h2>
+    <p>
+      Traces are JSONL files. One line per event, ordered by tick:
+    </p>
+<pre><code class="language-json">{
   "tick": 7,
   "ts_ms": 1716000123,
   "actor": "rep1",
@@ -420,47 +653,65 @@ ensemble train &lt;persona.toml&gt;         hand off to ensemble-train</code></p
   "payload": {
     "kind": "tool_call",
     "name": "issue_refund",
-    "args": {"user_id": "u-alice", "amount_cents": 15000, "reason": "..."}
+    "args": { "user_id": "u-alice", "amount_cents": 15000, "reason": "..." }
   }
 }</code></pre>
-    <p>Event kinds:</p>
+    <p>Every event has these top-level fields. The payload kind distinguishes the body:</p>
     <table>
-      <thead><tr><th>kind</th><th>emitted by</th><th>fields</th></tr></thead>
+      <thead>
+        <tr><th>kind</th><th>emitted by</th><th>payload fields</th></tr>
+      </thead>
       <tbody>
-        <tr><td>user_message</td><td>UserActor</td><td>text</td></tr>
-        <tr><td>agent_message</td><td>AgentActor</td><td>text</td></tr>
-        <tr><td>tool_call</td><td>AgentActor or scenario seed</td><td>name, args</td></tr>
-        <tr><td>tool_result</td><td>ToolRegistry dispatch</td><td>name, result</td></tr>
-        <tr><td>state_diff</td><td>WorldState::apply via apply_and_log</td><td>diff</td></tr>
-        <tr><td>system</td><td>scheduler stop reasons, runtime notes</td><td>note</td></tr>
+        <tr><td><code>user_message</code></td><td>UserActor</td><td><code>text</code></td></tr>
+        <tr><td><code>agent_message</code></td><td>AgentActor</td><td><code>text</code></td></tr>
+        <tr><td><code>tool_call</code></td><td>AgentActor or scenario seed</td><td><code>name</code>, <code>args</code></td></tr>
+        <tr><td><code>tool_result</code></td><td>ToolRegistry dispatch</td><td><code>name</code>, <code>result</code></td></tr>
+        <tr><td><code>state_diff</code></td><td><code>WorldState::apply</code> via <code>apply_and_log</code></td><td><code>diff</code></td></tr>
+        <tr><td><code>system</code></td><td>scheduler stop reasons, runtime notes</td><td><code>note</code></td></tr>
       </tbody>
     </table>
+    <p>
+      The trace is intended to be human-readable. When you are debugging a
+      scenario, <code>cat traces/foo.jsonl | jq</code> is often faster than
+      opening the viewer.
+    </p>
   </section>
 
   <section id="contributing">
     <h2>Contributing</h2>
     <p>
-      The fastest way to get involved is to add a new persona or a new scenario to
-      Plank. Both are TOML files; both immediately show up in
-      <code>ensemble run</code> and in the test suite.
+      The fastest way to get involved is to add a new persona or a new
+      scenario to Plank. Both are TOML or Python files, and both show up
+      immediately in <code>ensemble run</code> and the test suite.
     </p>
     <p>
-      Adding a new world is the next step up. Run <code>ensemble init my_world</code>
-      to get a Rust crate skeleton with a <code>WorldState</code> stub, a Python
-      scenario, a TOML manifest, and a persona TOML. Implement the trait, register
-      your tools, and you are off.
+      Adding a new world is the next step up. Run
+      <code>ensemble init my_world</code> for a working skeleton, implement
+      the <code>WorldState</code> trait, register your tools with a fresh
+      <code>ToolRegistry</code>, and write a smoke scenario. You will know
+      it is working when <code>cargo test</code> and
+      <code>uv run pytest tests/</code> both stay green.
     </p>
-    <p>House rules:</p>
+    <p>A few house rules that keep the codebase consistent:</p>
     <ul>
-      <li>Tests over screenshots. <code>cargo test --workspace</code> and <code>uv run pytest tests/</code> both stay green.</li>
-      <li>No em-dashes, no banner-style separators in comments.</li>
-      <li>Commits sound like a person wrote them: present tense, no Conventional Commits prefixes.</li>
-      <li>One logical change per commit. Split big changes; don't bundle.</li>
+      <li>Tests over screenshots. Both test suites stay green on every commit.</li>
+      <li>No em dashes anywhere in code, docs, or commit messages.</li>
+      <li>No banner-style separator comments. Section comments are fine if they are a single line of normal prose.</li>
+      <li>Commit messages sound like a person wrote them. Active voice, present tense, no Conventional Commits prefixes.</li>
+      <li>One logical change per commit. Split big changes rather than bundling them.</li>
     </ul>
   </section>
 
   <footer class="site">
     Source on <a href="https://github.com/tejasprabhune">tejasprabhune</a>. Built in Rust and Python.
   </footer>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/rust.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script>hljs.highlightAll();</script>
 </body>
 </html>

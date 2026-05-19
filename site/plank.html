@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="wide">
   <header>
     <a class="wordmark" href="index.html">ensemble</a>
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
@@ -23,48 +23,55 @@
   <section>
     <h2>What Plank is</h2>
     <p>
-      Plank is a small fake SaaS customer-support tool and the worked example world
-      for Ensemble. It exists to demonstrate the framework's shape end to end: a
-      typed world, a tool registry, a handful of personas, and three scenarios that
-      stress different parts of the system.
+      Plank is a small fake SaaS customer-support tool. It is the worked
+      example world that ships with Ensemble and the one the hero demo
+      runs against. Its job is to show the framework's shape end to end:
+      a typed world, a tool registry, a handful of personas, and three
+      scenarios that exercise different parts of the system.
     </p>
   </section>
 
   <section>
     <h2>State</h2>
-    <p>An in-memory SQLite database with six tables:</p>
-<pre><code>users         (id, name, email, plan)
+    <p>
+      Plank's world is an in-memory SQLite database with six tables. The
+      database lives inside <code>plank::PlankState</code> and is shared
+      by every tool closure through an <code>Arc&lt;Mutex&lt;_&gt;&gt;</code>.
+      Each <code>World("plank")</code> instance gets its own fresh
+      database.
+    </p>
+<pre><code class="language-sql">users         (id, name, email, plan)
 tickets       (id, user_id, subject, status, opened_at)
 subscriptions (user_id, plan)
 kb            (id, title, body)
 audit_log     (id, ts, who, action, payload)
 refunds       (id, user_id, amount_cents, reason, ts)</code></pre>
-    <p>
-      The state lives inside <code>plank::PlankState</code>, behind an
-      <code>Arc&lt;Mutex&lt;_&gt;&gt;</code> shared across all tool closures. Each
-      <code>World("plank")</code> instance gets its own fresh state.
-    </p>
   </section>
 
   <section>
     <h2>Tools</h2>
-    <ul>
-      <li><code>lookup_user(user_id)</code>, fetch a user record.</li>
-      <li><code>lookup_ticket(ticket_id)</code>, fetch a ticket.</li>
-      <li><code>issue_refund(user_id, amount_cents, reason)</code>, one per user per run; the second call errors.</li>
-      <li><code>escalate(ticket_id, to_team)</code>, sets status to <code>escalated</code>.</li>
-      <li><code>search_kb(query)</code>, case-insensitive substring search.</li>
-      <li><code>update_subscription(user_id, plan)</code>, switch a user's plan.</li>
-    </ul>
     <p>
-      All six audit every call into <code>audit_log</code>. The
-      <code>no_double_refunds</code> grader on the front-page demo reads back from
-      <code>refunds</code> to verify the policy held.
+      Six tools operate on the database. All six write to
+      <code>audit_log</code>, which means the grader can replay the full
+      sequence of agent actions after the run finishes.
     </p>
+    <ul>
+      <li><code>lookup_user(user_id)</code> fetches a user record.</li>
+      <li><code>lookup_ticket(ticket_id)</code> fetches a ticket.</li>
+      <li><code>issue_refund(user_id, amount_cents, reason)</code> issues a refund. The tool refuses a second call for the same user, which is what makes the <code>no_double_refunds</code> grader meaningful.</li>
+      <li><code>escalate(ticket_id, to_team)</code> sets a ticket status to <code>escalated</code>.</li>
+      <li><code>search_kb(query)</code> runs a case-insensitive substring search over the knowledge base.</li>
+      <li><code>update_subscription(user_id, plan)</code> switches a user's plan.</li>
+    </ul>
   </section>
 
   <section>
     <h2>Personas shipped</h2>
+    <p>
+      Five personas ship with Plank. One is trained, four are prompted. See
+      the <a href="personas.html">personas page</a> for the TOML schema and
+      the training pipeline.
+    </p>
     <ul>
       <li><code>frustrated_power_user</code>, trained adapter via DPO+LoRA.</li>
       <li><code>confused_new_user</code>, prompted.</li>
@@ -72,37 +79,37 @@ refunds       (id, user_id, amount_cents, reason, ts)</code></pre>
       <li><code>patient_retail</code>, prompted.</li>
       <li><code>chatty_neutral</code>, prompted.</li>
     </ul>
-    <p>
-      See the <a href="personas.html">personas page</a> for the TOML schema and how
-      training works.
-    </p>
   </section>
 
   <section>
     <h2>Scenarios shipped</h2>
     <ul>
-      <li><code>plank.single_ticket</code>, one user, one agent. Sanity check.</li>
-      <li><code>plank.refund_storm</code>, three users, two agents. The hero demo on the front page.</li>
-      <li><code>plank.enterprise_audit</code>, <code>async with</code> path with mid-run intervention.</li>
+      <li><code>plank.single_ticket</code> is the sanity check. One user, one agent.</li>
+      <li><code>plank.refund_storm</code> is the hero demo on the front page. Three users, two agents, contended refund policy.</li>
+      <li><code>plank.enterprise_audit</code> uses the <code>async with</code> path with mid-run intervention.</li>
     </ul>
   </section>
 
   <section>
     <h2>Run it</h2>
-<pre><code>cargo build -p ensemble-cli
+<pre><code class="language-bash">cargo build -p ensemble-cli
 ./target/debug/ensemble run plank.refund_storm --world plank
 ./target/debug/ensemble trace view traces/plank_refund_storm.jsonl \
   --site site --port 8765</code></pre>
     <p>
-      Source: <code>examples/plank/</code>. The Rust world is at
-      <code>examples/plank/world/src/</code>; the Python scenarios are at
-      <code>examples/plank/scenarios/</code>; the personas are TOML files under
-      <code>examples/plank/personas/</code>.
+      The Rust world lives at <code>examples/plank/world/src/</code>, the
+      scenarios at <code>examples/plank/scenarios/</code>, and the persona
+      TOML files at <code>examples/plank/personas/</code>.
     </p>
   </section>
 
   <footer class="site">
     Source on <a href="https://github.com/tejasprabhune">tejasprabhune</a>. Built in Rust and Python.
   </footer>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/sql.min.js"></script>
+  <script>hljs.highlightAll();</script>
 </body>
 </html>
