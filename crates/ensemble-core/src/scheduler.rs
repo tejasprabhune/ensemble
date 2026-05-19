@@ -10,13 +10,15 @@ use crate::event::{now_ms, Event, EventPayload};
 use crate::ids::ActorId;
 use crate::until::{Until, UntilCtx};
 
-/// Limits scheduler work to prevent runaway loops. Counts both ticks
-/// (one per bus event) and total events processed; whichever cap fires
-/// first halts the run with `TickBudgetExhausted`.
+/// Limits scheduler work to prevent runaway loops. Counts ticks (one
+/// per bus event), total events processed, and a quiescence timeout
+/// for when no new events arrive. Hitting `max_ticks` or `max_events`
+/// halts with `TickBudgetExhausted`; quiescence halts cleanly.
 #[derive(Clone, Copy, Debug)]
 pub struct TickBudget {
     pub max_ticks: u64,
     pub max_events: usize,
+    pub quiescence_ms: u64,
 }
 
 impl Default for TickBudget {
@@ -24,6 +26,7 @@ impl Default for TickBudget {
         Self {
             max_ticks: 200,
             max_events: 4000,
+            quiescence_ms: 500,
         }
     }
 }
@@ -104,7 +107,18 @@ impl Scheduler {
                 if stop {
                     return Ok::<_, CoreError>(StopReason::UntilFired);
                 }
-                notifier.notified().await;
+                let wait = notifier.notified();
+                tokio::pin!(wait);
+                let timeout = tokio::time::sleep(std::time::Duration::from_millis(
+                    budget.quiescence_ms,
+                ));
+                tokio::pin!(timeout);
+                tokio::select! {
+                    _ = &mut wait => continue,
+                    _ = &mut timeout => {
+                        return Ok(StopReason::Quiescent);
+                    }
+                }
             }
         });
 
@@ -114,19 +128,19 @@ impl Scheduler {
 
         tasks.shutdown().await;
 
-        if matches!(outcome, StopReason::UntilFired) {
-            let tick = bus.current_tick().await;
-            log.append(Event {
-                tick,
-                ts_ms: now_ms(),
-                actor: None,
-                message_id: None,
-                payload: EventPayload::System {
-                    note: "until predicate fired; halting".into(),
-                },
-            })
-            .await;
-        }
+        let note = match outcome {
+            StopReason::UntilFired => "until predicate fired; halting",
+            StopReason::Quiescent => "scheduler quiescent; halting",
+        };
+        let tick = bus.current_tick().await;
+        log.append(Event {
+            tick,
+            ts_ms: now_ms(),
+            actor: None,
+            message_id: None,
+            payload: EventPayload::System { note: note.into() },
+        })
+        .await;
 
         Ok(())
     }
@@ -134,6 +148,7 @@ impl Scheduler {
 
 enum StopReason {
     UntilFired,
+    Quiescent,
 }
 
 async fn actor_loop(

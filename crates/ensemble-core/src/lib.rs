@@ -3,7 +3,6 @@
 //! No LLM calls, no HTTP, no Python. All higher layers depend on this crate.
 
 pub mod actor;
-pub mod backend;
 pub mod bus;
 pub mod error;
 pub mod event;
@@ -14,9 +13,8 @@ pub mod until;
 pub mod world;
 
 pub mod prelude {
-    pub use crate::actor::{ActorHandle, ActorKind, AgentActor, UserActor};
-    pub use crate::backend::{BackendError, CompletionRequest, CompletionResponse, LLMBackend, ToolSchema};
-    pub use crate::bus::{Bus, Envelope, Message};
+    pub use crate::actor::{Actor, ActorHandle, ActorKind};
+    pub use crate::bus::{Bus, Envelope, Message, Recipient};
     pub use crate::error::{CoreError, RestoreError, ToolError};
     pub use crate::event::{Event, EventLog, EventPayload, Tick};
     pub use crate::ids::{ActorId, MessageId, RunId};

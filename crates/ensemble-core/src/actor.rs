@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::backend::SharedBackend;
 use crate::bus::{Bus, Envelope};
 use crate::error::CoreError;
 use crate::ids::ActorId;
@@ -47,17 +46,4 @@ impl ActorHandle {
     pub async fn take_inbox(&self) -> Option<mpsc::Receiver<Envelope>> {
         self.inbox.lock().await.take()
     }
-}
-
-/// Marker struct for user actors. Concrete implementations live in
-/// `ensemble-runtime`; this exists so the core can refer to a "user
-/// actor" without depending on the runtime crate.
-pub struct UserActor {
-    pub id: ActorId,
-    pub backend: SharedBackend,
-}
-
-pub struct AgentActor {
-    pub id: ActorId,
-    pub backend: SharedBackend,
 }

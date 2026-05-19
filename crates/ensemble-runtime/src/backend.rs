@@ -16,7 +16,22 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+impl ChatMessage {
+    pub fn user(content: impl Into<String>) -> Self {
+        Self { role: "user".into(), content: content.into() }
+    }
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self { role: "assistant".into(), content: content.into() }
+    }
+    pub fn system(content: impl Into<String>) -> Self {
+        Self { role: "system".into(), content: content.into() }
+    }
+    pub fn tool(content: impl Into<String>) -> Self {
+        Self { role: "tool".into(), content: content.into() }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CompletionRequest {
     pub model: String,
     pub system: Option<String>,
@@ -26,7 +41,7 @@ pub struct CompletionRequest {
     pub max_tokens: Option<u32>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CompletionResponse {
     pub text: String,
     pub tool_calls: Vec<ProposedToolCall>,

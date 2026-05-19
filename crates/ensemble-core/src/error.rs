@@ -14,8 +14,6 @@ pub enum CoreError {
     Tool(#[from] ToolError),
     #[error("restore error: {0}")]
     Restore(#[from] RestoreError),
-    #[error("backend error: {0}")]
-    Backend(#[from] crate::backend::BackendError),
     #[error("{0}")]
     Other(String),
 }

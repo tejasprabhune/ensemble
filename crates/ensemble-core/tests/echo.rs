@@ -59,7 +59,10 @@ async fn ping_pong_runs_until_budget_or_predicate() {
     let ping = ActorId::from_label("ping");
     let pong = ActorId::from_label("pong");
 
-    let mut scheduler = Scheduler::new(bus.clone(), TickBudget { max_ticks: 20, max_events: 200 });
+    let mut scheduler = Scheduler::new(
+        bus.clone(),
+        TickBudget { max_ticks: 20, max_events: 200, quiescence_ms: 500 },
+    );
     scheduler.register(register(&bus, ping.clone(), pong.clone()).await);
     scheduler.register(register(&bus, pong.clone(), ping.clone()).await);
 
