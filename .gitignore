@@ -1,0 +1,42 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.python-version
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Maturin
+*.so
+*.dylib
+*.pyd
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Runtime
+traces/
+.env
+.envrc
+*.sqlite
+*.sqlite3
+
+# Modal / training
+.modal.toml
+wandb/
+checkpoints/

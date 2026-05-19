@@ -1,0 +1,41 @@
+[project]
+name = "ensemble-train"
+version = "0.1.0"
+description = "Post-training pipeline for Ensemble personas."
+authors = [
+    { name = "Tejas Prabhune", email = "tejas.prabhune@gmail.com" },
+]
+requires-python = ">=3.10"
+dependencies = [
+    "tomli >= 2.0; python_version < '3.11'",
+    "click >= 8",
+]
+
+[project.optional-dependencies]
+torch = [
+    "torch >= 2.3",
+    "transformers >= 4.44",
+    "trl >= 0.9",
+    "peft >= 0.12",
+    "datasets >= 2.20",
+    "huggingface_hub >= 0.24",
+    "accelerate >= 0.33",
+]
+modal = ["modal >= 0.65"]
+skypilot = ["skypilot >= 0.6"]
+
+[project.scripts]
+ensemble-train = "ensemble_train.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest >= 8",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "ensemble_train"
+module-root = ""
