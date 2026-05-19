@@ -34,6 +34,8 @@ pub(crate) struct WorldInner {
     pub(crate) actors: Vec<ActorSpec>,
     pub(crate) seed_messages: Vec<(ActorId, ActorId, Message)>,
     pub(crate) budget: TickBudget,
+    pub(crate) bg_task: Option<tokio::task::JoinHandle<Result<(), ensemble_core::error::CoreError>>>,
+    pub(crate) registered_inboxes: Vec<ActorId>,
 }
 
 #[derive(Clone)]
@@ -83,6 +85,8 @@ impl World {
                 actors: vec![],
                 seed_messages: vec![],
                 budget: TickBudget::default(),
+                bg_task: None,
+                registered_inboxes: vec![],
             })),
         })
     }
@@ -240,6 +244,152 @@ impl World {
         runtime
             .block_on(log.to_jsonl())
             .map_err(|e| PyRuntimeError::new_err(format!("trace serialize: {e}")))
+    }
+
+    /// Start the scheduler in the background on the global tokio
+    /// runtime. Returns immediately. The caller is expected to drive
+    /// it via `wait_for_until` and stop it via `stop_scheduler`.
+    fn start_scheduler(&self) -> PyResult<()> {
+        let (bus, actor_handles, seed_messages, mut budget) = {
+            let mut inner = self.inner.lock();
+            if inner.bg_task.is_some() {
+                return Err(PyRuntimeError::new_err("scheduler already started"));
+            }
+            let backend = inner.backend.clone() as Arc<dyn ensemble_runtime::LLMBackend>;
+            let tools = inner.tools.clone();
+            let bus = inner.bus.clone();
+            let mut handles: Vec<(ActorId, Arc<dyn ensemble_core::actor::Actor>)> = Vec::new();
+            for spec in inner.actors.drain(..) {
+                let actor: Arc<dyn ensemble_core::actor::Actor> = match spec.kind {
+                    SpecKind::User => Arc::new(UserActor::new(
+                        spec.id.clone(),
+                        spec.model.clone().unwrap_or_else(|| "user-model".into()),
+                        backend.clone(),
+                    )),
+                    SpecKind::Agent => Arc::new(AgentActor::new(
+                        spec.id.clone(),
+                        spec.model.clone().unwrap_or_else(|| "agent-model".into()),
+                        backend.clone(),
+                        tools.clone(),
+                    )),
+                };
+                handles.push((spec.id, actor));
+            }
+            let seed = inner.seed_messages.drain(..).collect::<Vec<_>>();
+            (bus, handles, seed, inner.budget)
+        };
+        // Loosen the budget: the python harness is in charge of when
+        // to stop. Still keep quiescence so a stalled run halts.
+        budget.max_ticks = budget.max_ticks.max(10_000);
+        budget.max_events = budget.max_events.max(50_000);
+        budget.quiescence_ms = budget.quiescence_ms.max(2_000);
+
+        let runtime = global_runtime();
+        let mut registered = Vec::new();
+        let _enter = runtime.enter();
+        let mut scheduler = Scheduler::new(bus.clone(), budget);
+        for (id, actor) in actor_handles {
+            let inbox = runtime.block_on(bus.register(id.clone()));
+            registered.push(id.clone());
+            scheduler.register(Arc::new(ActorHandle::new(actor, inbox)));
+        }
+        // Seed messages before starting actors so they have something
+        // to react to.
+        runtime.block_on(async {
+            for (from, to, msg) in seed_messages {
+                if to.as_str() == "__world__" {
+                    let payload = match msg {
+                        Message::ToolCall { name, args } => EventPayload::ToolCall { name, args },
+                        Message::UserMessage { text } => EventPayload::UserMessage { text },
+                        Message::AgentMessage { text } => EventPayload::AgentMessage { text },
+                        Message::ToolResult { name, result } => EventPayload::ToolResult { name, result },
+                        Message::System { note } => EventPayload::System { note },
+                    };
+                    bus.append_event(Some(from), payload).await;
+                } else {
+                    bus.send(from, Recipient::Actor(to), msg).await.ok();
+                }
+            }
+        });
+        let task = runtime.spawn(async move { scheduler.run().await });
+        let mut inner = self.inner.lock();
+        inner.bg_task = Some(task);
+        inner.registered_inboxes = registered;
+        Ok(())
+    }
+
+    /// Block until the given until-spec fires (or the scheduler exits
+    /// for any reason). Returns true if the predicate fired, false if
+    /// the scheduler ended first.
+    fn wait_for_until(&self, until_spec_json: &str, timeout_ms: u64) -> PyResult<bool> {
+        let spec: serde_json::Value = serde_json::from_str(until_spec_json)
+            .map_err(|e| PyValueError::new_err(format!("bad until spec: {e}")))?;
+        let until = build_until(&spec)?;
+        let bus = self.inner.lock().bus.clone();
+        let log = self.inner.lock().log.clone();
+        let runtime = global_runtime();
+        let notifier = bus.notifier();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+
+        Ok(runtime.block_on(async move {
+            loop {
+                let cur = log.len().await as u64;
+                let ctx = UntilCtx { tick: cur, log: &log, events_seen: cur as usize };
+                if until.check(&ctx) {
+                    return true;
+                }
+                let now = std::time::Instant::now();
+                if now >= deadline {
+                    return false;
+                }
+                let remaining = deadline - now;
+                tokio::select! {
+                    _ = notifier.notified() => continue,
+                    _ = tokio::time::sleep(remaining) => return false,
+                }
+            }
+        }))
+    }
+
+    /// Abort the background scheduler task and wait for it to finish.
+    fn stop_scheduler(&self) -> PyResult<()> {
+        let task = { self.inner.lock().bg_task.take() };
+        if let Some(task) = task {
+            task.abort();
+            let _ = global_runtime().block_on(async move { task.await });
+        }
+        Ok(())
+    }
+
+    /// True when the background scheduler is running.
+    fn is_running(&self) -> bool {
+        let inner = self.inner.lock();
+        match &inner.bg_task {
+            Some(t) => !t.is_finished(),
+            None => false,
+        }
+    }
+
+    /// Send a message from a registered actor while the scheduler is
+    /// running. Used by `User.say` for mid-run intervention.
+    fn send_now(&self, from: &str, target: &str, kind: &str, text: &str) -> PyResult<()> {
+        let bus = self.inner.lock().bus.clone();
+        let msg = match kind {
+            "user" => Message::UserMessage { text: text.into() },
+            "agent" => Message::AgentMessage { text: text.into() },
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown send_now kind: {other}"
+                )))
+            }
+        };
+        global_runtime()
+            .block_on(bus.send(
+                ActorId::from_label(from),
+                Recipient::Actor(ActorId::from_label(target)),
+                msg,
+            ))
+            .map_err(|e| PyRuntimeError::new_err(format!("send: {e}")))
     }
 
     /// Return the trace events as a list of JSON-encoded strings, one

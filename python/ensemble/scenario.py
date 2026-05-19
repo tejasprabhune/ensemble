@@ -157,6 +157,45 @@ class World:
         self._native.run_until(until.to_json())
         return [json.loads(e) for e in self._native.trace_events()]
 
+    def simulate(self) -> "Simulation":
+        """Power-user path: start the scheduler in the background and
+        return an async context manager that exposes `wait_until` for
+        mid-run intervention."""
+        return Simulation(self)
+
+    def trace(self) -> List[Dict[str, Any]]:
+        return [json.loads(e) for e in self._native.trace_events()]
+
+
+class SimulationRun:
+    """The handle yielded by `async with world.simulate() as run`."""
+
+    def __init__(self, world: "World") -> None:
+        self._world = world
+
+    async def wait_until(self, condition: Any, timeout_ms: int = 30_000) -> bool:
+        """Block until `condition` fires. Yields control to the event
+        loop in small slices via asyncio.to_thread so other tasks can
+        proceed (e.g., test instrumentation)."""
+        until = self._world.until(condition)
+        return await asyncio.to_thread(
+            self._world._native.wait_for_until, until.to_json(), timeout_ms
+        )
+
+
+class Simulation:
+    def __init__(self, world: "World") -> None:
+        self._world = world
+        self._run: Optional[SimulationRun] = None
+
+    async def __aenter__(self) -> SimulationRun:
+        self._world._native.start_scheduler()
+        self._run = SimulationRun(self._world)
+        return self._run
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        self._world._native.stop_scheduler()
+
 
 _REGISTRY: Dict[str, Callable[[], Awaitable[RunResult]]] = {}
 
