@@ -120,7 +120,7 @@
       html.push(`<div class="actor-col">`);
       html.push(`<div class="actor-msg" style="border-color:#bbb"><div class="who">${escape(a)}</div></div>`);
       for (const m of msgs.slice(-5)) {
-        html.push(`<div class="actor-msg"><div class="who">${escape(a)} &middot; tick ${m.tick}</div><div class="text">${escape(m.text)}</div></div>`);
+        html.push(`<div class="actor-msg"><div class="who">${escape(a)} | tick ${m.tick}</div><div class="text">${escape(m.text)}</div></div>`);
       }
       html.push(`</div>`);
     }
@@ -132,9 +132,9 @@
     for (const e of slice) {
       const k = e.payload && e.payload.kind;
       if (k === 'tool_call') {
-        html.push(`<div class="tool-line"><div><span class="name">${escape(e.payload.name)}</span> <span class="who">&middot; ${escape(e.actor || '?')} &middot; tick ${e.tick}</span></div><div class="args">${escape(JSON.stringify(e.payload.args))}</div></div>`);
+        html.push(`<div class="tool-line"><div><span class="name">${escape(e.payload.name)}</span> <span class="who">[call] ${escape(e.actor || '?')} | tick ${e.tick}</span></div><div class="args">${escape(JSON.stringify(e.payload.args))}</div></div>`);
       } else if (k === 'tool_result') {
-        html.push(`<div class="tool-line"><div><span class="name">${escape(e.payload.name)}</span> <span class="who">&rarr; result</span></div><div class="res">${escape(JSON.stringify(e.payload.result).slice(0, 240))}</div></div>`);
+        html.push(`<div class="tool-line"><div><span class="name">${escape(e.payload.name)}</span> <span class="who">[result]</span></div><div class="res">${escape(JSON.stringify(e.payload.result).slice(0, 240))}</div></div>`);
       }
     }
     if (html.length === 1) html.push(`<div class="who">no tool activity yet</div>`);
@@ -187,14 +187,14 @@
         html.push(bubble(who, p.text || '', 'agent', e.tick));
       } else if (k === 'tool_call') {
         const args = compactJson(p.args);
-        html.push(`<div class="chat-tool ${kind === 'user' ? 'right' : 'left'}"><span class="chat-tool-arrow">&rarr;</span> <strong>${escape(who)}</strong> called <code>${escape(p.name)}</code>(${escape(args)})</div>`);
+        html.push(`<div class="chat-tool ${kind === 'user' ? 'right' : 'left'}"><span class="chat-tool-tag">[tool]</span> <strong>${escape(who)}</strong> called <code>${escape(p.name)}</code>(${escape(args)})</div>`);
       } else if (k === 'tool_result') {
         const res = compactJson(p.result, 200);
-        html.push(`<div class="chat-tool ${kind === 'user' ? 'right' : 'left'}"><span class="chat-tool-arrow">&larr;</span> <code>${escape(p.name)}</code> returned <span class="chat-tool-res">${escape(res)}</span></div>`);
+        html.push(`<div class="chat-tool ${kind === 'user' ? 'right' : 'left'}"><span class="chat-tool-tag">[result]</span> <code>${escape(p.name)}</code> returned <span class="chat-tool-res">${escape(res)}</span></div>`);
       } else if (k === 'state_diff' && p.diff) {
         const d = p.diff;
-        const summary = `${d.table || d.field || 'state'}.${d.field || ''}: ${stringify(d.old)} → ${stringify(d.new)}`;
-        html.push(`<div class="chat-note">state &middot; ${escape(summary)}</div>`);
+        const summary = `${d.table || d.field || 'state'}.${d.field || ''}: ${stringify(d.old)} -> ${stringify(d.new)}`;
+        html.push(`<div class="chat-note">[state] ${escape(summary)}</div>`);
       } else if (k === 'system') {
         html.push(`<div class="chat-note">${escape(p.note || '')}</div>`);
       }
@@ -210,7 +210,7 @@
     const sideClass = side === 'user' ? 'right' : 'left';
     return `<div class="chat-row ${sideClass}">
       <div class="chat-bubble ${sideClass}">
-        <div class="chat-meta">${escape(who)} &middot; tick ${tick}</div>
+        <div class="chat-meta">${escape(who)} | tick ${tick}</div>
         <div class="chat-text">${escapeMultiline(text)}</div>
       </div>
     </div>`;
@@ -220,7 +220,7 @@
     if (v == null) return '';
     let s;
     try { s = JSON.stringify(v); } catch { s = String(v); }
-    if (s && s.length > max) s = s.slice(0, max) + '…';
+    if (s && s.length > max) s = s.slice(0, max) + '...';
     return s || '';
   }
 

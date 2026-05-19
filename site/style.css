@@ -206,7 +206,7 @@ main {
 }
 
 main.wide {
-  max-width: 1000px;
+  max-width: 1280px;
 }
 
 h1 {
@@ -495,19 +495,23 @@ footer.site a:hover { color: var(--accent); }
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 0;
-  min-height: 24rem;
+  min-height: 36rem;
 }
 
+.viewer.viewer-large .stage { min-height: 44rem; }
+
 .viewer .panel {
-  padding: 16px 18px;
+  padding: 18px 22px;
   border-right: 1px solid var(--rule);
   font-size: 15px;
   line-height: 1.6;
   overflow-y: auto;
-  max-height: 32rem;
+  max-height: 50rem;
   background: white;
   color: var(--dark);
 }
+
+.viewer.viewer-large .panel { max-height: 62rem; }
 
 .viewer .panel:last-child { border-right: none; }
 
@@ -676,8 +680,9 @@ table.diff th {
 }
 
 .chat-feed {
-  padding: 18px 22px;
-  max-height: 36rem;
+  padding: 22px 28px;
+  min-height: 36rem;
+  max-height: 60rem;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -733,7 +738,14 @@ table.diff th {
 .chat-tool.right { text-align: right; }
 .chat-tool.left { text-align: left; }
 .chat-tool code { font-style: normal; font-size: 13px; }
-.chat-tool .chat-tool-arrow { color: var(--accent); font-style: normal; }
+.chat-tool .chat-tool-tag {
+  color: var(--accent);
+  font-style: normal;
+  font-family: "calling-code", "SF Mono", monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
 .chat-tool .chat-tool-res { color: var(--dark); }
 
 .chat-note {
