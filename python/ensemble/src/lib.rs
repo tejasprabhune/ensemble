@@ -17,7 +17,18 @@ use ensemble_runtime::{
 };
 
 mod world_registry;
-use world_registry::WorldRegistry;
+use world_registry::{WorldBundle, WorldRegistry};
+
+fn noop_world_builder() -> WorldBundle {
+    WorldBundle { tools: ToolRegistry::new() }
+}
+
+fn plank_world_builder() -> WorldBundle {
+    let (_state, tools) = plank::build();
+    // The state Arc lives on inside each tool closure; tools holds it
+    // alive for as long as the world instance does.
+    WorldBundle { tools }
+}
 
 /// Inner world state shared between `World`, `User`, and `Agent`.
 /// Actor specs and seed messages accumulate here and are consumed at
@@ -65,11 +76,11 @@ impl World {
     #[pyo3(signature = (name=None))]
     fn new(name: Option<&str>) -> PyResult<Self> {
         let name = name.unwrap_or("noop").to_string();
-        if !WorldRegistry::contains(&name) {
-            return Err(PyValueError::new_err(format!(
+        let bundle = WorldRegistry::build(&name).ok_or_else(|| {
+            PyValueError::new_err(format!(
                 "no world named {name:?}; register one before constructing it"
-            )));
-        }
+            ))
+        })?;
         let script = MockScript::new();
         let backend = Arc::new(MockBackend::new(script.clone()));
         let log = EventLog::new();
@@ -81,7 +92,7 @@ impl World {
                 log,
                 backend,
                 script,
-                tools: Arc::new(ToolRegistry::new()),
+                tools: Arc::new(bundle.tools),
                 actors: vec![],
                 seed_messages: vec![],
                 budget: TickBudget::default(),
@@ -534,7 +545,10 @@ fn build_until(spec: &serde_json::Value) -> PyResult<Until> {
 #[pymodule]
 fn _native(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Always-available no-op world for tests and the scaffold flow.
-    WorldRegistry::register("noop");
+    WorldRegistry::register("noop", noop_world_builder);
+    // Plank is built-in for the MVP. Future worlds register via their
+    // own pyo3 modules or by importing into this one.
+    WorldRegistry::register("plank", plank_world_builder);
 
     m.add_class::<World>()?;
     m.add_class::<User>()?;

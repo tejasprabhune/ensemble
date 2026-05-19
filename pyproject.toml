@@ -34,7 +34,7 @@ cache-keys = [
 ]
 
 [tool.uv.workspace]
-members = ["train"]
+members = ["train", "examples/plank"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

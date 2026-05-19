@@ -4,6 +4,7 @@ members = [
     "crates/ensemble-core",
     "crates/ensemble-runtime",
     "python/ensemble",
+    "examples/plank/world",
 ]
 
 [workspace.package]

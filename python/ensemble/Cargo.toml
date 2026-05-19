@@ -19,6 +19,7 @@ extension-module = ["pyo3/extension-module"]
 [dependencies]
 ensemble-core = { path = "../../crates/ensemble-core" }
 ensemble-runtime = { path = "../../crates/ensemble-runtime" }
+plank = { path = "../../examples/plank/world" }
 pyo3 = { workspace = true }
 pyo3-asyncio-0-21 = { workspace = true }
 tokio = { workspace = true }
