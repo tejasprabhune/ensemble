@@ -7,91 +7,108 @@
   <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="wide">
-  <header>
+<body>
+  <aside class="sidebar">
     <a class="wordmark" href="index.html">ensemble</a>
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
     <nav>
-      <a href="index.html" class="active">Overview</a>
-      <a href="docs.html">Docs</a>
-      <a href="scenarios.html">Scenarios</a>
-      <a href="plank.html">Plank</a>
-      <a href="personas.html">Personas</a>
+      <div class="nav-group">
+        <div class="nav-group-title">Site</div>
+        <a href="index.html" class="active">Overview</a>
+        <a href="docs.html">Docs</a>
+        <a href="scenarios.html">Scenarios</a>
+        <a href="plank.html">Plank</a>
+        <a href="personas.html">Personas</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Docs sections</div>
+        <a href="docs.html#what-it-is">What Ensemble is</a>
+        <a href="docs.html#mental-model">Mental model</a>
+        <a href="docs.html#install">Install</a>
+        <a href="docs.html#first-scenario">Your first scenario</a>
+        <a href="docs.html#first-world">Your first world</a>
+        <a href="docs.html#tools">Tools</a>
+        <a href="docs.html#users-personas">Users and personas</a>
+        <a href="docs.html#verification">Verification and reward</a>
+        <a href="docs.html#rl">As an RL environment</a>
+        <a href="docs.html#power-user">Mid-run intervention</a>
+        <a href="docs.html#toml">TOML scenarios</a>
+        <a href="docs.html#cli">CLI</a>
+        <a href="docs.html#architecture">Architecture</a>
+        <a href="docs.html#trace-format">Trace format</a>
+        <a href="docs.html#contributing">Contributing</a>
+      </div>
     </nav>
-  </header>
+  </aside>
 
-  <section>
-    <h2>What it is</h2>
+  <main class="wide">
+    <h1>ensemble</h1>
     <p class="lead">
-      Ensemble is a framework for building RL environments where several
-      simulated users and several agents share one typed world. You describe
-      the world in Rust, you write the scenarios in Python, and the framework
-      handles message routing, tool dispatch, the trace log, and the grader
-      that turns each rollout into a reward.
-    </p>
-    <p>
-      Most agent benchmarks model one agent talking to one human in a
-      stateless sandbox. That is not how production support, sales, customer
-      success, or operations actually work. Ensemble lets you build the
-      multi-actor version, run rollouts at scale, and turn the rollouts into
-      training signal.
-    </p>
-  </section>
-
-  <section>
-    <h2>Install</h2>
-<pre><code class="language-bash">uv sync                       # build the python extension, install the workspace
-cargo build -p ensemble-cli   # produces ./target/debug/ensemble</code></pre>
-    <p>
-      The <a href="docs.html">docs page</a> has the full quickstart, with a
-      walkthrough of how to write a world, a scenario, and a grader, and how
-      to use the framework as an RL environment.
-    </p>
-  </section>
-
-  <section>
-    <h2>Refund storm, replayed</h2>
-    <p>
-      The trace below is a deterministic mock run of
-      <code>plank.refund_storm</code>. Three users, two agents, one shared
-      SQLite world. Scrub the timeline to step through events. The right
-      panel shows tool effects on world state.
+      A framework for building RL environments where several simulated users
+      and several agents share one typed world. You describe the world in
+      Rust, you write the scenarios in Python, and the framework handles
+      message routing, tool dispatch, the trace log, and the grader that
+      turns each rollout into a reward.
     </p>
 
-    <div class="viewer" id="viewer">
-      <div class="controls">
-        <button id="playBtn">play</button>
-        <button id="prevBtn">prev</button>
-        <button id="nextBtn">next</button>
-        <input type="range" id="slider" min="0" max="0" value="0">
-        <span id="tickLabel">0 / 0</span>
+    <section>
+      <h2>Why it exists</h2>
+      <p>
+        Most agent benchmarks model one agent talking to one user in a
+        stateless sandbox. Production support, sales, customer success, and
+        operations all look very different. There are multiple users
+        contending for attention, multiple agents seeing each other's tool
+        calls, shared state that changes underfoot, and policies that only
+        become visible across many turns. Ensemble lets you build that, run
+        rollouts at scale, and turn the rollouts into training signal.
+      </p>
+    </section>
+
+    <section>
+      <h2>Install</h2>
+<pre><code class="language-bash">uv sync
+cargo build -p ensemble-cli</code></pre>
+      <p>
+        The <a href="docs.html">docs page</a> has the full quickstart, with a
+        walkthrough of how to write a world, a scenario, and a grader, and how
+        to use the framework as an RL environment.
+      </p>
+    </section>
+
+    <section>
+      <h2>Refund storm, replayed</h2>
+      <p>
+        The trace below is a deterministic mock run of
+        <code>plank.refund_storm</code>. Three users, two agents, one shared
+        SQLite world. Scrub the timeline to step through events. The right
+        panel shows tool effects on world state.
+      </p>
+
+      <div class="viewer" id="viewer">
+        <div class="controls">
+          <button id="playBtn">play</button>
+          <button id="prevBtn">prev</button>
+          <button id="nextBtn">next</button>
+          <input type="range" id="slider" min="0" max="0" value="0">
+          <span id="tickLabel">0 / 0</span>
+        </div>
+        <div class="stage">
+          <div class="panel" id="messagesPanel"><h4>actors</h4></div>
+          <div class="panel" id="toolsPanel"><h4>tool calls</h4></div>
+          <div class="panel" id="diffPanel"><h4>state changes</h4></div>
+        </div>
       </div>
-      <div class="stage">
-        <div class="panel" id="messagesPanel"><h4>actors</h4></div>
-        <div class="panel" id="toolsPanel"><h4>tool calls</h4></div>
-        <div class="panel" id="diffPanel"><h4>state changes</h4></div>
-      </div>
-    </div>
 
-    <p class="muted">
-      In a real run the agents are language models. This baked transcript
-      uses the mock backend so the trace is identical across machines.
-    </p>
-  </section>
+      <p class="muted">
+        In a real run the agents are language models. This baked transcript
+        uses the mock backend so the trace is identical across machines.
+      </p>
+    </section>
 
-  <section>
-    <h2>What is in the repo</h2>
-    <ul>
-      <li><a href="docs.html">Docs</a>, the quickstart and the architecture walkthrough.</li>
-      <li><a href="scenarios.html">Scenarios</a>, the <code>@scenario</code> decorator and the <code>async with world.simulate()</code> power-user path.</li>
-      <li><a href="plank.html">Plank</a>, the worked example world.</li>
-      <li><a href="personas.html">Personas</a>, persona TOML spec and the DPO+LoRA training pipeline.</li>
-    </ul>
-  </section>
-
-  <footer class="site">
-    Source on <a href="https://github.com/tejasprabhune">tejasprabhune</a>. Built in Rust and Python.
-  </footer>
+    <footer class="site">
+      Source on <a href="https://github.com/tejasprabhune">tejasprabhune</a>. Built in Rust and Python.
+    </footer>
+  </main>
 
   <script src="viewer.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>

@@ -13,7 +13,8 @@ use ensemble_core::ids::ActorId;
 use ensemble_core::scheduler::{Scheduler, TickBudget};
 use ensemble_core::until::{turn_count_exceeds, Until, UntilCtx};
 use ensemble_runtime::{
-    AgentActor, MockBackend, MockScript, MockTurn, ToolRegistry, UserActor,
+    AgentActor, AnthropicBackend, LocalAdapterBackend, MockBackend, MockScript, MockTurn,
+    OpenAIBackend, SharedBackend, ToolRegistry, UserActor,
 };
 
 mod world_registry;
@@ -37,8 +38,8 @@ pub(crate) struct WorldInner {
     pub(crate) name: String,
     pub(crate) bus: Bus,
     pub(crate) log: EventLog,
-    #[allow(dead_code)]
-    pub(crate) backend: Arc<MockBackend>,
+    pub(crate) backend: SharedBackend,
+    pub(crate) backend_kind: BackendKind,
     pub(crate) script: MockScript,
     #[allow(dead_code)]
     pub(crate) tools: Arc<ToolRegistry>,
@@ -47,6 +48,14 @@ pub(crate) struct WorldInner {
     pub(crate) budget: TickBudget,
     pub(crate) bg_task: Option<tokio::task::JoinHandle<Result<(), ensemble_core::error::CoreError>>>,
     pub(crate) registered_inboxes: Vec<ActorId>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub(crate) enum BackendKind {
+    Mock,
+    Anthropic,
+    OpenAI,
+    Vllm,
 }
 
 #[derive(Clone)]
@@ -72,9 +81,20 @@ pub struct World {
 
 #[pymethods]
 impl World {
+    /// `backend` selects the LLM client used by every actor in this
+    /// world. Choices: `"mock"` (default; deterministic, no network),
+    /// `"anthropic"` (Messages API, needs ANTHROPIC_API_KEY),
+    /// `"openai"` (Chat Completions, needs OPENAI_API_KEY),
+    /// `"vllm"` (OpenAI-shaped HTTP endpoint, set `base_url`), or
+    /// `"auto"` (pick the first backend whose API key is in the env,
+    /// fall back to mock).
     #[new]
-    #[pyo3(signature = (name=None))]
-    fn new(name: Option<&str>) -> PyResult<Self> {
+    #[pyo3(signature = (name=None, backend=None, base_url=None))]
+    fn new(
+        name: Option<&str>,
+        backend: Option<&str>,
+        base_url: Option<&str>,
+    ) -> PyResult<Self> {
         let name = name.unwrap_or("noop").to_string();
         let bundle = WorldRegistry::build(&name).ok_or_else(|| {
             PyValueError::new_err(format!(
@@ -82,7 +102,7 @@ impl World {
             ))
         })?;
         let script = MockScript::new();
-        let backend = Arc::new(MockBackend::new(script.clone()));
+        let (backend, kind) = build_backend(backend, base_url, &script)?;
         let log = EventLog::new();
         let bus = Bus::new(log.clone());
         Ok(Self {
@@ -91,6 +111,7 @@ impl World {
                 bus,
                 log,
                 backend,
+                backend_kind: kind,
                 script,
                 tools: Arc::new(bundle.tools),
                 actors: vec![],
@@ -100,6 +121,18 @@ impl World {
                 registered_inboxes: vec![],
             })),
         })
+    }
+
+    /// Name of the active backend (`"mock"`, `"anthropic"`,
+    /// `"openai"`, `"vllm"`).
+    #[getter]
+    fn backend(&self) -> &'static str {
+        match self.inner.lock().backend_kind {
+            BackendKind::Mock => "mock",
+            BackendKind::Anthropic => "anthropic",
+            BackendKind::OpenAI => "openai",
+            BackendKind::Vllm => "vllm",
+        }
     }
 
     #[getter]
@@ -188,7 +221,7 @@ impl World {
         let until = build_until(&spec)?;
         let (bus, actor_handles, seed_messages, budget) = {
             let mut inner = self.inner.lock();
-            let backend = inner.backend.clone() as Arc<dyn ensemble_runtime::LLMBackend>;
+            let backend = inner.backend.clone();
             let tools = inner.tools.clone();
             let bus = inner.bus.clone();
             let budget = inner.budget;
@@ -266,7 +299,7 @@ impl World {
             if inner.bg_task.is_some() {
                 return Err(PyRuntimeError::new_err("scheduler already started"));
             }
-            let backend = inner.backend.clone() as Arc<dyn ensemble_runtime::LLMBackend>;
+            let backend = inner.backend.clone();
             let tools = inner.tools.clone();
             let bus = inner.bus.clone();
             let mut handles: Vec<(ActorId, Arc<dyn ensemble_core::actor::Actor>)> = Vec::new();
@@ -477,6 +510,57 @@ impl Agent {
     fn __repr__(&self) -> String {
         format!("<Agent id={:?}>", self.id)
     }
+}
+
+fn build_backend(
+    name: Option<&str>,
+    base_url: Option<&str>,
+    script: &MockScript,
+) -> PyResult<(SharedBackend, BackendKind)> {
+    let chosen = match name.unwrap_or("mock") {
+        "mock" => "mock",
+        "anthropic" => "anthropic",
+        "openai" => "openai",
+        "vllm" => "vllm",
+        "auto" => {
+            if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+                "anthropic"
+            } else if std::env::var("OPENAI_API_KEY").is_ok() {
+                "openai"
+            } else {
+                "mock"
+            }
+        }
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown backend {other:?}; choose mock | anthropic | openai | vllm | auto"
+            )))
+        }
+    };
+    Ok(match chosen {
+        "mock" => (
+            Arc::new(MockBackend::new(script.clone())) as SharedBackend,
+            BackendKind::Mock,
+        ),
+        "anthropic" => {
+            let be = AnthropicBackend::from_env()
+                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+            (Arc::new(be) as SharedBackend, BackendKind::Anthropic)
+        }
+        "openai" => {
+            let be = OpenAIBackend::from_env()
+                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+            (Arc::new(be) as SharedBackend, BackendKind::OpenAI)
+        }
+        "vllm" => {
+            let base = base_url.ok_or_else(|| {
+                PyValueError::new_err("vllm backend requires base_url=...")
+            })?;
+            let be = LocalAdapterBackend::new(base);
+            (Arc::new(be) as SharedBackend, BackendKind::Vllm)
+        }
+        _ => unreachable!(),
+    })
 }
 
 fn global_runtime() -> &'static tokio::runtime::Runtime {

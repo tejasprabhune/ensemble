@@ -96,14 +96,23 @@ class World:
     accessible after the run completes.
     """
 
-    def __init__(self, name: str) -> None:
-        self._native = _NativeWorld(name)
+    def __init__(
+        self,
+        name: str,
+        backend: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> None:
+        self._native = _NativeWorld(name, backend=backend, base_url=base_url)
         self.users: List[User] = []
         self.agents: List[Agent] = []
 
     @property
     def name(self) -> str:
         return self._native.name
+
+    @property
+    def backend(self) -> str:
+        return self._native.backend
 
     @property
     def turn_count(self) -> TurnCount:
@@ -214,8 +223,12 @@ def scenario(name: str) -> Callable:
                 "scenario must be `async def` (with yield) or `async def` (regular)"
             )
 
-        async def wrapper(world_name: str = "noop") -> RunResult:
-            world = World(world_name)
+        async def wrapper(
+            world_name: str = "noop",
+            backend: Optional[str] = None,
+            base_url: Optional[str] = None,
+        ) -> RunResult:
+            world = World(world_name, backend=backend, base_url=base_url)
             if is_gen:
                 gen = func(world)
                 try:
@@ -256,8 +269,15 @@ def all_scenarios() -> Dict[str, Callable[..., Awaitable[RunResult]]]:
     return dict(_REGISTRY)
 
 
-def run_scenario(name: str, world_name: str = "noop") -> RunResult:
+def run_scenario(
+    name: str,
+    world_name: str = "noop",
+    backend: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> RunResult:
     """Synchronous helper: look up a scenario by name and run it."""
     if name not in _REGISTRY:
         raise KeyError(f"no scenario registered as {name!r}")
-    return asyncio.run(_REGISTRY[name](world_name))
+    return asyncio.run(
+        _REGISTRY[name](world_name, backend=backend, base_url=base_url)
+    )
