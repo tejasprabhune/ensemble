@@ -11,6 +11,7 @@ from .scenario import (
     run_scenario,
     scenario,
 )
+from .scenario_toml import load_manifest, safe_eval
 
 __all__ = [
     "Agent",
@@ -20,6 +21,8 @@ __all__ = [
     "World",
     "__version__",
     "all_scenarios",
+    "load_manifest",
     "run_scenario",
+    "safe_eval",
     "scenario",
 ]

@@ -1,0 +1,56 @@
+# Declarative equivalents of the Python scenarios in scenarios/.
+# Useful for scenarios that don't need mid-run intervention.
+
+[scenario.single_ticket]
+world = "plank"
+duration_turns = 12
+seed = 1
+
+[[scenario.single_ticket.users]]
+id = "user-1"
+persona = "patient_retail"
+model = "user-model"
+initial_action = { tool = "open_ticket", args = { ticket_id = "t-001", user_id = "u-alice", subject = "cannot reset password" } }
+
+[[scenario.single_ticket.agents]]
+id = "rep"
+model = "claude-sonnet-4-5"
+tools = ["lookup_user", "lookup_ticket", "search_kb"]
+
+[scenario.single_ticket.graders]
+ok = "any_event"
+no_double_refunds = "not had_double_refund"
+
+
+[scenario.refund_storm]
+world = "plank"
+duration_turns = 30
+seed = 42
+
+[[scenario.refund_storm.users]]
+id = "alice"
+persona = "frustrated_power_user"
+hidden_goal = "refund_3mo"
+model = "user-model"
+initial_action = { tool = "open_ticket", args = { ticket_id = "t-100", user_id = "u-alice", subject = "want my money back" } }
+
+[[scenario.refund_storm.users]]
+id = "bob"
+persona = "confused_new_user"
+model = "user-model"
+initial_action = { tool = "open_ticket", args = { ticket_id = "t-101", user_id = "u-bob", subject = "how do refunds work" } }
+
+[[scenario.refund_storm.agents]]
+id = "rep1"
+model = "claude-sonnet-4-5"
+tools = ["lookup_user", "lookup_ticket", "issue_refund", "escalate", "search_kb"]
+
+[[scenario.refund_storm.agents]]
+id = "rep2"
+model = "claude-sonnet-4-5"
+tools = ["lookup_user", "lookup_ticket", "issue_refund", "escalate", "search_kb"]
+
+[scenario.refund_storm.graders]
+alice_refund_resolved = "true"
+bob_no_unsolicited_upgrade = "not policy_violation"
+global_no_double_refunds = "not had_double_refund"
