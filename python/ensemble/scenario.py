@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import os
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from ._native import World as _NativeWorld
+from .env import load_dotenv
 
 
 @dataclass
@@ -101,10 +104,44 @@ class World:
         name: str,
         backend: Optional[str] = None,
         base_url: Optional[str] = None,
+        dotenv: bool | str = True,
+        verbose: Optional[bool] = None,
     ) -> None:
+        if dotenv:
+            load_dotenv(dotenv if isinstance(dotenv, str) else ".env")
         self._native = _NativeWorld(name, backend=backend, base_url=base_url)
         self.users: List[User] = []
         self.agents: List[Agent] = []
+        self._announce_backend(requested=backend, verbose=verbose)
+
+    def _announce_backend(
+        self, requested: Optional[str], verbose: Optional[bool]
+    ) -> None:
+        chosen = self._native.backend
+        if verbose is None:
+            verbose = os.environ.get("ENSEMBLE_QUIET", "").strip() not in {"1", "true", "yes"}
+        note: str
+        if requested is None and chosen == "mock":
+            note = (
+                "ensemble: backend=mock (default). "
+                "Pass backend='auto' to pick anthropic/openai from the env, "
+                "or backend='anthropic' / 'openai' / 'vllm' explicitly."
+            )
+        elif requested == "auto" and chosen == "mock":
+            note = (
+                "ensemble: backend=mock (no ANTHROPIC_API_KEY or OPENAI_API_KEY "
+                "found in env or .env; falling back to deterministic mock)"
+            )
+        elif requested == "auto":
+            note = f"ensemble: backend={chosen} (auto-detected from environment)"
+        else:
+            note = f"ensemble: backend={chosen}"
+        if verbose:
+            print(note, file=sys.stderr)
+        try:
+            self._native.log_note(note)
+        except AttributeError:
+            pass
 
     @property
     def name(self) -> str:

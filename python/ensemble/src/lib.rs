@@ -281,6 +281,18 @@ impl World {
         Ok(runtime.block_on(log.len()) as u64)
     }
 
+    /// Append a `system` event to the log. Used by the python wrapper
+    /// to record the chosen backend so it shows up in saved traces and
+    /// in the viewer.
+    fn log_note(&self, note: &str) -> PyResult<()> {
+        let bus = self.inner.lock().bus.clone();
+        global_runtime().block_on(bus.append_event(
+            None,
+            ensemble_core::event::EventPayload::System { note: note.into() },
+        ));
+        Ok(())
+    }
+
     /// Serialize the trace log to JSONL.
     fn trace_jsonl(&self) -> PyResult<String> {
         let log = self.inner.lock().log.clone();
