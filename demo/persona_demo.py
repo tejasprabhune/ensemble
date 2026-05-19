@@ -57,6 +57,8 @@ async def persona_demo(world: World):
 
 
 if __name__ == "__main__":
+    import json
+
     result: RunResult = run_scenario(
         "persona_demo", world_name="noop", backend="openai"
     )
@@ -73,3 +75,12 @@ if __name__ == "__main__":
             or ""
         )
         print(f"  [{event['tick']:>3}] {actor:6} {kind:14} {str(body)[:120]}")
+
+    out = Path("traces/persona_demo.jsonl")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w") as f:
+        for event in result.trace:
+            f.write(json.dumps(event) + "\n")
+    print(f"\nwrote trace to {out.resolve()}")
+    print("view it with:")
+    print(f"  ensemble trace view {out} --site ../site --port 8765")
