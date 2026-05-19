@@ -28,12 +28,14 @@ class World:
         persona: Optional[str] = None,
         hidden_goal: Optional[str] = None,
         model: str = "user-model",
+        system_prompt: Optional[str] = None,
     ) -> User: ...
     def spawn_agent(
         self,
         id: Optional[str] = None,
         model: str = "claude-sonnet-4-5",
         tools: Optional[Sequence[str]] = None,
+        system_prompt: Optional[str] = None,
     ) -> Agent: ...
     def _mock_say(self, model: str, text: str) -> None: ...
     def _mock_tool(self, model: str, tool: str, args_json: str) -> None: ...

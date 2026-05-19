@@ -66,6 +66,7 @@ pub(crate) struct ActorSpec {
     pub(crate) hidden_goal: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) tools: Vec<String>,
+    pub(crate) system_prompt: Option<String>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -153,13 +154,14 @@ impl World {
         self.inner.lock().actors.len()
     }
 
-    #[pyo3(signature = (id=None, persona=None, hidden_goal=None, model="user-model"))]
+    #[pyo3(signature = (id=None, persona=None, hidden_goal=None, model="user-model", system_prompt=None))]
     fn spawn_user(
         &self,
         id: Option<&str>,
         persona: Option<&str>,
         hidden_goal: Option<&str>,
         model: &str,
+        system_prompt: Option<&str>,
     ) -> User {
         let actor_id = ActorId::from_label(id.unwrap_or_else(|| persona.unwrap_or("user")));
         let spec = ActorSpec {
@@ -169,6 +171,7 @@ impl World {
             hidden_goal: hidden_goal.map(str::to_string),
             model: Some(model.into()),
             tools: vec![],
+            system_prompt: system_prompt.map(str::to_string),
         };
         self.inner.lock().actors.push(spec);
         User {
@@ -177,12 +180,13 @@ impl World {
         }
     }
 
-    #[pyo3(signature = (id=None, model="claude-sonnet-4-5", tools=None))]
+    #[pyo3(signature = (id=None, model="claude-sonnet-4-5", tools=None, system_prompt=None))]
     fn spawn_agent(
         &self,
         id: Option<&str>,
         model: &str,
         tools: Option<&Bound<'_, PyList>>,
+        system_prompt: Option<&str>,
     ) -> PyResult<Agent> {
         let actor_id = ActorId::from_label(id.unwrap_or("agent"));
         let tool_names: Vec<String> = match tools {
@@ -199,6 +203,7 @@ impl World {
             hidden_goal: None,
             model: Some(model.into()),
             tools: tool_names,
+            system_prompt: system_prompt.map(str::to_string),
         };
         self.inner.lock().actors.push(spec);
         Ok(Agent {
@@ -255,17 +260,29 @@ impl World {
             let mut handles: Vec<(ActorId, Arc<dyn ensemble_core::actor::Actor>)> = Vec::new();
             for spec in inner.actors.drain(..) {
                 let actor: Arc<dyn ensemble_core::actor::Actor> = match spec.kind {
-                    SpecKind::User => Arc::new(UserActor::new(
-                        spec.id.clone(),
-                        spec.model.clone().unwrap_or_else(|| "user-model".into()),
-                        backend.clone(),
-                    )),
-                    SpecKind::Agent => Arc::new(AgentActor::new(
-                        spec.id.clone(),
-                        spec.model.clone().unwrap_or_else(|| "agent-model".into()),
-                        backend.clone(),
-                        tools.clone(),
-                    )),
+                    SpecKind::User => {
+                        let mut a = UserActor::new(
+                            spec.id.clone(),
+                            spec.model.clone().unwrap_or_else(|| "user-model".into()),
+                            backend.clone(),
+                        );
+                        if let Some(sp) = spec.system_prompt.clone() {
+                            a = a.with_system_prompt(sp);
+                        }
+                        Arc::new(a)
+                    }
+                    SpecKind::Agent => {
+                        let mut a = AgentActor::new(
+                            spec.id.clone(),
+                            spec.model.clone().unwrap_or_else(|| "agent-model".into()),
+                            backend.clone(),
+                            tools.clone(),
+                        );
+                        if let Some(sp) = spec.system_prompt.clone() {
+                            a = a.with_system_prompt(sp);
+                        }
+                        Arc::new(a)
+                    }
                 };
                 handles.push((spec.id, actor));
             }
@@ -344,17 +361,29 @@ impl World {
             let mut handles: Vec<(ActorId, Arc<dyn ensemble_core::actor::Actor>)> = Vec::new();
             for spec in inner.actors.drain(..) {
                 let actor: Arc<dyn ensemble_core::actor::Actor> = match spec.kind {
-                    SpecKind::User => Arc::new(UserActor::new(
-                        spec.id.clone(),
-                        spec.model.clone().unwrap_or_else(|| "user-model".into()),
-                        backend.clone(),
-                    )),
-                    SpecKind::Agent => Arc::new(AgentActor::new(
-                        spec.id.clone(),
-                        spec.model.clone().unwrap_or_else(|| "agent-model".into()),
-                        backend.clone(),
-                        tools.clone(),
-                    )),
+                    SpecKind::User => {
+                        let mut a = UserActor::new(
+                            spec.id.clone(),
+                            spec.model.clone().unwrap_or_else(|| "user-model".into()),
+                            backend.clone(),
+                        );
+                        if let Some(sp) = spec.system_prompt.clone() {
+                            a = a.with_system_prompt(sp);
+                        }
+                        Arc::new(a)
+                    }
+                    SpecKind::Agent => {
+                        let mut a = AgentActor::new(
+                            spec.id.clone(),
+                            spec.model.clone().unwrap_or_else(|| "agent-model".into()),
+                            backend.clone(),
+                            tools.clone(),
+                        );
+                        if let Some(sp) = spec.system_prompt.clone() {
+                            a = a.with_system_prompt(sp);
+                        }
+                        Arc::new(a)
+                    }
                 };
                 handles.push((spec.id, actor));
             }

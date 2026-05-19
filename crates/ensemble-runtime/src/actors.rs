@@ -19,6 +19,7 @@ pub struct UserActor {
     pub id: ActorId,
     pub model: String,
     pub backend: SharedBackend,
+    pub system_prompt: Option<String>,
     history: Mutex<Vec<ChatMessage>>,
 }
 
@@ -28,8 +29,14 @@ impl UserActor {
             id,
             model: model.into(),
             backend,
+            system_prompt: None,
             history: Mutex::new(Vec::new()),
         }
+    }
+
+    pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.system_prompt = Some(prompt.into());
+        self
     }
 }
 
@@ -54,6 +61,7 @@ impl Actor for UserActor {
         let messages = self.history.lock().clone();
         let req = CompletionRequest {
             model: self.model.clone(),
+            system: self.system_prompt.clone(),
             messages,
             ..Default::default()
         };
@@ -91,6 +99,7 @@ pub struct AgentActor {
     pub model: String,
     pub backend: SharedBackend,
     pub tools: Arc<ToolRegistry>,
+    pub system_prompt: Option<String>,
     history: Mutex<Vec<ChatMessage>>,
 }
 
@@ -106,8 +115,14 @@ impl AgentActor {
             model: model.into(),
             backend,
             tools,
+            system_prompt: None,
             history: Mutex::new(Vec::new()),
         }
+    }
+
+    pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.system_prompt = Some(prompt.into());
+        self
     }
 }
 
@@ -138,6 +153,7 @@ impl Actor for AgentActor {
             let messages = self.history.lock().clone();
             let req = CompletionRequest {
                 model: self.model.clone(),
+                system: self.system_prompt.clone(),
                 messages,
                 tools: self.tools.schemas(),
                 ..Default::default()

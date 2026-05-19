@@ -180,9 +180,14 @@ class World:
         persona: Optional[str] = None,
         hidden_goal: Optional[str] = None,
         model: str = "user-model",
+        system_prompt: Optional[str] = None,
     ) -> User:
         native = self._native.spawn_user(
-            id=id, persona=persona, hidden_goal=hidden_goal, model=model
+            id=id,
+            persona=persona,
+            hidden_goal=hidden_goal,
+            model=model,
+            system_prompt=system_prompt,
         )
         u = User(native, self)
         self.users.append(u)
@@ -193,8 +198,11 @@ class World:
         id: Optional[str] = None,
         model: str = "claude-sonnet-4-5",
         tools: Optional[List[str]] = None,
+        system_prompt: Optional[str] = None,
     ) -> Agent:
-        native = self._native.spawn_agent(id=id, model=model, tools=tools)
+        native = self._native.spawn_agent(
+            id=id, model=model, tools=tools, system_prompt=system_prompt
+        )
         a = Agent(native, self)
         self.agents.append(a)
         return a
