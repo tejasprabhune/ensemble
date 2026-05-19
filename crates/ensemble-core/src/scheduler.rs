@@ -11,8 +11,8 @@ use crate::ids::ActorId;
 use crate::until::{Until, UntilCtx};
 
 /// Limits scheduler work to prevent runaway loops. Counts both ticks
-/// and events processed; whichever cap fires first halts the run with
-/// `TickBudgetExhausted`.
+/// (one per bus event) and total events processed; whichever cap fires
+/// first halts the run with `TickBudgetExhausted`.
 #[derive(Clone, Copy, Debug)]
 pub struct TickBudget {
     pub max_ticks: u64,
@@ -59,9 +59,8 @@ impl Scheduler {
 
     /// Runs the scheduler until the `until` predicate fires or the
     /// tick budget is exhausted. Each actor runs in its own tokio
-    /// task draining its inbox; the scheduler watches the event log
-    /// and advances the tick counter each time any actor produces a
-    /// message.
+    /// task draining its inbox; a watcher task wakes on each new bus
+    /// event and re-checks the `until` predicate.
     pub async fn run(self) -> Result<(), CoreError> {
         let Scheduler {
             bus,
@@ -75,48 +74,50 @@ impl Scheduler {
 
         for handle in actors.values() {
             let actor = handle.actor.clone();
-            let bus = bus.clone();
+            let bus_clone = bus.clone();
             let inbox = handle.take_inbox().await.expect("inbox taken twice");
-            tasks.spawn(actor_loop(actor, bus, inbox));
+            tasks.spawn(actor_loop(actor, bus_clone, inbox));
         }
 
+        let notifier = bus.notifier();
         let watcher_bus = bus.clone();
         let watcher_log = log.clone();
         let watcher_until = until.clone();
         let watcher = tokio::spawn(async move {
-            let mut last_seen = 0usize;
             loop {
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-                let cur = watcher_log.len().await;
-                if cur > last_seen {
-                    last_seen = cur;
-                    let tick = watcher_bus.advance_tick().await;
-                    let ctx = UntilCtx {
-                        tick,
-                        log: &watcher_log,
-                        events_seen: cur,
-                    };
-                    let stop = {
-                        let guard = watcher_until.lock().await;
-                        guard.as_ref().map(|u| u.check(&ctx)).unwrap_or(false)
-                    };
-                    if stop {
-                        return Ok::<_, CoreError>(StopReason::UntilFired);
-                    }
-                    if tick >= budget.max_ticks || cur >= budget.max_events {
-                        return Err(CoreError::TickBudgetExhausted);
-                    }
+                // Check once before blocking so any messages already in
+                // the log are considered before we wait for new ones.
+                let cur = watcher_log.len().await as u64;
+                watcher_bus.set_tick(cur).await;
+                if cur >= budget.max_ticks || cur as usize >= budget.max_events {
+                    return Err(CoreError::TickBudgetExhausted);
                 }
+                let ctx = UntilCtx {
+                    tick: cur,
+                    log: &watcher_log,
+                    events_seen: cur as usize,
+                };
+                let stop = {
+                    let guard = watcher_until.lock().await;
+                    guard.as_ref().map(|u| u.check(&ctx)).unwrap_or(false)
+                };
+                if stop {
+                    return Ok::<_, CoreError>(StopReason::UntilFired);
+                }
+                notifier.notified().await;
             }
         });
 
-        let outcome = watcher.await.map_err(|e| CoreError::SchedulerExit(e.to_string()))??;
+        let outcome = watcher
+            .await
+            .map_err(|e| CoreError::SchedulerExit(e.to_string()))??;
 
         tasks.shutdown().await;
 
         if matches!(outcome, StopReason::UntilFired) {
+            let tick = bus.current_tick().await;
             log.append(Event {
-                tick: bus.current_tick().await,
+                tick,
                 ts_ms: now_ms(),
                 actor: None,
                 message_id: None,

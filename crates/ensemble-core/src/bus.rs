@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Notify};
 
 use crate::error::CoreError;
 use crate::event::{now_ms, Event, EventLog, EventPayload, Tick};
@@ -39,6 +39,7 @@ pub enum Recipient {
 pub struct Bus {
     inner: Arc<Mutex<BusInner>>,
     log: EventLog,
+    notify: Arc<Notify>,
 }
 
 struct BusInner {
@@ -54,11 +55,18 @@ impl Bus {
                 tick: 0,
             })),
             log,
+            notify: Arc::new(Notify::new()),
         }
     }
 
     pub fn log(&self) -> &EventLog {
         &self.log
+    }
+
+    /// Wake any task waiting via `wait_for_activity()`. Called internally
+    /// each time the bus appends to the log.
+    pub fn notifier(&self) -> Arc<Notify> {
+        self.notify.clone()
     }
 
     pub async fn register(&self, actor: ActorId) -> mpsc::Receiver<Envelope> {
@@ -72,10 +80,10 @@ impl Bus {
         self.inner.lock().await.tick
     }
 
-    pub async fn advance_tick(&self) -> Tick {
-        let mut inner = self.inner.lock().await;
-        inner.tick += 1;
-        inner.tick
+    /// Set the tick counter directly. Used by the scheduler to keep tick
+    /// equal to the count of bus events.
+    pub async fn set_tick(&self, tick: Tick) {
+        self.inner.lock().await.tick = tick;
     }
 
     pub async fn send(
@@ -103,12 +111,12 @@ impl Bus {
                 payload: payload_for(&message),
             })
             .await;
-        match to {
+        let send_result: Result<(), CoreError> = match to {
             Recipient::Actor(target) => {
                 if let Some(tx) = inner.inboxes.get(&target) {
-                    tx.send(envelope).await.map_err(|_| CoreError::BusClosed)?;
+                    tx.send(envelope).await.map_err(|_| CoreError::BusClosed)
                 } else {
-                    return Err(CoreError::ActorNotFound(target.to_string()));
+                    Err(CoreError::ActorNotFound(target.to_string()))
                 }
             }
             Recipient::Broadcast => {
@@ -118,9 +126,29 @@ impl Bus {
                     }
                     let _ = tx.send(envelope.clone()).await;
                 }
+                Ok(())
             }
-        }
-        Ok(())
+        };
+        drop(inner);
+        self.notify.notify_waiters();
+        send_result
+    }
+
+    /// Append a non-message event (state diff, system note) to the log
+    /// without routing anything to an inbox. Tick is whatever the bus
+    /// currently has.
+    pub async fn append_event(&self, actor: Option<ActorId>, payload: EventPayload) {
+        let tick = self.current_tick().await;
+        self.log
+            .append(Event {
+                tick,
+                ts_ms: now_ms(),
+                actor,
+                message_id: None,
+                payload,
+            })
+            .await;
+        self.notify.notify_waiters();
     }
 }
 
