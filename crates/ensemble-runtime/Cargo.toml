@@ -3,7 +3,6 @@ name = "ensemble-runtime"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license-file.workspace = true
 publish = false
 description = "LLM client layer and tool runtime for Ensemble."
 

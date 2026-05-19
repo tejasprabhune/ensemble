@@ -1,12 +1,15 @@
 [workspace]
 resolver = "2"
-members = ["crates/ensemble-core", "crates/ensemble-runtime"]
+members = [
+    "crates/ensemble-core",
+    "crates/ensemble-runtime",
+    "python/ensemble",
+]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
-license-file = "LICENSE.private"
 publish = false
 
 [workspace.dependencies]
@@ -22,8 +25,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
 clap = { version = "4", features = ["derive"] }
 toml = "0.8"
-pyo3 = { version = "0.22", features = ["extension-module", "abi3-py310"] }
-pyo3-asyncio-0-21 = { package = "pyo3-asyncio", version = "0.21", features = ["tokio-runtime"] }
+pyo3 = { version = "0.21", features = ["abi3-py310"] }
+pyo3-asyncio-0-21 = { version = "0.21", features = ["tokio-runtime"] }
 
 [profile.release]
 lto = "thin"

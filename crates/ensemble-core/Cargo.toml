@@ -3,7 +3,6 @@ name = "ensemble-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license-file.workspace = true
 publish = false
 description = "Pure simulation primitives for Ensemble: world, actors, bus, traces, scheduler."
 
