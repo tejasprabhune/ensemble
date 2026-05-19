@@ -6,7 +6,7 @@ from ensemble import Agent, User, World
 def test_construct_noop_world():
     w = World("noop")
     assert w.name == "noop"
-    assert w.actor_count() == 0
+    assert len(w.users) + len(w.agents) == 0
 
 
 def test_unknown_world_rejected():
@@ -22,7 +22,7 @@ def test_spawn_user_and_agent():
     assert isinstance(rep, Agent)
     assert alice.id == "alice"
     assert rep.id == "rep1"
-    assert w.actor_count() == 2
+    assert len(w.users) + len(w.agents) == 2
 
 
 def test_user_say_queues_message():
