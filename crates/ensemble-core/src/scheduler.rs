@@ -26,11 +26,7 @@ impl Default for TickBudget {
         Self {
             max_ticks: 200,
             max_events: 4000,
-            // 30s is generous enough to cover real LLM round trips while
-            // still failing fast on a truly stuck scenario. Mock-backed
-            // tests never wait this long because their events flow
-            // instantly and the until predicate fires.
-            quiescence_ms: 30_000,
+            quiescence_ms: 500,
         }
     }
 }

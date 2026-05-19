@@ -15,7 +15,16 @@ from typing import Optional
 
 def load_dotenv(path: str | Path = ".env", override: bool = False) -> bool:
     """Load environment variables from a dotenv file. Returns True if a
-    file was found and read, False otherwise."""
+    file was found and read, False otherwise.
+
+    When `override=False` (the default), variables already set in
+    `os.environ` win over the file. If the file tries to set a key
+    that the shell already exported with a different value, we print
+    a warning on stderr so the conflict is visible. Pass
+    `override=True` to make the file always win.
+    """
+    import sys
+
     p = Path(path)
     if not p.exists() or not p.is_file():
         return False
@@ -23,8 +32,18 @@ def load_dotenv(path: str | Path = ".env", override: bool = False) -> bool:
         key, value = _parse_line(raw)
         if key is None:
             continue
-        if override or key not in os.environ:
+        existing = os.environ.get(key)
+        if override or existing is None:
             os.environ[key] = value
+        elif existing != value and key.endswith(("_API_KEY", "_BASE_URL", "_TOKEN")):
+            short_env = (existing[:6] + "...") if len(existing) > 6 else existing
+            short_file = (value[:6] + "...") if len(value) > 6 else value
+            print(
+                f"ensemble: warning, {key} in shell env ({short_env}) "
+                f"overrides {path} ({short_file}); pass dotenv-override or "
+                f"unset {key} in your shell to use the .env value.",
+                file=sys.stderr,
+            )
     return True
 
 

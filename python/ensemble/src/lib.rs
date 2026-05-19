@@ -105,6 +105,14 @@ impl World {
         let (backend, kind) = build_backend(backend, base_url, &script)?;
         let log = EventLog::new();
         let bus = Bus::new(log.clone());
+        // Real LLM round trips can easily blow past the 500ms default
+        // quiescence window; bump it whenever the backend is anything
+        // other than mock so the watcher does not abort an in-flight
+        // HTTP call.
+        let mut budget = TickBudget::default();
+        if !matches!(kind, BackendKind::Mock) {
+            budget.quiescence_ms = 60_000;
+        }
         Ok(Self {
             inner: Arc::new(Mutex::new(WorldInner {
                 name,
@@ -116,7 +124,7 @@ impl World {
                 tools: Arc::new(bundle.tools),
                 actors: vec![],
                 seed_messages: vec![],
-                budget: TickBudget::default(),
+                budget,
                 bg_task: None,
                 registered_inboxes: vec![],
             })),

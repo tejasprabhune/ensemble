@@ -108,7 +108,14 @@ class World:
         verbose: Optional[bool] = None,
     ) -> None:
         if dotenv:
-            load_dotenv(dotenv if isinstance(dotenv, str) else ".env")
+            path = ".env"
+            override = False
+            if isinstance(dotenv, str):
+                if dotenv == "override":
+                    override = True
+                else:
+                    path = dotenv
+            load_dotenv(path, override=override)
         self._native = _NativeWorld(name, backend=backend, base_url=base_url)
         self.users: List[User] = []
         self.agents: List[Agent] = []
@@ -120,6 +127,18 @@ class World:
         chosen = self._native.backend
         if verbose is None:
             verbose = os.environ.get("ENSEMBLE_QUIET", "").strip() not in {"1", "true", "yes"}
+        # Surface a key fingerprint so users can spot a stale shell env
+        # var that is overriding their .env file.
+        key_hint = ""
+        env_var = {
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openai": "OPENAI_API_KEY",
+        }.get(chosen)
+        if env_var:
+            raw = os.environ.get(env_var, "")
+            if raw:
+                key_hint = f" key={raw[:6]}..."
+
         note: str
         if requested is None and chosen == "mock":
             note = (
@@ -133,9 +152,9 @@ class World:
                 "found in env or .env; falling back to deterministic mock)"
             )
         elif requested == "auto":
-            note = f"ensemble: backend={chosen} (auto-detected from environment)"
+            note = f"ensemble: backend={chosen} (auto-detected from environment){key_hint}"
         else:
-            note = f"ensemble: backend={chosen}"
+            note = f"ensemble: backend={chosen}{key_hint}"
         if verbose:
             print(note, file=sys.stderr)
         try:
