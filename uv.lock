@@ -825,7 +825,9 @@ source = { editable = "." }
 
 [package.dev-dependencies]
 dev = [
+    { name = "ensemble-train" },
     { name = "maturin" },
+    { name = "plank" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -834,7 +836,9 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "ensemble-train", editable = "train" },
     { name = "maturin", specifier = ">=1.7,<2.0" },
+    { name = "plank", editable = "examples/plank" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
 ]
