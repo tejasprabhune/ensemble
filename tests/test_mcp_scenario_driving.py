@@ -115,3 +115,50 @@ async def test_external_agent_drives_slot(registered_plank):
                 "agent_say",
                 arguments={"target": "alice", "text": "team plan, alice"},
             )
+
+
+@pytest.mark.asyncio
+async def test_scenario_without_as_agent_errors(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENSEMBLE_HOME", str(tmp_path))
+    from ensemble import worlds_registry
+
+    worlds_registry.add_world("plank", Path("examples/plank"))
+
+    import subprocess
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ensemble.cli_mcp",
+            "serve",
+            "--world",
+            "plank",
+            "--scenario",
+            "plank.refund_storm",
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "ENSEMBLE_HOME": str(tmp_path)},
+    )
+    assert result.returncode == 2
+    assert "--scenario requires --as-agent" in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_unknown_tool_returns_error(registered_plank):
+    env = {**os.environ, "ENSEMBLE_HOME": str(registered_plank["registry_home"])}
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "ensemble.cli_mcp", "serve", "--world", "plank"],
+        env=env,
+    )
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(
+                "does_not_exist", arguments={}
+            )
+            body = json.loads(result.content[0].text)
+            assert "error" in body
+            assert "unknown tool" in body["error"]
