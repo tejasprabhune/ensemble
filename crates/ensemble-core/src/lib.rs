@@ -17,7 +17,7 @@ pub mod prelude {
     pub use crate::bus::{Bus, Envelope, Message, Recipient};
     pub use crate::error::{CoreError, RestoreError, ToolError};
     pub use crate::event::{Event, EventLog, EventPayload, Tick, TraceFile};
-    pub use crate::ids::{ActorId, MessageId, RunId};
+    pub use crate::ids::{ActorId, MessageId};
     pub use crate::predicate::{Predicate, PredicateCtx, PredicateRegistry};
     pub use crate::scheduler::{BudgetCap, Scheduler, StopReason, TickBudget};
     pub use crate::until::{all_of, any_of, turn_count_exceeds, Until};

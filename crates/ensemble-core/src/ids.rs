@@ -49,4 +49,3 @@ macro_rules! string_id {
 
 string_id!(ActorId, "actor");
 string_id!(MessageId, "msg");
-string_id!(RunId, "run");
