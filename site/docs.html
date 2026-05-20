@@ -1144,6 +1144,47 @@ alice = world.spawn_user(
         composes any backend with a system prompt template and a tagged
         hidden-state block.
       </p>
+      <h4>Choosing a backend</h4>
+      <p>
+        The <code>backend</code> argument to <code>World(...)</code>
+        and <code>run_scenario(...)</code> takes one of
+        <code>"mock"</code> (the deterministic default),
+        <code>"anthropic"</code>, <code>"openai"</code>,
+        <code>"vllm"</code>, or <code>"auto"</code>.
+        <code>"auto"</code> picks the first provider with an API key
+        in the environment, in this order: Anthropic first (the
+        <code>ANTHROPIC_API_KEY</code> variable), then OpenAI
+        (<code>OPENAI_API_KEY</code>), then fallback to mock. When
+        both keys are set, Anthropic wins; pass an explicit
+        <code>backend="openai"</code> if you want the other.
+      </p>
+      <p>
+        Two small divergences between the shipped backends are worth
+        knowing about. The OpenAI client sends
+        <code>max_completion_tokens</code> (every chat-completions
+        model since mid-2024 accepts it, and newer models like
+        <code>o1</code> and <code>gpt-5</code> reject the legacy
+        <code>max_tokens</code> field). The Anthropic client sends
+        <code>max_tokens</code> because that is what the Messages API
+        expects. The vLLM-shaped client follows the OpenAI shape but
+        uses <code>max_tokens</code>, because vLLM accepts both and
+        many of the smaller open models people serve through it
+        haven't kept up with the newer name. The single
+        <code>max_tokens</code> field on <code>CompletionRequest</code>
+        is translated to whichever name each provider wants.
+      </p>
+      <p>
+        Each backend, on completion, parses its provider's usage
+        block (Anthropic's <code>input_tokens</code> and
+        <code>output_tokens</code>, OpenAI's
+        <code>prompt_tokens</code> and <code>completion_tokens</code>)
+        and records <code>tokens_in</code>, <code>tokens_out</code>,
+        and (when the model is in
+        <code>crates/ensemble-runtime/pricing.toml</code>)
+        <code>usd</code> against the calling actor. Pair this with
+        per-actor budgets to cap a slot's spend without affecting
+        the rest of the run.
+      </p>
 
       <h3>ensemble-py and the bindings</h3>
       <p>
