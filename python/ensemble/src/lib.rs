@@ -846,18 +846,21 @@ impl World {
     /// `{"effect": ...}` or `{"effect": ..., "diff": ...}`. The diff,
     /// when present, is emitted as a StateDiff event after the
     /// ToolResult.
+    #[pyo3(signature = (name, description, parameters_json, callable, timeout_ms=None, resources=None))]
     fn register_tool(
         &self,
         name: &str,
         description: &str,
         parameters_json: &str,
         callable: Py<PyAny>,
+        timeout_ms: Option<u64>,
+        resources: Option<Vec<String>>,
     ) -> PyResult<()> {
         let parameters: serde_json::Value = serde_json::from_str(parameters_json)
             .map_err(|e| PyValueError::new_err(format!("bad parameters json: {e}")))?;
         let tools = self.inner.lock().tools.clone();
         let tool_name = name.to_string();
-        let wrapper = move |args: &serde_json::Value, _emitter: &ensemble_runtime::ProgressEmitter|
+        let wrapper = move |args: &serde_json::Value, emitter: &ensemble_runtime::ProgressEmitter|
             -> Result<ToolOutcome, ToolError> {
             let args_str = serde_json::to_string(args)
                 .map_err(|e| ToolError::Execution(format!("serialize args: {e}")))?;
@@ -887,6 +890,24 @@ impl World {
                         }
                     }
                 }
+                // Forward any progress entries the python tool emitted
+                // (via the {"progress": [...]} key) into the outer
+                // ProgressEmitter so the runtime can flush them to
+                // the trace.
+                if let Some(serde_json::Value::Array(arr)) = parsed.get("progress") {
+                    for entry in arr {
+                        let fraction = entry
+                            .get("fraction")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.0) as f32;
+                        let message = entry
+                            .get("message")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        emitter.emit(fraction, message);
+                    }
+                }
                 Ok(ToolOutcome { effect, diff, costs })
             })
         };
@@ -896,8 +917,8 @@ impl World {
                 description: description.to_string(),
                 parameters,
             },
-            timeout: None,
-            resources: Vec::new(),
+            timeout: timeout_ms.map(std::time::Duration::from_millis),
+            resources: resources.unwrap_or_default(),
             run: Arc::new(wrapper),
         });
         Ok(())

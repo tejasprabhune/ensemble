@@ -26,13 +26,20 @@ from . import _native
 PERSONAS_DIR = Path(__file__).resolve().parent.parent / "personas"
 
 
-def _tool(db, name, description, parameters):
+def _tool(db, name, description, parameters, *, timeout_ms=None, resources=None):
     """Bind a plank rust tool to the JSON-string ABI ensemble expects."""
 
     def fn(args_json: str) -> str:
         return db.dispatch(name, args_json)
 
-    return PluginTool(name=name, description=description, parameters=parameters, fn=fn)
+    return PluginTool(
+        name=name,
+        description=description,
+        parameters=parameters,
+        fn=fn,
+        timeout_ms=timeout_ms,
+        resources=resources,
+    )
 
 
 def _predicate(db, name):
@@ -86,7 +93,9 @@ def _setup():
         _tool(
             db,
             "issue_refund",
-            "Issue a refund to a user. Amounts are in whole cents.",
+            "Issue a refund to a user. Amounts are in whole cents. "
+            "Acquires the billing_db resource so concurrent refund "
+            "attempts serialize.",
             {
                 "type": "object",
                 "properties": {
@@ -96,6 +105,7 @@ def _setup():
                 },
                 "required": ["user_id", "amount_cents", "reason"],
             },
+            resources=["billing_db"],
         ),
         _tool(
             db,
@@ -131,6 +141,19 @@ def _setup():
                     "plan": {"type": "string"},
                 },
                 "required": ["user_id", "plan"],
+            },
+        ),
+        _tool(
+            db,
+            "slow_billing_check",
+            "Slow billing reconciliation. Emits progress while it works.",
+            {
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string"},
+                    "steps": {"type": "integer"},
+                },
+                "required": ["user_id"],
             },
         ),
     ]

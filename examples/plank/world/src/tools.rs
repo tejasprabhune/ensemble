@@ -42,6 +42,48 @@ fn ok<T: Serialize>(data: T) -> serde_json::Value {
     serde_json::to_value(OkPayload { ok: true, data }).unwrap()
 }
 
+/// A deliberately slow tool that emits progress while it works.
+/// Useful for exercising the progress-event + timeout machinery on
+/// realistic workloads. Sleeps 100ms x `steps` (default 5) emitting
+/// fractional progress after each chunk.
+pub fn slow_billing_check(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
+    let _ = state;
+    tools.register(Tool::new_with_progress(
+        "slow_billing_check",
+        "Run a slow billing reconciliation. Emits progress fractions \
+         while it works. Used to demonstrate progress events and \
+         tool timeouts.",
+        json!({
+            "type": "object",
+            "properties": {
+                "user_id": { "type": "string" },
+                "steps": { "type": "integer" }
+            },
+            "required": ["user_id"]
+        }),
+        move |args, emitter| {
+            let user_id = arg_str(args, "user_id")?;
+            let steps = args
+                .get("steps")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5)
+                .max(1);
+            for i in 1..=steps {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let fraction = i as f32 / steps as f32;
+                emitter.emit(
+                    fraction,
+                    format!("scanned {i}/{steps} months for {user_id}"),
+                );
+            }
+            Ok(ok(json!({
+                "user_id": user_id,
+                "reconciled_months": steps,
+            })))
+        },
+    ));
+}
+
 pub fn open_ticket(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new_with_diff(
@@ -123,9 +165,12 @@ pub fn lookup_ticket(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
 
 pub fn issue_refund(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     let state = state.clone();
-    tools.register(Tool::new_with_diff(
+    tools.register(
+        Tool::new_with_diff(
         "issue_refund",
-        "Issue a refund to a user. Amounts are in whole cents.",
+        "Issue a refund to a user. Amounts are in whole cents. Acquires \
+         the `billing_db` resource so concurrent refund attempts \
+         serialize through the runtime.",
         json!({
             "type": "object",
             "properties": {
@@ -168,7 +213,9 @@ pub fn issue_refund(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
             }]);
             Ok((effect, diff))
         },
-    ));
+    )
+        .with_resources(vec!["billing_db".to_string()]),
+    );
 }
 
 pub fn escalate(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
@@ -290,10 +337,11 @@ mod tests {
             "escalate",
             "search_kb",
             "update_subscription",
+            "slow_billing_check",
         ] {
             assert!(names.contains(&expected.to_string()), "missing tool {expected}");
         }
-        assert_eq!(names.len(), 7);
+        assert_eq!(names.len(), 8);
     }
 
     #[test]

@@ -204,6 +204,8 @@ class World:
                     t.description,
                     json.dumps(t.parameters),
                     t.fn,
+                    t.timeout_ms,
+                    t.resources,
                 )
             for p in predicates:
                 self._native.register_predicate(p.name, p.fn)

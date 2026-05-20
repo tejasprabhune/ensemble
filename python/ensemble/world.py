@@ -37,6 +37,8 @@ class PluginTool:
     description: str
     parameters: Dict[str, Any]
     fn: Callable[[str], str]
+    timeout_ms: Optional[int] = None
+    resources: Optional[List[str]] = None
 
 
 @dataclass

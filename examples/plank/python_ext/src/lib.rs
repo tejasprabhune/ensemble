@@ -47,19 +47,54 @@ impl PlankDb {
     }
 
     /// Dispatch a tool by name. `args_json` is a JSON string; the
-    /// return is a JSON string of `{"effect": ..., "diff"?: ...}` so
-    /// the wrapper plays cleanly with ensemble's plugin tool ABI.
+    /// return is a JSON string of
+    /// `{"effect": ..., "diff"?: ..., "progress"?: [...], "costs"?: {...}}`
+    /// so the wrapper plays cleanly with ensemble's plugin tool ABI.
+    /// The progress entries the tool emitted while running flow up
+    /// through this JSON: ensemble's register_tool wrapper re-emits
+    /// them into the outer ProgressEmitter the runtime is collecting.
     fn dispatch(&self, name: &str, args_json: &str) -> PyResult<String> {
         let args: serde_json::Value = serde_json::from_str(args_json)
             .map_err(|e| PyValueError::new_err(format!("bad args json: {e}")))?;
-        let outcome = self
+        let tool = self
             .tools
-            .dispatch(name, &args)
+            .get(name)
+            .ok_or_else(|| PyKeyError::new_err(format!("unknown tool {name:?}")))?;
+        let emitter = ensemble_runtime::ProgressEmitter::new();
+        let outcome = (tool.run)(&args, &emitter)
             .map_err(|e| PyRuntimeError::new_err(format!("{e}")))?;
+        let progress: Vec<serde_json::Value> = emitter
+            .drain()
+            .into_iter()
+            .map(|p| {
+                serde_json::json!({
+                    "fraction": p.fraction,
+                    "message": p.message,
+                })
+            })
+            .collect();
         let mut out = serde_json::Map::new();
         out.insert("effect".into(), outcome.effect);
         if let Some(diff) = outcome.diff {
             out.insert("diff".into(), diff);
+        }
+        if !progress.is_empty() {
+            out.insert("progress".into(), serde_json::Value::Array(progress));
+        }
+        if !outcome.costs.is_empty() {
+            let costs: serde_json::Map<String, serde_json::Value> = outcome
+                .costs
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        k,
+                        serde_json::Number::from_f64(v)
+                            .map(serde_json::Value::Number)
+                            .unwrap_or(serde_json::Value::Null),
+                    )
+                })
+                .collect();
+            out.insert("costs".into(), serde_json::Value::Object(costs));
         }
         Ok(serde_json::Value::Object(out).to_string())
     }

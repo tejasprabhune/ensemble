@@ -37,4 +37,5 @@ pub fn register_all(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     tools::escalate(state, tools);
     tools::search_kb(state, tools);
     tools::update_subscription(state, tools);
+    tools::slow_billing_check(state, tools);
 }
