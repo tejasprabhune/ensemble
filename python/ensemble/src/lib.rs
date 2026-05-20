@@ -15,8 +15,10 @@ use ensemble_core::scheduler::{Scheduler, StopReason, TickBudget};
 use ensemble_core::until::{turn_count_exceeds, Until, UntilCtx};
 use ensemble_runtime::{
     AgentActor, AnthropicBackend, HiddenState, LocalAdapterBackend, MockBackend, MockScript,
-    MockTurn, OpenAIBackend, PromptedPersona, SharedBackend, ToolRegistry, UserActor,
+    MockTurn, OpenAIBackend, PromptedPersona, SharedBackend, Tool, ToolOutcome, ToolRegistry,
+    UserActor,
 };
+use ensemble_core::error::ToolError;
 
 mod world_registry;
 use world_registry::{WorldBundle, WorldRegistry};
@@ -481,6 +483,87 @@ impl World {
     /// for introspection in tests and docs.
     fn predicate_names(&self) -> Vec<String> {
         self.inner.lock().predicates.names()
+    }
+
+    /// Names of the tools registered on this world's `ToolRegistry`.
+    fn tool_names(&self) -> Vec<String> {
+        self.inner.lock().tools.names()
+    }
+
+    /// Register a python-callable tool. The callable receives the
+    /// args JSON as a string and must return a JSON string of either
+    /// `{"effect": ...}` or `{"effect": ..., "diff": ...}`. The diff,
+    /// when present, is emitted as a StateDiff event after the
+    /// ToolResult.
+    fn register_tool(
+        &self,
+        name: &str,
+        description: &str,
+        parameters_json: &str,
+        callable: Py<PyAny>,
+    ) -> PyResult<()> {
+        let parameters: serde_json::Value = serde_json::from_str(parameters_json)
+            .map_err(|e| PyValueError::new_err(format!("bad parameters json: {e}")))?;
+        let tools = self.inner.lock().tools.clone();
+        let tool_name = name.to_string();
+        let wrapper = move |args: &serde_json::Value| -> Result<ToolOutcome, ToolError> {
+            let args_str = serde_json::to_string(args)
+                .map_err(|e| ToolError::Execution(format!("serialize args: {e}")))?;
+            Python::with_gil(|py| {
+                let result_obj = callable
+                    .call1(py, (args_str,))
+                    .map_err(|e| ToolError::Execution(format!("python tool: {e}")))?;
+                let result_str: String = result_obj.extract(py).map_err(|e| {
+                    ToolError::Execution(format!(
+                        "python tool must return a JSON string: {e}"
+                    ))
+                })?;
+                let parsed: serde_json::Value = serde_json::from_str(&result_str)
+                    .map_err(|e| ToolError::Execution(format!(
+                        "python tool returned non-json: {e}"
+                    )))?;
+                let effect = parsed
+                    .get("effect")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                let diff = parsed.get("diff").cloned();
+                Ok(ToolOutcome { effect, diff })
+            })
+        };
+        tools.register(Tool {
+            schema: ensemble_runtime::ToolSchema {
+                name: tool_name,
+                description: description.to_string(),
+                parameters,
+            },
+            run: Arc::new(wrapper),
+        });
+        Ok(())
+    }
+
+    /// Register a python-callable predicate. The callable receives
+    /// `(trace_json: str, args_json: str)` and must return a bool.
+    /// `trace_json` is the full event log at evaluation time.
+    fn register_predicate(&self, name: &str, callable: Py<PyAny>) -> PyResult<()> {
+        let preds = self.inner.lock().predicates.clone();
+        preds.register(name.to_string(), move |ctx| {
+            let trace_str =
+                serde_json::to_string(ctx.trace).unwrap_or_else(|_| "[]".into());
+            let args_str = ctx.args.to_string();
+            Python::with_gil(|py| {
+                match callable.call1(py, (trace_str, args_str)) {
+                    Ok(v) => v.extract::<bool>(py).unwrap_or(false),
+                    Err(e) => {
+                        // Surface as `false` rather than panic; the
+                        // python exception is printed to stderr so it
+                        // is visible during scenario runs.
+                        e.print(py);
+                        false
+                    }
+                }
+            })
+        });
+        Ok(())
     }
 
     /// Evaluate a named predicate against the current trace. Returns

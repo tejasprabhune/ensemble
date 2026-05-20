@@ -20,7 +20,7 @@ async fn agent_uses_tool_via_mock_backend() {
     script.push_for("user-model", MockTurn::text("hi rep, please help"));
     let backend = Arc::new(MockBackend::new(script));
 
-    let mut tools = ToolRegistry::new();
+    let tools = ToolRegistry::new();
     tools.register(ensemble_runtime::Tool::new(
         "ping",
         "echo back the input",

@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::RwLock;
 
 use crate::event::Event;
 
@@ -31,9 +32,12 @@ impl<'a> PredicateCtx<'a> {
 
 pub type Predicate = Arc<dyn Fn(&PredicateCtx<'_>) -> bool + Send + Sync>;
 
+/// A registry of named predicates. Cheap to clone (shares state behind
+/// an Arc) and uses interior mutability so worlds can register new
+/// predicates after construction.
 #[derive(Default, Clone)]
 pub struct PredicateRegistry {
-    preds: HashMap<String, Predicate>,
+    preds: Arc<RwLock<HashMap<String, Predicate>>>,
 }
 
 impl PredicateRegistry {
@@ -46,26 +50,31 @@ impl PredicateRegistry {
     /// least one event), and `had_double_refund` (a generic
     /// `issue_refund` repetition check keyed by `args.user_id`).
     pub fn with_defaults() -> Self {
-        let mut reg = Self::default();
-        defaults::install(&mut reg);
+        let reg = Self::default();
+        defaults::install(&reg);
         reg
     }
 
-    pub fn register<F>(&mut self, name: impl Into<String>, f: F)
+    pub fn register<F>(&self, name: impl Into<String>, f: F)
     where
         F: Fn(&PredicateCtx<'_>) -> bool + Send + Sync + 'static,
     {
-        self.preds.insert(name.into(), Arc::new(f));
+        self.preds
+            .write()
+            .expect("predicate registry poisoned")
+            .insert(name.into(), Arc::new(f));
     }
 
     pub fn names(&self) -> Vec<String> {
-        let mut out: Vec<String> = self.preds.keys().cloned().collect();
+        let guard = self.preds.read().expect("predicate registry poisoned");
+        let mut out: Vec<String> = guard.keys().cloned().collect();
         out.sort();
         out
     }
 
     pub fn evaluate(&self, name: &str, ctx: &PredicateCtx<'_>) -> Option<bool> {
-        self.preds.get(name).map(|p| p(ctx))
+        let guard = self.preds.read().expect("predicate registry poisoned");
+        guard.get(name).map(|p| p(ctx))
     }
 }
 
@@ -74,7 +83,7 @@ mod defaults {
     use crate::event::EventPayload;
     use std::collections::HashSet;
 
-    pub fn install(reg: &mut PredicateRegistry) {
+    pub fn install(reg: &PredicateRegistry) {
         reg.register("any_event", |ctx| !ctx.trace.is_empty());
         reg.register("had_double_refund", |ctx| {
             let mut seen = HashSet::new();
@@ -111,7 +120,7 @@ mod tests {
 
     #[test]
     fn counts_tool_calls() {
-        let mut reg = PredicateRegistry::new();
+        let reg = PredicateRegistry::new();
         reg.register("any_refund", |ctx| {
             ctx.trace.iter().any(|e| {
                 matches!(&e.payload, EventPayload::ToolCall { name, .. } if name == "issue_refund")

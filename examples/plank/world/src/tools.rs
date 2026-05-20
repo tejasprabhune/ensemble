@@ -42,7 +42,7 @@ fn ok<T: Serialize>(data: T) -> serde_json::Value {
     serde_json::to_value(OkPayload { ok: true, data }).unwrap()
 }
 
-pub fn open_ticket(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
+pub fn open_ticket(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new_with_diff(
         "open_ticket",
@@ -81,7 +81,7 @@ pub fn open_ticket(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
     ));
 }
 
-pub fn lookup_user(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
+pub fn lookup_user(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new(
         "lookup_user",
@@ -101,7 +101,7 @@ pub fn lookup_user(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
     ));
 }
 
-pub fn lookup_ticket(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
+pub fn lookup_ticket(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new(
         "lookup_ticket",
@@ -121,7 +121,7 @@ pub fn lookup_ticket(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
     ));
 }
 
-pub fn issue_refund(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
+pub fn issue_refund(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new_with_diff(
         "issue_refund",
@@ -171,7 +171,7 @@ pub fn issue_refund(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
     ));
 }
 
-pub fn escalate(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
+pub fn escalate(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new_with_diff(
         "escalate",
@@ -216,7 +216,7 @@ pub fn escalate(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
     ));
 }
 
-pub fn search_kb(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
+pub fn search_kb(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new(
         "search_kb",
@@ -236,7 +236,7 @@ pub fn search_kb(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
     ));
 }
 
-pub fn update_subscription(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
+pub fn update_subscription(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new_with_diff(
         "update_subscription",

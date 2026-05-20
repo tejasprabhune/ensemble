@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from ._native import World as _NativeWorld
 from .env import load_dotenv
 from .persona import PersonaResolver, load_persona, register_personas_dir
+from .world import get_world
 
 
 @dataclass
@@ -183,6 +184,21 @@ class World:
         self._native = _NativeWorld(name, backend=backend, base_url=base_url)
         self.users: List[User] = []
         self.agents: List[Agent] = []
+        # Apply any python-registered tools and predicates for this
+        # world name. A world plugin registers itself by importing its
+        # package (e.g. `import plank`) before `World("plank")` is
+        # constructed.
+        definition = get_world(name)
+        if definition is not None:
+            for t in definition.tools:
+                self._native.register_tool(
+                    t.name,
+                    t.description,
+                    json.dumps(t.parameters),
+                    t.fn,
+                )
+            for p in definition.predicates:
+                self._native.register_predicate(p.name, p.fn)
         self._announce_backend(requested=backend, verbose=verbose)
 
     def _announce_backend(

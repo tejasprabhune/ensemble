@@ -19,17 +19,17 @@ pub use state::PlankState;
 /// a predicate registry whose closures hold an `Arc` to that state.
 pub fn build() -> (Arc<Mutex<PlankState>>, ToolRegistry, PredicateRegistry) {
     let state = Arc::new(Mutex::new(PlankState::seed_default()));
-    let mut tools = ToolRegistry::new();
-    register_all(&state, &mut tools);
-    let mut preds = PredicateRegistry::new();
-    predicates::register_all(&state, &mut preds);
+    let tools = ToolRegistry::new();
+    register_all(&state, &tools);
+    let preds = PredicateRegistry::new();
+    predicates::register_all(&state, &preds);
     (state, tools, preds)
 }
 
 /// Install Plank's tools onto an existing registry. Worlds may register
 /// fewer or more; agents only see the schemas in their `tools=[...]`
 /// list when they spawn.
-pub fn register_all(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
+pub fn register_all(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     tools::open_ticket(state, tools);
     tools::lookup_user(state, tools);
     tools::lookup_ticket(state, tools);

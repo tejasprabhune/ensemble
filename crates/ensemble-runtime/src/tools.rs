@@ -91,9 +91,12 @@ impl Tool {
     }
 }
 
+/// A registry of tools agents can call. Cheap to clone (the underlying
+/// map is shared behind an Arc) and uses interior mutability so plugins
+/// can register tools after the registry has been handed to actors.
 #[derive(Default, Clone)]
 pub struct ToolRegistry {
-    tools: HashMap<String, Tool>,
+    tools: Arc<parking_lot::RwLock<HashMap<String, Tool>>>,
 }
 
 impl ToolRegistry {
@@ -101,16 +104,24 @@ impl ToolRegistry {
         Self::default()
     }
 
-    pub fn register(&mut self, tool: Tool) {
-        self.tools.insert(tool.schema.name.clone(), tool);
+    pub fn register(&self, tool: Tool) {
+        self.tools
+            .write()
+            .insert(tool.schema.name.clone(), tool);
     }
 
-    pub fn get(&self, name: &str) -> Option<&Tool> {
-        self.tools.get(name)
+    pub fn get(&self, name: &str) -> Option<Tool> {
+        self.tools.read().get(name).cloned()
     }
 
     pub fn schemas(&self) -> Vec<ToolSchema> {
-        self.tools.values().map(|t| t.schema.clone()).collect()
+        self.tools.read().values().map(|t| t.schema.clone()).collect()
+    }
+
+    pub fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.tools.read().keys().cloned().collect();
+        names.sort();
+        names
     }
 
     pub fn dispatch(
@@ -120,7 +131,9 @@ impl ToolRegistry {
     ) -> Result<ToolOutcome, ToolError> {
         let tool = self
             .tools
+            .read()
             .get(name)
+            .cloned()
             .ok_or_else(|| ToolError::UnknownTool(name.into()))?;
         (tool.run)(args)
     }

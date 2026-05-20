@@ -14,11 +14,20 @@ use crate::state::PlankState;
 /// Register every predicate Plank exposes. Graders reference them by
 /// name, e.g. `not had_double_refund` in a TOML manifest, or via
 /// `world.evaluate_predicate("had_double_refund")` from Python.
-pub fn register_all(state: &Arc<Mutex<PlankState>>, preds: &mut PredicateRegistry) {
+pub fn register_all(state: &Arc<Mutex<PlankState>>, preds: &PredicateRegistry) {
     let _ = state; // most predicates compute from the trace; some will use state later.
 
     // Plank inherits the core defaults (had_double_refund, any_event).
-    *preds = PredicateRegistry::with_defaults();
+    let defaults = PredicateRegistry::with_defaults();
+    for name in defaults.names() {
+        // Copy each default into this registry. The closures are Arc'd
+        // inside the source registry; we re-register a thin wrapper so
+        // we don't have to expose `Predicate` directly.
+        let src = defaults.clone();
+        preds.register(name.clone(), move |ctx| {
+            src.evaluate(&name, ctx).unwrap_or(false)
+        });
+    }
 
     preds.register("any_refund_issued", |ctx| {
         ctx.trace.iter().any(|e| {
