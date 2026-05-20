@@ -413,11 +413,17 @@ class Simulation:
 _REGISTRY: Dict[str, Callable[[], Awaitable[RunResult]]] = {}
 
 
-def scenario(name: str) -> Callable:
+def scenario(name: str, *, world: Optional[str] = None) -> Callable:
     """Register a scenario. The wrapped function may be either an
     async generator (yield once with the until, yield once with the
     grader dict) or a regular async function (returns the grader
-    dict directly)."""
+    dict directly).
+
+    ``world`` names the world this scenario expects to run against;
+    the CLI uses it as the default when ``--world`` is not supplied.
+    Callers may still pass a different world to the wrapper for
+    cross-world testing (e.g. running a generic scenario against the
+    "noop" world)."""
 
     def deco(func: Callable) -> Callable:
         is_gen = inspect.isasyncgenfunction(func)
@@ -428,13 +434,17 @@ def scenario(name: str) -> Callable:
             )
 
         async def wrapper(
-            world_name: str = "noop",
+            world_name: Optional[str] = None,
             backend: Optional[str] = None,
             base_url: Optional[str] = None,
         ) -> RunResult:
-            world = World(world_name, backend=backend, base_url=base_url)
+            # Caller-supplied world wins; otherwise fall back to the
+            # decorator's declared world; otherwise "noop" so the
+            # scaffold flow still works without a world plugin.
+            resolved_world = world_name or world or "noop"
+            world_obj = World(resolved_world, backend=backend, base_url=base_url)
             if is_gen:
-                gen = func(world)
+                gen = func(world_obj)
                 try:
                     first = await gen.__anext__()
                 except StopAsyncIteration as e:
@@ -443,7 +453,7 @@ def scenario(name: str) -> Callable:
                     raise TypeError(
                         f"scenario must first yield an Until, got {type(first).__name__}"
                     )
-                trace = world.run(first)
+                trace = world_obj.run(first)
                 try:
                     scores = await gen.__anext__()
                 except StopAsyncIteration:
@@ -454,14 +464,14 @@ def scenario(name: str) -> Callable:
             else:
                 # Regular async function: scenario author calls
                 # world.run(until) themselves and returns the grader dict.
-                scores = await func(world)
-                trace = [json.loads(e) for e in world._native.trace_events()]
+                scores = await func(world_obj)
+                trace = [json.loads(e) for e in world_obj._native.trace_events()]
                 return RunResult(
                     name=name, scores=dict(scores or {}), trace=trace
                 )
 
         wrapper.__scenario_name__ = name  # type: ignore[attr-defined]
-        wrapper.__scenario_world__ = None  # type: ignore[attr-defined]
+        wrapper.__scenario_world__ = world  # type: ignore[attr-defined]
         _REGISTRY[name] = wrapper
         return wrapper
 
@@ -475,11 +485,13 @@ def all_scenarios() -> Dict[str, Callable[..., Awaitable[RunResult]]]:
 
 def run_scenario(
     name: str,
-    world_name: str = "noop",
+    world_name: Optional[str] = None,
     backend: Optional[str] = None,
     base_url: Optional[str] = None,
 ) -> RunResult:
-    """Synchronous helper: look up a scenario by name and run it."""
+    """Synchronous helper: look up a scenario by name and run it.
+    ``world_name`` overrides the world declared on the @scenario;
+    leave it None to use the declared default."""
     if name not in _REGISTRY:
         raise KeyError(f"no scenario registered as {name!r}")
     return asyncio.run(

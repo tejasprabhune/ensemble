@@ -5,7 +5,7 @@ import plank  # noqa: F401  registers plank personas with ensemble
 from ensemble import scenario
 
 
-@scenario("plank.enterprise_audit")
+@scenario("plank.enterprise_audit", world="plank")
 async def enterprise_audit(world):
     carol = world.spawn_user(
         id="carol",

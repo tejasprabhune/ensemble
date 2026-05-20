@@ -57,13 +57,17 @@ def load_manifest(path: str | Path) -> Dict[str, Callable[..., Awaitable[RunResu
 
 
 def _build_scenario(name: str, spec: Dict[str, Any]) -> Callable[..., Awaitable[RunResult]]:
-    world_name = spec.get("world", "noop")
+    world_name = spec.get("world")
+    if not isinstance(world_name, str) or not world_name:
+        raise ValueError(
+            f"scenario {name!r}: 'world' field is required (set [scenario.{name}].world = ...)"
+        )
     duration_turns = int(spec.get("duration_turns", 20))
     users = spec.get("users", [])
     agents = spec.get("agents", [])
     graders = spec.get("graders", {})
 
-    @scenario(name)
+    @scenario(name, world=world_name)
     async def manifest_scenario(world):
         # The decorator default-runs against "noop"; the caller must
         # supply the matching world name via run_scenario(name, world).

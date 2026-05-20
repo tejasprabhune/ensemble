@@ -27,6 +27,9 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from .worlds_registry import find_world
+from .world_manifest import ManifestError
+
 
 def _add_package_dir(p: Path) -> None:
     p = p.resolve()
@@ -53,6 +56,35 @@ def _import_scenarios_package(package_dir: Optional[Path]) -> None:
         )
 
 
+def _resolve_world(name: Optional[str]) -> Optional[Path]:
+    """Look the world up in ~/.ensemble/worlds.toml and add its python
+    package dir to sys.path so importing it triggers register_world.
+    Returns the world's directory so the caller can default package_dir
+    to the scenarios that ship with the world."""
+    if not name or name == "noop":
+        return None
+    entry = find_world(name)
+    if entry is None:
+        return None
+    try:
+        manifest = entry.manifest()
+    except ManifestError as e:
+        print(f"warning: world {name!r} manifest is invalid: {e}", file=sys.stderr)
+        return entry.path
+    # The world's python package usually lives at <root>/<python_package>;
+    # the parent of that dir goes on sys.path so `import <python_package>`
+    # resolves. Importing the package runs register_world.
+    _add_package_dir(entry.path)
+    try:
+        importlib.import_module(manifest.python_package)
+    except ImportError as e:
+        print(
+            f"warning: importing world package {manifest.python_package!r} from {entry.path}: {e}",
+            file=sys.stderr,
+        )
+    return entry.path
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ensemble.cli_run",
@@ -61,8 +93,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--scenario", required=True, help="Registered scenario name.")
     parser.add_argument(
         "--world",
-        default="plank",
-        help="Name of the world to construct (default: plank).",
+        default=None,
+        help="Name of the world to construct. Resolves through "
+        "~/.ensemble/worlds.toml; defaults to whatever the scenario "
+        "declared on @scenario(..., world=...).",
     )
     parser.add_argument(
         "--manifest",
@@ -87,7 +121,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    _import_scenarios_package(args.package_dir)
+    # Resolve the world first so register_world fires before we import
+    # the scenarios package (scenarios that say `import plank` will
+    # short-circuit since plank is already in sys.modules).
+    world_root = _resolve_world(args.world)
+    package_dir = args.package_dir or world_root
+    _import_scenarios_package(package_dir)
 
     # Imported here so the manifest-derived scenarios share the same
     # registry as the package-imported scenarios.

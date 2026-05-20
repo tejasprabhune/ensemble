@@ -4,7 +4,7 @@ import plank  # noqa: F401  registers plank personas with ensemble
 from ensemble import scenario
 
 
-@scenario("plank.single_ticket")
+@scenario("plank.single_ticket", world="plank")
 async def single_ticket(world):
     user = world.spawn_user(
         id="user-1",

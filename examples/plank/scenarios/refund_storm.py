@@ -5,7 +5,7 @@ import plank  # noqa: F401  registers plank personas with ensemble
 from ensemble import scenario
 
 
-@scenario("plank.refund_storm")
+@scenario("plank.refund_storm", world="plank")
 async def refund_storm(world):
     alice = world.spawn_user(
         id="alice",
