@@ -64,13 +64,14 @@ impl<S: WorldState> WorldHandle<S> {
     }
 
     /// Apply a tool call and emit `ToolResult` + `StateDiff` events on
-    /// the bus. The caller still owns whatever happens to the
-    /// `ToolEffect` value (returned for further use), but the diff is
-    /// already serialized into the log.
+    /// the bus. The caller still owns the `ToolEffect` value (returned
+    /// for further use); the diff is serialized into the log. `call_id`
+    /// associates the result with the originating `ToolCall` event.
     pub async fn apply_and_log(
         &self,
         bus: &Bus,
         actor: ActorId,
+        call_id: impl Into<String>,
         tool_name: &str,
         call: S::ToolCall,
     ) -> Result<S::ToolEffect, ToolError>
@@ -84,11 +85,14 @@ impl<S: WorldState> WorldHandle<S> {
         let diff_json = serde_json::to_value(&diff).map_err(|e| {
             ToolError::Execution(format!("could not serialize diff: {e}"))
         })?;
+        let call_id = call_id.into();
         bus.append_event(
             Some(actor.clone()),
             EventPayload::ToolResult {
+                id: call_id,
                 name: tool_name.into(),
                 result: effect_json,
+                is_error: false,
             },
         )
         .await;

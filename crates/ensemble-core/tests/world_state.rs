@@ -105,6 +105,7 @@ async fn apply_emits_tool_result_and_diff() {
         .apply_and_log(
             &bus,
             actor.clone(),
+            "call-1",
             "inc",
             CounterCall::Inc { by: 5, note: "first".into() },
         )
@@ -114,7 +115,14 @@ async fn apply_emits_tool_result_and_diff() {
 
     let events = log.snapshot().await;
     assert_eq!(events.len(), 2);
-    assert!(matches!(events[0].payload, EventPayload::ToolResult { .. }));
+    match &events[0].payload {
+        EventPayload::ToolResult { id, name, is_error, .. } => {
+            assert_eq!(id, "call-1");
+            assert_eq!(name, "inc");
+            assert!(!is_error);
+        }
+        other => panic!("expected ToolResult, got {other:?}"),
+    }
     match &events[1].payload {
         EventPayload::StateDiff { diff } => {
             assert_eq!(diff["field"], "value");

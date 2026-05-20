@@ -50,6 +50,10 @@ pub struct CompletionResponse {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProposedToolCall {
+    /// Provider-supplied call id (Anthropic `tool_use.id`, OpenAI
+    /// `tool_calls[].id`). `None` means the runtime should mint one.
+    #[serde(default)]
+    pub id: Option<String>,
     pub name: String,
     pub args: serde_json::Value,
 }

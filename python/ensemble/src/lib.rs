@@ -9,7 +9,7 @@ use pyo3::types::PyList;
 use ensemble_core::actor::ActorHandle;
 use ensemble_core::bus::{Bus, Message, Recipient};
 use ensemble_core::event::{EventLog, EventPayload};
-use ensemble_core::ids::ActorId;
+use ensemble_core::ids::{ActorId, MessageId};
 use ensemble_core::scheduler::{Scheduler, StopReason, TickBudget};
 use ensemble_core::until::{turn_count_exceeds, Until, UntilCtx};
 use ensemble_runtime::{
@@ -302,10 +302,14 @@ impl World {
             for (from, to, msg) in seed_messages {
                 if to.as_str() == "__world__" {
                     let payload = match msg {
-                        Message::ToolCall { name, args } => EventPayload::ToolCall { name, args },
+                        Message::ToolCall { id, name, args } => {
+                            EventPayload::ToolCall { id, name, args }
+                        }
                         Message::UserMessage { text } => EventPayload::UserMessage { text },
                         Message::AgentMessage { text } => EventPayload::AgentMessage { text },
-                        Message::ToolResult { name, result } => EventPayload::ToolResult { name, result },
+                        Message::ToolResult { id, name, result, is_error } => {
+                            EventPayload::ToolResult { id, name, result, is_error }
+                        }
                         Message::System { note } => EventPayload::System { note },
                     };
                     bus.append_event(Some(from), payload).await;
@@ -412,10 +416,14 @@ impl World {
             for (from, to, msg) in seed_messages {
                 if to.as_str() == "__world__" {
                     let payload = match msg {
-                        Message::ToolCall { name, args } => EventPayload::ToolCall { name, args },
+                        Message::ToolCall { id, name, args } => {
+                            EventPayload::ToolCall { id, name, args }
+                        }
                         Message::UserMessage { text } => EventPayload::UserMessage { text },
                         Message::AgentMessage { text } => EventPayload::AgentMessage { text },
-                        Message::ToolResult { name, result } => EventPayload::ToolResult { name, result },
+                        Message::ToolResult { id, name, result, is_error } => {
+                            EventPayload::ToolResult { id, name, result, is_error }
+                        }
                         Message::System { note } => EventPayload::System { note },
                     };
                     bus.append_event(Some(from), payload).await;
@@ -550,10 +558,15 @@ impl User {
     fn act_json(&self, tool: &str, args_json: &str) -> PyResult<()> {
         let args: serde_json::Value = serde_json::from_str(args_json)
             .map_err(|e| PyValueError::new_err(format!("bad json: {e}")))?;
+        let call_id = MessageId::new().to_string();
         self.world.lock().seed_messages.push((
             ActorId::from_label(&self.id),
             ActorId::from_label("__world__"),
-            Message::ToolCall { name: tool.into(), args },
+            Message::ToolCall {
+                id: call_id,
+                name: tool.into(),
+                args,
+            },
         ));
         Ok(())
     }

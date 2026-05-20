@@ -11,11 +11,34 @@ use crate::ids::{ActorId, MessageId};
 /// can receive any payload; routing decides who actually gets each one.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Message {
-    UserMessage { text: String },
-    AgentMessage { text: String },
-    ToolCall { name: String, args: serde_json::Value },
-    ToolResult { name: String, result: serde_json::Value },
-    System { note: String },
+    UserMessage {
+        text: String,
+    },
+    AgentMessage {
+        text: String,
+    },
+    /// A tool invocation. `id` lets a later `ToolResult` be paired with
+    /// the call that produced it; provider-supplied ids (Anthropic
+    /// `tool_use.id`, OpenAI `tool_calls[].id`) are preserved when
+    /// available and otherwise generated.
+    ToolCall {
+        id: String,
+        name: String,
+        args: serde_json::Value,
+    },
+    /// Result of a tool invocation. `is_error` is set when the tool
+    /// failed; the calling agent reads `result` either way and replies
+    /// to the user with whatever it makes of the response.
+    ToolResult {
+        id: String,
+        name: String,
+        result: serde_json::Value,
+        #[serde(default)]
+        is_error: bool,
+    },
+    System {
+        note: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -156,13 +179,21 @@ fn payload_for(message: &Message) -> EventPayload {
     match message {
         Message::UserMessage { text } => EventPayload::UserMessage { text: text.clone() },
         Message::AgentMessage { text } => EventPayload::AgentMessage { text: text.clone() },
-        Message::ToolCall { name, args } => EventPayload::ToolCall {
+        Message::ToolCall { id, name, args } => EventPayload::ToolCall {
+            id: id.clone(),
             name: name.clone(),
             args: args.clone(),
         },
-        Message::ToolResult { name, result } => EventPayload::ToolResult {
+        Message::ToolResult {
+            id,
+            name,
+            result,
+            is_error,
+        } => EventPayload::ToolResult {
+            id: id.clone(),
             name: name.clone(),
             result: result.clone(),
+            is_error: *is_error,
         },
         Message::System { note } => EventPayload::System { note: note.clone() },
     }

@@ -19,12 +19,30 @@ pub struct Event {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EventPayload {
-    UserMessage { text: String },
-    AgentMessage { text: String },
-    ToolCall { name: String, args: serde_json::Value },
-    ToolResult { name: String, result: serde_json::Value },
-    StateDiff { diff: serde_json::Value },
-    System { note: String },
+    UserMessage {
+        text: String,
+    },
+    AgentMessage {
+        text: String,
+    },
+    ToolCall {
+        id: String,
+        name: String,
+        args: serde_json::Value,
+    },
+    ToolResult {
+        id: String,
+        name: String,
+        result: serde_json::Value,
+        #[serde(default)]
+        is_error: bool,
+    },
+    StateDiff {
+        diff: serde_json::Value,
+    },
+    System {
+        note: String,
+    },
 }
 
 #[derive(Clone, Default)]

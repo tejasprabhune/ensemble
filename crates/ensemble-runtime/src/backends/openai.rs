@@ -55,6 +55,8 @@ struct ChoiceMessage {
 
 #[derive(Deserialize)]
 struct ToolCallBlock {
+    #[serde(default)]
+    id: Option<String>,
     function: FunctionCall,
 }
 
@@ -127,7 +129,11 @@ impl LLMBackend for OpenAIBackend {
             .map(|tc| {
                 let args = serde_json::from_str(&tc.function.arguments)
                     .unwrap_or_else(|_| serde_json::Value::Null);
-                ProposedToolCall { name: tc.function.name, args }
+                ProposedToolCall {
+                    id: tc.id,
+                    name: tc.function.name,
+                    args,
+                }
             })
             .collect();
         Ok(CompletionResponse {

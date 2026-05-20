@@ -26,7 +26,11 @@ impl MockTurn {
     pub fn tool(name: impl Into<String>, args: serde_json::Value) -> Self {
         Self {
             text: String::new(),
-            tool_calls: vec![ProposedToolCall { name: name.into(), args }],
+            tool_calls: vec![ProposedToolCall {
+                id: None,
+                name: name.into(),
+                args,
+            }],
             stop_reason: Some("tool_use".into()),
         }
     }
@@ -41,7 +45,11 @@ impl MockTurn {
     ) -> Self {
         Self {
             text: text.into(),
-            tool_calls: vec![ProposedToolCall { name: tool.into(), args }],
+            tool_calls: vec![ProposedToolCall {
+                id: None,
+                name: tool.into(),
+                args,
+            }],
             stop_reason: Some("tool_use".into()),
         }
     }

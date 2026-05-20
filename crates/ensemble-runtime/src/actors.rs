@@ -8,6 +8,7 @@ use ensemble_core::error::CoreError;
 use ensemble_core::event::EventPayload;
 
 use ensemble_core::ids::ActorId;
+use ensemble_core::ids::MessageId;
 
 use crate::backend::{ChatMessage, CompletionRequest, SharedBackend};
 use crate::tools::ToolRegistry;
@@ -54,6 +55,12 @@ impl Actor for UserActor {
                 return Ok(());
             }
         };
+        // Users hear themselves talked at by the seed scaffold (act_json
+        // posts as the user). If an agent never replied, the user's own
+        // line ends up routed back; ignore those self-echoes.
+        if from == self.id {
+            return Ok(());
+        }
         {
             let mut h = self.history.lock();
             h.push(ChatMessage::user(incoming));
@@ -136,18 +143,18 @@ impl Actor for AgentActor {
         let incoming = match envelope.message {
             Message::UserMessage { text } => text,
             Message::AgentMessage { text } => text,
-            Message::ToolResult { name, result } => {
-                format!("(tool {name} returned {result})")
+            Message::ToolResult { name, result, is_error, .. } => {
+                let prefix = if is_error { "tool error" } else { "tool" };
+                format!("({prefix} {name} returned {result})")
             }
             Message::System { .. } | Message::ToolCall { .. } => return Ok(()),
         };
         self.history.lock().push(ChatMessage::user(incoming));
 
         // Standard tool-use loop: each iteration is one model turn.
-        // We send any text immediately, dispatch any tool calls, and
-        // stop when the model produces a turn with no tool calls.
-        // The cap is a safety belt against runaway scripts; six is
-        // enough for most multi-step plans.
+        // The cap stops a model that keeps calling tools without ever
+        // replying to the user. Eight is generous; most multi-step
+        // plans resolve in three or four.
         const MAX_TOOL_TURNS: usize = 8;
         for _ in 0..MAX_TOOL_TURNS {
             let messages = self.history.lock().clone();
@@ -189,9 +196,11 @@ impl Actor for AgentActor {
             }
 
             for call in resp.tool_calls {
+                let call_id = call.id.unwrap_or_else(|| MessageId::new().to_string());
                 bus.append_event(
                     Some(self.id.clone()),
                     EventPayload::ToolCall {
+                        id: call_id.clone(),
                         name: call.name.clone(),
                         args: call.args.clone(),
                     },
@@ -206,17 +215,34 @@ impl Actor for AgentActor {
                         bus.append_event(
                             Some(self.id.clone()),
                             EventPayload::ToolResult {
+                                id: call_id,
                                 name: call.name,
                                 result: effect,
+                                is_error: false,
                             },
                         )
                         .await;
                     }
                     Err(e) => {
+                        // Surface the error to the model so it can recover
+                        // (retry with different args, escalate, or give up
+                        // and explain). Real frontier models expect a
+                        // tool-error reply rather than silence.
+                        let err_json = serde_json::json!({
+                            "ok": false,
+                            "error": e.to_string(),
+                        });
+                        self.history.lock().push(ChatMessage::tool(format!(
+                            "tool {} error: {e}",
+                            call.name
+                        )));
                         bus.append_event(
                             Some(self.id.clone()),
-                            EventPayload::System {
-                                note: format!("tool error: {e}"),
+                            EventPayload::ToolResult {
+                                id: call_id,
+                                name: call.name,
+                                result: err_json,
+                                is_error: true,
                             },
                         )
                         .await;

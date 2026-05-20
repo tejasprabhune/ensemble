@@ -48,7 +48,7 @@ struct AnthropicResponse {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AnthropicBlock {
     Text { text: String },
-    ToolUse { name: String, input: serde_json::Value, #[allow(dead_code)] id: String },
+    ToolUse { id: String, name: String, input: serde_json::Value },
 }
 
 #[async_trait]
@@ -101,8 +101,12 @@ impl LLMBackend for AnthropicBackend {
                     }
                     text.push_str(&t);
                 }
-                AnthropicBlock::ToolUse { name, input, .. } => {
-                    tool_calls.push(ProposedToolCall { name, args: input });
+                AnthropicBlock::ToolUse { id, name, input } => {
+                    tool_calls.push(ProposedToolCall {
+                        id: Some(id),
+                        name,
+                        args: input,
+                    });
                 }
             }
         }
