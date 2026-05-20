@@ -26,7 +26,7 @@ import mcp.types as types
 from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
-from .world import PluginPredicate, PluginTool, WorldDefinition
+from .world import PluginTool, WorldDefinition
 
 
 SERVER_VERSION = "0.1.0"
@@ -119,40 +119,13 @@ def build_tools_server(
 
 
 def build_world_server(definition: WorldDefinition) -> Server:
-    """Spin up an MCP server that mirrors a world's tools and
-    predicates. Predicates are exposed as zero-arg tools that return
-    a boolean; this is enough for clients that want to introspect a
-    run mid-flight."""
-    tools, predicates = definition.build()
-    plugin_tools: List[PluginTool] = list(tools)
-    plugin_tools.extend(_predicates_as_tools(predicates))
-    return build_tools_server(definition.name, plugin_tools)
-
-
-def _predicates_as_tools(predicates: Sequence[PluginPredicate]) -> List[PluginTool]:
-    """Wrap each predicate as a zero-arg MCP tool. The trace argument
-    is fed empty since this server-only server has no scenario context;
-    callers running the predicate against a real trace should call the
-    scenario-driving form instead."""
-    out: List[PluginTool] = []
-    for p in predicates:
-        def make_fn(pred: PluginPredicate) -> Callable[[str], str]:
-            def fn(_args_json: str) -> str:
-                value = pred.fn("[]", "{}")
-                return json.dumps({"effect": {"value": bool(value)}})
-
-            return fn
-
-        out.append(
-            PluginTool(
-                name=f"predicate.{p.name}",
-                description=f"Evaluate the {p.name!r} predicate against an empty trace. "
-                "Use the scenario-driving server form for evaluation against a live run.",
-                parameters={"type": "object", "properties": {}, "required": []},
-                fn=make_fn(p),
-            )
-        )
-    return out
+    """Spin up an MCP server that exposes a world's tools. Predicates
+    are scenario-context primitives (they walk the trace and answer
+    questions about it), so they are intentionally not surfaced here;
+    a client that needs predicate evaluation runs against the
+    scenario-driving form via :func:`build_scenario_server`."""
+    tools, _predicates = definition.build()
+    return build_tools_server(definition.name, list(tools))
 
 
 def build_scenario_server(
