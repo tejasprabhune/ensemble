@@ -48,6 +48,20 @@ enum Cmd {
         /// the registered world's path.
         #[arg(long)]
         package_dir: Option<PathBuf>,
+        /// LLM backend: mock | anthropic | openai | vllm | auto.
+        /// Passed through to the python entry point.
+        #[arg(long)]
+        backend: Option<String>,
+        /// Where to write the trace JSONL (default: ./traces).
+        #[arg(long)]
+        traces_dir: Option<PathBuf>,
+        /// Skip `uv run` and invoke the current python interpreter
+        /// directly. Useful when the host project's pyproject.toml
+        /// has an unresolvable dependency or a stale lockfile: the
+        /// scenario only needs `ensemble` itself on sys.path, which
+        /// the active venv already has.
+        #[arg(long)]
+        no_sync: bool,
     },
     /// Trace-related subcommands.
     Trace {
@@ -145,7 +159,18 @@ fn main() -> Result<()> {
             world,
             manifest,
             package_dir,
-        } => run_scenario(&scenario, world.as_deref(), manifest.as_deref(), package_dir.as_deref()),
+            backend,
+            traces_dir,
+            no_sync,
+        } => run_scenario(
+            &scenario,
+            world.as_deref(),
+            manifest.as_deref(),
+            package_dir.as_deref(),
+            backend.as_deref(),
+            traces_dir.as_deref(),
+            no_sync,
+        ),
         Cmd::Trace { sub } => match sub {
             TraceCmd::View { trace, port, site } => {
                 trace_serve::serve(&trace, port, site.as_deref())
@@ -158,8 +183,8 @@ fn main() -> Result<()> {
 }
 
 fn worlds_subcommand(sub: WorldsCmd) -> Result<()> {
-    let mut cmd = Command::new("uv");
-    cmd.args(["run", "python", "-m", "ensemble.cli_worlds"]);
+    let mut cmd = python_command(false);
+    cmd.args(["-m", "ensemble.cli_worlds"]);
     match sub {
         WorldsCmd::List => {
             cmd.arg("list");
@@ -179,7 +204,7 @@ fn worlds_subcommand(sub: WorldsCmd) -> Result<()> {
     }
     let status = cmd
         .status()
-        .context("invoking uv run python -m ensemble.cli_worlds; is uv on PATH?")?;
+        .context("invoking python -m ensemble.cli_worlds; is python on PATH?")?;
     if !status.success() {
         return Err(anyhow!("worlds subcommand failed (exit {status})"));
     }
@@ -191,6 +216,9 @@ fn run_scenario(
     world: Option<&str>,
     manifest: Option<&std::path::Path>,
     package_dir: Option<&std::path::Path>,
+    backend: Option<&str>,
+    traces_dir: Option<&std::path::Path>,
+    no_sync: bool,
 ) -> Result<()> {
     // Default to the bundled plank scenarios when the caller did not
     // specify a package dir, so the README's quick-start works
@@ -199,8 +227,8 @@ fn run_scenario(
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("examples/plank"));
 
-    let mut cmd = Command::new("uv");
-    cmd.args(["run", "python", "-m", "ensemble.cli_run"])
+    let mut cmd = python_command(no_sync);
+    cmd.args(["-m", "ensemble.cli_run"])
         .args(["--scenario", scenario])
         .args(["--world", world.unwrap_or("plank")])
         .args(["--package-dir"])
@@ -208,14 +236,47 @@ fn run_scenario(
     if let Some(m) = manifest {
         cmd.args(["--manifest"]).arg(m);
     }
+    if let Some(b) = backend {
+        cmd.args(["--backend", b]);
+    }
+    if let Some(td) = traces_dir {
+        cmd.args(["--traces-dir"]).arg(td);
+    }
 
     let status = cmd
         .status()
-        .context("invoking uv run python -m ensemble.cli_run; is uv on PATH?")?;
+        .context("invoking python -m ensemble.cli_run; is python on PATH?")?;
     if !status.success() {
         return Err(anyhow!("scenario run failed (exit {status})"));
     }
     Ok(())
+}
+
+/// Build the leading command that ends up invoking python. The
+/// default flow is `uv run python` so the host project's lockfile
+/// is honoured; `--no-sync` (or `ENSEMBLE_NO_SYNC=1` in the env)
+/// bypasses uv and uses the active interpreter directly. This
+/// matters when the host's pyproject.toml has an unresolvable dep
+/// or a yanked version that would crash uv before the scenario
+/// even starts.
+fn python_command(no_sync: bool) -> Command {
+    let skip = no_sync || std::env::var("ENSEMBLE_NO_SYNC").is_ok();
+    if skip {
+        // Prefer the active virtualenv's python so the user's
+        // dependencies and ensemble itself resolve from the same
+        // place. Fall back to whatever `python` is on PATH so the
+        // CLI still works outside a venv.
+        if let Ok(venv) = std::env::var("VIRTUAL_ENV") {
+            let candidate = PathBuf::from(venv).join("bin").join("python");
+            if candidate.exists() {
+                return Command::new(candidate);
+            }
+        }
+        return Command::new("python");
+    }
+    let mut cmd = Command::new("uv");
+    cmd.args(["run", "python"]);
+    cmd
 }
 
 fn mcp_subcommand(sub: McpCmd) -> Result<()> {

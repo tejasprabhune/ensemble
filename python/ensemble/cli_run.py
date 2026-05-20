@@ -40,20 +40,51 @@ def _add_package_dir(p: Path) -> None:
 def _import_scenarios_package(package_dir: Optional[Path]) -> None:
     """Make the scenarios in the supplied directory visible to the
     @scenario decorator's global registry. The directory is expected to
-    contain either a `scenarios/` subpackage or a flat set of scenario
-    modules under a `scenarios` name."""
+    contain either a ``scenarios/`` subpackage or a flat set of
+    scenario modules under a ``scenarios`` name.
+
+    Tries the conventional package import first. If a ``scenarios``
+    directory exists with no ``__init__.py``, walks the directory and
+    imports each ``*.py`` module by file path so a freshly-cloned
+    scenario project without the boilerplate ``__init__`` still
+    registers its scenarios.
+    """
     if package_dir is None:
         return
     _add_package_dir(package_dir)
+    scenarios_root = package_dir.resolve() / "scenarios"
     try:
         importlib.import_module("scenarios")
-    except ImportError as e:
-        # Surface the underlying import error so a misnamed module is
-        # not confused with the package being absent.
-        print(
-            f"warning: could not import scenarios package from {package_dir}: {e}",
-            file=sys.stderr,
+        return
+    except ImportError as primary:
+        if not scenarios_root.is_dir():
+            print(
+                f"warning: could not import scenarios package from {package_dir}: {primary}",
+                file=sys.stderr,
+            )
+            return
+
+    # Fallback: import every scenario module by file path. This covers
+    # the "I forgot to write scenarios/__init__.py" papercut without
+    # us having to materialise one on disk.
+    import importlib.util as _util  # noqa: WPS433  (local import keeps the cli startup cheap)
+
+    for module_path in sorted(scenarios_root.glob("*.py")):
+        if module_path.name.startswith("_"):
+            continue
+        spec = _util.spec_from_file_location(
+            f"scenarios.{module_path.stem}", module_path
         )
+        if spec is None or spec.loader is None:
+            continue
+        module = _util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except Exception as e:
+            print(
+                f"warning: failed to import {module_path}: {e}",
+                file=sys.stderr,
+            )
 
 
 def _resolve_world(name: Optional[str]) -> Optional[Path]:
