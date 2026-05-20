@@ -45,7 +45,7 @@ pub(crate) struct WorldInner {
     pub(crate) bus: Bus,
     pub(crate) log: EventLog,
     pub(crate) backend: SharedBackend,
-    pub(crate) backend_kind: BackendKind,
+    pub(crate) backend_kind: &'static str,
     pub(crate) script: MockScript,
     pub(crate) tools: Arc<ToolRegistry>,
     pub(crate) predicates: Arc<PredicateRegistry>,
@@ -59,14 +59,6 @@ pub(crate) struct WorldInner {
     /// Per-agent message queues for externally driven slots, keyed by
     /// agent id. Populated when `register_external_agent` is called.
     pub(crate) external_inboxes: HashMap<ActorId, ExternalAgentInbox>,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
-pub(crate) enum BackendKind {
-    Mock,
-    Anthropic,
-    OpenAI,
-    Vllm,
 }
 
 #[derive(Clone)]
@@ -235,7 +227,7 @@ impl World {
         // window even with the mock backend, so bump it to 2s for
         // mock and to 60s for any real-network backend.
         budget.quiescence_ms = 2_000;
-        if !matches!(kind, BackendKind::Mock) {
+        if kind != "mock" {
             budget.quiescence_ms = 60_000;
         }
         let resources = Arc::new(ensemble_runtime::resources::shared(&name));
@@ -264,12 +256,7 @@ impl World {
     /// `"openai"`, `"vllm"`).
     #[getter]
     fn backend(&self) -> &'static str {
-        match self.inner.lock().backend_kind {
-            BackendKind::Mock => "mock",
-            BackendKind::Anthropic => "anthropic",
-            BackendKind::OpenAI => "openai",
-            BackendKind::Vllm => "vllm",
-        }
+        self.inner.lock().backend_kind
     }
 
     #[getter]
@@ -1485,7 +1472,7 @@ fn build_backend(
     name: Option<&str>,
     base_url: Option<&str>,
     script: &MockScript,
-) -> PyResult<(SharedBackend, BackendKind)> {
+) -> PyResult<(SharedBackend, &'static str)> {
     let chosen = match name.unwrap_or("mock") {
         "mock" => "mock",
         "anthropic" => "anthropic",
@@ -1507,10 +1494,7 @@ fn build_backend(
         }
     };
     Ok(match chosen {
-        "mock" => (
-            Arc::new(MockBackend::new(script.clone())) as SharedBackend,
-            BackendKind::Mock,
-        ),
+        "mock" => (Arc::new(MockBackend::new(script.clone())) as SharedBackend, "mock"),
         "anthropic" => {
             let mut be = AnthropicBackend::from_env()
                 .map_err(|e| PyValueError::new_err(format!("{e}")))?;
@@ -1520,7 +1504,7 @@ fn build_backend(
             if let Some(url) = url {
                 be = be.with_base_url(url);
             }
-            (Arc::new(be) as SharedBackend, BackendKind::Anthropic)
+            (Arc::new(be) as SharedBackend, "anthropic")
         }
         "openai" => {
             let mut be = OpenAIBackend::from_env()
@@ -1531,14 +1515,14 @@ fn build_backend(
             if let Some(url) = url {
                 be = be.with_base_url(url);
             }
-            (Arc::new(be) as SharedBackend, BackendKind::OpenAI)
+            (Arc::new(be) as SharedBackend, "openai")
         }
         "vllm" => {
             let base = base_url.ok_or_else(|| {
                 PyValueError::new_err("vllm backend requires base_url=...")
             })?;
             let be = LocalAdapterBackend::new(base);
-            (Arc::new(be) as SharedBackend, BackendKind::Vllm)
+            (Arc::new(be) as SharedBackend, "vllm")
         }
         _ => unreachable!(),
     })
