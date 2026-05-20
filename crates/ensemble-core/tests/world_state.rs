@@ -124,7 +124,7 @@ async fn apply_emits_tool_result_and_diff() {
         other => panic!("expected ToolResult, got {other:?}"),
     }
     match &events[1].payload {
-        EventPayload::StateDiff { diff } => {
+        EventPayload::StateDiff { diff, seed: _ } => {
             assert_eq!(diff["field"], "value");
             assert_eq!(diff["old"], 0);
             assert_eq!(diff["new"], 5);
