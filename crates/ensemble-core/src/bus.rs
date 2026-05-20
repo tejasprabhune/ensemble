@@ -69,19 +69,27 @@ pub struct Bus {
 
 #[derive(Default, Clone, Debug)]
 struct CostState {
+    /// World-wide running totals per unit.
     totals: std::collections::HashMap<String, f64>,
+    /// World-wide caps per unit.
     budgets: std::collections::HashMap<String, f64>,
+    /// Per-actor running totals: actor_id -> unit -> total.
+    actor_totals: std::collections::HashMap<ActorId, std::collections::HashMap<String, f64>>,
+    /// Per-actor caps: actor_id -> unit -> cap.
+    actor_budgets: std::collections::HashMap<ActorId, std::collections::HashMap<String, f64>>,
 }
 
 /// A request to halt the scheduler from outside the watcher's
 /// predicate / budget machinery. Set by world-level checks (the
 /// budget tracker calls `Bus::halt_with` when a unit exceeds its
-/// declared cap).
+/// declared cap). `actor` is set when the cap that fired was scoped
+/// to a single actor; `None` means the world-wide cap fired.
 #[derive(Clone, Debug)]
 pub struct HaltReason {
     pub unit: String,
     pub amount: f64,
     pub budget: f64,
+    pub actor: Option<ActorId>,
 }
 
 struct BusInner {
@@ -103,11 +111,29 @@ impl Bus {
         }
     }
 
-    /// Declare a budget cap for `unit`. When [`record_cost`] would
-    /// push the running total past this, the bus halts the scheduler
-    /// (via [`halt_with`]) with `BudgetExceeded`.
+    /// Declare a world-wide budget cap for `unit`. When [`record_cost`]
+    /// would push the world-wide running total past this, the bus halts
+    /// the scheduler (via [`halt_with`]) with `BudgetExceeded`.
     pub async fn set_budget(&self, unit: impl Into<String>, amount: f64) {
         self.costs.lock().await.budgets.insert(unit.into(), amount);
+    }
+
+    /// Declare a per-actor budget cap. Same semantics as `set_budget`
+    /// but checked against the actor's own running total, not the
+    /// world-wide total. A cost recorded against a different actor
+    /// does not consume this cap.
+    pub async fn set_actor_budget(
+        &self,
+        actor: ActorId,
+        unit: impl Into<String>,
+        amount: f64,
+    ) {
+        let mut state = self.costs.lock().await;
+        state
+            .actor_budgets
+            .entry(actor)
+            .or_default()
+            .insert(unit.into(), amount);
     }
 
     pub async fn cost_total(&self, unit: &str) -> f64 {
@@ -120,21 +146,51 @@ impl Bus {
             .unwrap_or(&0.0)
     }
 
-    /// Record a cost annotation. Updates the running total, appends
-    /// a `Cost` event to the log, and signals the scheduler to halt
-    /// if a budget cap has been crossed.
-    pub async fn record_cost(&self, unit: impl Into<String>, amount: f64) {
+    pub async fn actor_cost_total(&self, actor: &ActorId, unit: &str) -> f64 {
+        let state = self.costs.lock().await;
+        state
+            .actor_totals
+            .get(actor)
+            .and_then(|m| m.get(unit))
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// Record a cost annotation. Updates the world-wide running total
+    /// (and the per-actor total when `actor` is supplied), appends a
+    /// `Cost` event to the log, and signals the scheduler to halt if
+    /// any cap (world-wide or per-actor) has been crossed.
+    pub async fn record_cost(
+        &self,
+        unit: impl Into<String>,
+        amount: f64,
+        actor: Option<ActorId>,
+    ) {
         let unit = unit.into();
-        let (new_total, budget) = {
+        let (new_total, world_budget, actor_total, actor_budget) = {
             let mut state = self.costs.lock().await;
             let total = state.totals.entry(unit.clone()).or_insert(0.0);
             *total += amount;
             let new_total = *total;
-            let budget = state.budgets.get(&unit).copied();
-            (new_total, budget)
+            let world_budget = state.budgets.get(&unit).copied();
+            let (actor_total, actor_budget) = if let Some(ref a) = actor {
+                let totals = state.actor_totals.entry(a.clone()).or_default();
+                let entry = totals.entry(unit.clone()).or_insert(0.0);
+                *entry += amount;
+                let actor_total = *entry;
+                let actor_budget = state
+                    .actor_budgets
+                    .get(a)
+                    .and_then(|m| m.get(&unit))
+                    .copied();
+                (Some(actor_total), actor_budget)
+            } else {
+                (None, None)
+            };
+            (new_total, world_budget, actor_total, actor_budget)
         };
         self.append_event(
-            None,
+            actor.clone(),
             EventPayload::Cost {
                 unit: unit.clone(),
                 amount,
@@ -142,12 +198,25 @@ impl Bus {
             },
         )
         .await;
-        if let Some(cap) = budget {
+        if let (Some(at), Some(cap)) = (actor_total, actor_budget) {
+            if at > cap {
+                self.halt_with(HaltReason {
+                    unit: unit.clone(),
+                    amount: at,
+                    budget: cap,
+                    actor: actor.clone(),
+                })
+                .await;
+                return;
+            }
+        }
+        if let Some(cap) = world_budget {
             if new_total > cap {
                 self.halt_with(HaltReason {
                     unit,
                     amount: new_total,
                     budget: cap,
+                    actor: None,
                 })
                 .await;
             }

@@ -273,7 +273,7 @@ impl Actor for AgentActor {
                             .await;
                         }
                         for (unit, amount) in costs {
-                            bus.record_cost(unit, amount).await;
+                            bus.record_cost(unit, amount, Some(self.id.clone())).await;
                         }
                     }
                     Err(e) => {
