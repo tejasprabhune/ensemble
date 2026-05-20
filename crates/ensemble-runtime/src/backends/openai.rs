@@ -267,10 +267,20 @@ impl OpenAIBackend {
                     map.insert(k.clone(), v.clone());
                 }
             }
-            // When `reasoning` is present but `summary` is not, add
-            // `summary: "auto"` so the API returns reasoning summary
-            // text alongside the completion.
-            if let Some(serde_json::Value::Object(rmap)) = map.get_mut("reasoning") {
+            // Default `reasoning: {summary: "auto"}` so the API
+            // returns a reasoning summary on every call. The model
+            // surfaces it through CompletionResponse.reasoning_text
+            // and the agent loop emits it on the bus as an
+            // agent_message before the tool_calls. Reasoning-capable
+            // models honor the request; non-reasoning models ignore
+            // the field. Callers that want to suppress reasoning can
+            // pass `params={"reasoning": {"summary": "none"}}`.
+            if !map.contains_key("reasoning") {
+                map.insert(
+                    "reasoning".to_string(),
+                    serde_json::json!({"summary": "auto"}),
+                );
+            } else if let Some(serde_json::Value::Object(rmap)) = map.get_mut("reasoning") {
                 rmap.entry("summary".to_string())
                     .or_insert(serde_json::Value::String("auto".into()));
             }
