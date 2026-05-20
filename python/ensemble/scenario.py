@@ -1,4 +1,24 @@
-"""Scenario decorator and the small Python surface around it."""
+"""Scenario decorator and the Python surface around it.
+
+Two ways to build a world. The factory form,
+``register_world(name, setup=...)``, populates a global registry the
+``World(name)`` constructor reads. The subclass form,
+``class MyWorld(World)`` with methods decorated by ``@tool(...)`` /
+``@predicate(...)``, auto-registers itself when first instantiated.
+
+The Python surface in this module covers both. ``World.__init__``
+inspects the runtime class: when called on a subclass it walks the
+subclass for decorated methods, calls ``self.setup()`` if defined,
+and forwards the resulting tools and predicates to the native side.
+``world.shared_state`` is a mutable JSON-serialisable dict the
+runtime forwards to sandbox workers via the
+``ENSEMBLE_SHARED_STATE`` environment variable.
+
+``world.log_event(kind, payload)`` and ``world.log_note(text)`` are
+the public trace-emit helpers. ``spawn_agent`` automatically emits
+an ``agent_spawned`` event with the resolved model and system
+prompt, so worlds and viewers no longer need a per-scenario helper.
+"""
 
 from __future__ import annotations
 
@@ -9,12 +29,23 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, ClassVar, Dict, List, Optional
 
 from ._native import World as _NativeWorld
 from .env import load_dotenv
 from .persona import PersonaResolver, load_persona, register_personas_dir
-from .world import get_world
+from .world import (
+    _PREDICATE_META_ATTR,
+    _TOOL_META_ATTR,
+    PluginPredicate,
+    PluginTool,
+    WorldDefinition,
+    _coerce_to_plugin_predicate,
+    _coerce_to_plugin_tool,
+    _wrap_predicate_fn,
+    _wrap_tool_fn,
+    get_world,
+)
 
 
 def _log_grader_scores(world_obj: "World", scenario_name: str, scores: Dict[str, Any]) -> None:
@@ -37,20 +68,45 @@ def _log_grader_scores(world_obj: "World", scenario_name: str, scores: Dict[str,
         pass
 
 
-def _make_sandbox_dispatcher(world_name: str, tool_name: str) -> Callable[[str], str]:
-    """Build a wrapper that dispatches a tool call to a fresh
-    subprocess. The subprocess imports the world's python package
-    (which re-registers tools), invokes the named tool with the
-    supplied JSON args, and writes the JSON response on stdout.
+SANDBOX_SHARED_STATE_ENV = "ENSEMBLE_SHARED_STATE"
+SANDBOX_PACKAGE_ENV = "ENSEMBLE_SANDBOX_PACKAGE"
+SANDBOX_PACKAGE_DIR_ENV = "ENSEMBLE_SANDBOX_PACKAGE_DIR"
 
-    A failure to spawn or a non-zero exit is surfaced as a structured
-    error effect so the calling agent gets a normal tool-result rather
-    than the scheduler crashing.
+
+def _make_sandbox_dispatcher(
+    world_name: str,
+    tool_name: str,
+    world_ref: "World",
+) -> Callable[[str], str]:
+    """Build a wrapper that dispatches a tool call to a fresh
+    subprocess. The worker imports the world's python package and
+    re-registers the tool from scratch; the parent forwards
+    ``shared_state`` (JSON-serialised) plus the package + package_dir
+    hint so the worker resolves the same world even when
+    ``~/.ensemble/worlds.toml`` would have given it a different one
+    or nothing at all.
     """
 
     import subprocess
 
     def dispatcher(args_json: str) -> str:
+        env = os.environ.copy()
+        # Forward shared_state at call time so each dispatch sees the
+        # parent's latest snapshot; closures-over-state do not cross
+        # the boundary, but this dict does.
+        try:
+            env[SANDBOX_SHARED_STATE_ENV] = json.dumps(world_ref.shared_state)
+        except (TypeError, ValueError):
+            env[SANDBOX_SHARED_STATE_ENV] = "{}"
+        # Tell the worker exactly which python package to import. The
+        # worker still falls back to the worlds registry if these are
+        # unset, but the explicit path eliminates the "registry says
+        # one thing, parent loaded another" failure mode the round-2
+        # KTBench feedback called out.
+        if world_ref._sandbox_python_package:
+            env[SANDBOX_PACKAGE_ENV] = world_ref._sandbox_python_package
+        if world_ref._sandbox_package_dir:
+            env[SANDBOX_PACKAGE_DIR_ENV] = str(world_ref._sandbox_package_dir)
         try:
             proc = subprocess.run(
                 [sys.executable, "-m", "ensemble.tool_worker",
@@ -59,6 +115,7 @@ def _make_sandbox_dispatcher(world_name: str, tool_name: str) -> Callable[[str],
                 capture_output=True,
                 text=True,
                 check=False,
+                env=env,
             )
         except FileNotFoundError as e:
             return json.dumps({
@@ -80,9 +137,6 @@ def _make_sandbox_dispatcher(world_name: str, tool_name: str) -> Callable[[str],
                     ),
                 }
             })
-        # The worker's last stdout line is the JSON envelope; earlier
-        # lines (if any) are diagnostic. Splitting on the last
-        # newline lets a worker print progress as it runs.
         stdout = (proc.stdout or "").strip()
         if not stdout:
             return json.dumps({
@@ -100,7 +154,7 @@ def _make_sandbox_dispatcher(world_name: str, tool_name: str) -> Callable[[str],
 
 @dataclass
 class Until:
-    """A halting condition. Holds a JSON-serializable spec the Rust
+    """A halting condition. Holds a JSON-serialisable spec the rust
     side compiles into a predicate."""
 
     spec: Dict[str, Any]
@@ -116,8 +170,8 @@ class Until:
 
 
 def any_of(*conditions: Until) -> Until:
-    """Halts when any of the supplied conditions fire. Flattens nested
-    `any_of` for the rust side."""
+    """Halts when any of the supplied conditions fire. Flattens
+    nested `any_of` so the wire spec stays shallow."""
     parts: List[Dict[str, Any]] = []
     for c in conditions:
         if c.spec.get("kind") == "any_of":
@@ -136,6 +190,17 @@ def all_of(*conditions: Until) -> Until:
         else:
             parts.append(c.spec)
     return Until({"kind": "all_of", "parts": parts})
+
+
+def until_predicate(name: str, **args: Any) -> Until:
+    """Halt when a named world predicate returns true. The rust
+    scheduler evaluates the predicate against the live trace each
+    tick; composes with turn-count via ``|`` / ``&`` so the common
+    "stop on submit, cap at N turns" shape is one expression."""
+    spec: Dict[str, Any] = {"kind": "predicate", "name": name}
+    if args:
+        spec["args"] = args
+    return Until(spec)
 
 
 class TurnCount:
@@ -169,6 +234,14 @@ class RunResult:
     trace: List[Dict[str, Any]] = field(default_factory=list)
 
 
+class PredicateError(KeyError):
+    """Raised when ``world.evaluate_predicate`` is called with a
+    name no predicate was registered under."""
+
+
+_PREDICATE_NO_DEFAULT = object()
+
+
 class User:
     def __init__(
         self,
@@ -199,12 +272,6 @@ class User:
 
     @property
     def backend_info(self) -> Optional[Dict[str, Any]]:
-        """Resolved per-user backend, or ``None`` when this user
-        shares the world's default. Populated for trained personas
-        whose TOML supplied an ``adapter_name``; the dict reports the
-        kind (currently always ``"vllm"``), the base URL, and the
-        adapter name. Useful for verifying the trained-persona auto-
-        wiring without standing up the backend itself."""
         info = self._native.backend_info()
         return info if isinstance(info, dict) else None
 
@@ -214,14 +281,19 @@ class User:
     def act(self, tool: str, **kwargs: Any) -> None:
         self._native.act_json(tool, json.dumps(kwargs))
 
-    # The convenience predicates a scenario might want at grader time.
-    # All resolve to world.evaluate_predicate(name, {"user_id": self.id}),
-    # so worlds publish them by registering same-named predicates that
-    # read args["user_id"]. Returning False when the world did not
-    # register the predicate keeps graders robust to optional worlds.
-
-    def predicate(self, name: str) -> bool:
-        return bool(self._world.evaluate_predicate(name, {"user_id": self.id}))
+    def predicate(self, name: str, default: Any = False) -> bool:
+        """Per-user predicate convenience. Defaults to False on
+        unknown predicate names so portable graders that target
+        multiple worlds with different predicate sets stay robust;
+        pass ``default=...`` to override, or call
+        ``world.evaluate_predicate`` directly to get the raise-loudly
+        behaviour."""
+        try:
+            return bool(self._world.evaluate_predicate(
+                name, {"user_id": self.id}, default=default,
+            ))
+        except PredicateError:
+            return bool(default)
 
     def hidden_goal_resolved(self) -> bool:
         return self.predicate("hidden_goal_resolved")
@@ -269,15 +341,25 @@ class _ExternalAgent:
 
 
 class World:
-    """A scenario-author-facing wrapper around the native World.
+    """Scenario-author-facing wrapper around the native World.
 
-    Holds back-references so `User` and `Agent` can stash hidden state
-    accessible after the run completes.
+    Used in two shapes:
+
+    1. ``World("plank")`` references a world registered via
+       ``register_world("plank", ...)``.
+    2. ``class PopcornWorld(World)`` with ``@tool`` / ``@predicate``
+       decorated methods and an optional ``setup(self)``. Subclasses
+       auto-derive a world name from ``world_name`` (a class
+       attribute) or the lower-cased class name.
     """
+
+    # Subclasses override to override the world name; default falls
+    # back to the lower-cased class name.
+    world_name: ClassVar[Optional[str]] = None
 
     def __init__(
         self,
-        name: str,
+        name: Optional[str] = None,
         backend: Optional[str] = None,
         base_url: Optional[str] = None,
         dotenv: bool | str = True,
@@ -294,49 +376,145 @@ class World:
                 else:
                     path = dotenv
             load_dotenv(path, override=override)
-        definition = get_world(name)
-        if name != "noop" and definition is None:
-            raise ValueError(
-                f"no world named {name!r}; import the world's python package "
-                "(which calls register_world) before constructing it, or use "
-                "World(\"noop\") for a bare world"
+
+        is_subclass = type(self) is not World
+        if is_subclass:
+            resolved_name = (
+                name
+                or self.world_name
+                or type(self).__name__.lower()
             )
-        self._native = _NativeWorld(name, backend=backend, base_url=base_url)
+            definition = get_world(resolved_name)
+        else:
+            resolved_name = name or "noop"
+            definition = get_world(resolved_name)
+            if resolved_name != "noop" and definition is None:
+                raise ValueError(
+                    f"no world named {resolved_name!r}; import the world's "
+                    "python package (which calls register_world) before "
+                    "constructing it, or use World(\"noop\") for a bare "
+                    "world. Subclasses of World skip the registry; if you "
+                    "meant to write a subclass, define `class MyWorld(World)` "
+                    "and instantiate that instead."
+                )
+
+        self._native = _NativeWorld(resolved_name, backend=backend, base_url=base_url)
         if trace_path:
             self._native.set_trace_path(str(trace_path))
         self.users: List[User] = []
         self.agents: List[Agent] = []
-        # Instance-scoped external-agent state. When set, the
-        # spawn_agent call whose id matches gets converted into an
-        # external proxy (the slot the MCP-connected client drives)
-        # rather than going through native spawn_agent. Lives on the
-        # instance so concurrent scenarios in the same process do not
-        # interfere; the previous design patched the spawn_agent
-        # method at class level.
         self._external_agent_id: Optional[str] = external_agent_id
         self._external_agent: Optional[Agent] = None
         self._external_agent_tools: List[str] = []
-        # Apply python-registered tools and predicates for this world.
+
+        # Per-instance state the scenario author can mutate. Survives
+        # tool calls in-process. For sandboxed tools the runtime
+        # serialises it into the worker's environment via
+        # ENSEMBLE_SHARED_STATE; mutations the worker makes do *not*
+        # propagate back, since the worker process exits after each
+        # call. Treat it as a configuration channel for sandboxed
+        # tools and a per-instance state bag for in-process ones.
+        self.shared_state: Dict[str, Any] = {}
+        # Sandbox-worker hints. ``shared_state`` plus these two strings
+        # are everything the worker needs to re-create the same world
+        # in a fresh interpreter.
+        self._sandbox_python_package: Optional[str] = None
+        self._sandbox_package_dir: Optional[Path] = None
+
+        # Predicates registered by post-construction code (subclass
+        # walker, scenario callsites). Tracked here so
+        # ``predicate_names`` and ``evaluate_predicate(default=...)``
+        # can answer authoritatively without round-tripping to the
+        # rust side every call.
+        self._registered_predicate_names: set[str] = set()
+
         if definition is not None:
-            for rname, permits in definition.resources.items():
-                self._native.declare_resource(rname, permits)
-            tools, predicates = definition.build()
-            for t in tools:
-                fn = t.fn
-                if getattr(t, "sandbox", False):
-                    sandbox_world = t.sandbox_world or name
-                    fn = _make_sandbox_dispatcher(sandbox_world, t.name)
-                self._native.register_tool(
-                    t.name,
-                    t.description,
-                    json.dumps(t.parameters),
-                    fn,
-                    t.timeout_ms,
-                    t.resources,
-                )
-            for p in predicates:
-                self._native.register_predicate(p.name, p.fn)
+            self._apply_definition(definition)
+
+        if is_subclass:
+            # Subclass path: gather decorated methods and call
+            # setup() so the subclass has somewhere to build its
+            # state. Important ordering: setup runs *before* the
+            # decorated-method walker so a setup that initialises
+            # ``self.db`` is in place when the tool wrappers run.
+            self._sandbox_python_package = self._sandbox_python_package or type(self).__module__.split(".")[0]
+            if hasattr(self, "setup"):
+                self.setup()
+            self._register_subclass_members()
+
         self._announce_backend(requested=backend, verbose=verbose)
+
+    def _apply_definition(self, definition: WorldDefinition) -> None:
+        for rname, permits in definition.resources.items():
+            self._native.declare_resource(rname, permits)
+        if definition.initial_shared_state:
+            self.shared_state = dict(definition.initial_shared_state)
+        if definition.python_package and not self._sandbox_python_package:
+            self._sandbox_python_package = definition.python_package
+        if definition.package_dir and not self._sandbox_package_dir:
+            self._sandbox_package_dir = definition.package_dir
+        tools, predicates = definition.build()
+        for t in tools:
+            self._register_native_tool(t)
+        for p in predicates:
+            self._register_native_predicate(p)
+
+    def _register_subclass_members(self) -> None:
+        """Walk this instance's class for ``@tool`` and ``@predicate``
+        decorated methods, build per-instance ``PluginTool`` /
+        ``PluginPredicate`` objects bound to ``self``, and forward
+        them to the native registry. Decorated methods on a base
+        ``World`` (none today) would be picked up too."""
+        cls = type(self)
+        # MRO walk so a subclass that mixes in another World subclass
+        # inherits its decorated methods (or shadows them by
+        # redefining the method on the more-derived class).
+        seen: set[str] = set()
+        for klass in cls.__mro__:
+            if klass is World or klass is object:
+                continue
+            for attr_name, attr in klass.__dict__.items():
+                if attr_name in seen or not callable(attr):
+                    continue
+                meta_tool = getattr(attr, _TOOL_META_ATTR, None)
+                meta_pred = getattr(attr, _PREDICATE_META_ATTR, None)
+                if meta_tool is None and meta_pred is None:
+                    continue
+                bound = getattr(self, attr_name)
+                if meta_tool is not None:
+                    plugin = _wrap_tool_fn(
+                        meta_tool["name"],
+                        meta_tool["description"],
+                        meta_tool["parameters"],
+                        bound,
+                        timeout_ms=meta_tool.get("timeout_ms"),
+                        resources=meta_tool.get("resources"),
+                        sandbox=meta_tool.get("sandbox", False),
+                        sandbox_world=meta_tool.get("sandbox_world"),
+                    )
+                    self._register_native_tool(plugin)
+                if meta_pred is not None:
+                    plugin = _wrap_predicate_fn(meta_pred["name"], bound)
+                    self._register_native_predicate(plugin)
+                seen.add(attr_name)
+
+    def _register_native_tool(self, t: PluginTool) -> None:
+        fn = t.fn
+        if getattr(t, "sandbox", False):
+            sandbox_world = t.sandbox_world or self.name
+            fn = _make_sandbox_dispatcher(sandbox_world, t.name, self)
+        self._native.register_tool(
+            t.name,
+            t.description,
+            json.dumps(t.parameters),
+            fn,
+            t.timeout_ms,
+            t.resources,
+        )
+
+    def _register_native_predicate(self, p: PluginPredicate) -> None:
+        self._native.register_predicate(p.name, p.fn)
+        self._registered_predicate_names.add(p.name)
 
     def _announce_backend(
         self, requested: Optional[str], verbose: Optional[bool]
@@ -344,8 +522,6 @@ class World:
         chosen = self._native.backend
         if verbose is None:
             verbose = os.environ.get("ENSEMBLE_QUIET", "").strip() not in {"1", "true", "yes"}
-        # Surface a key fingerprint so users can spot a stale shell env
-        # var that is overriding their .env file.
         key_hint = ""
         env_var = {
             "anthropic": "ANTHROPIC_API_KEY",
@@ -372,6 +548,9 @@ class World:
             note = f"ensemble: backend={chosen} (auto-detected from environment){key_hint}"
         else:
             note = f"ensemble: backend={chosen}{key_hint}"
+        # Print BEFORE the first LLM call so the user can see what
+        # backend is about to do work, not after it has already
+        # silently fallen back to mock.
         if verbose:
             print(note, file=sys.stderr)
         try:
@@ -393,14 +572,9 @@ class World:
 
     @property
     def trace_path(self) -> Optional[str]:
-        """Path of the current live-trace sink, if any."""
         return self._native.trace_path()
 
     def set_trace_path(self, path: Optional[str]) -> None:
-        """Mirror every event to a JSONL file as it is appended.
-
-        Passing ``None`` detaches the sink. Attaching mid-run picks up
-        future events; previously-buffered ones are not replayed."""
         self._native.set_trace_path(str(path) if path else None)
 
     def spawn_user(
@@ -412,21 +586,10 @@ class World:
         system_prompt: Optional[str] = None,
         hidden_state: Optional[Dict[str, Any]] = None,
     ) -> User:
-        """Spawn a user. If `persona` names a TOML registered on this
-        world (see `ensemble.persona.register_personas_dir`), the
-        loader pulls the system prompt template and default hidden
-        state from the file. `hidden_goal` and `hidden_state` overrides
-        win on top of the file defaults.
-
-        When the persona TOML declares ``mode = "trained"`` together
-        with ``[persona.training].adapter_name``, the spawned user
-        routes through a per-user vLLM backend rather than the
-        world's shared backend, so a trained adapter and a frontier
-        agent can share one scenario. The vLLM base URL comes from
-        ``persona.training.serve_url`` if set, otherwise from the
-        ``ENSEMBLE_VLLM_BASE_URL`` environment variable; one of them
-        must be present or the call raises.
-        """
+        """Spawn a user. ``persona`` looks up a TOML registered on this
+        world; ``hidden_state`` and ``hidden_goal`` override file
+        defaults. Trained personas (with an ``adapter_name``) route
+        through a per-user vLLM backend."""
 
         overrides: Dict[str, Any] = {}
         if hidden_goal is not None:
@@ -481,6 +644,16 @@ class World:
         )
         u = User(native, self, persona_spec=spec)
         self.users.append(u)
+        # Emit a structured spawn event so trace consumers can render
+        # the user's resolved persona, model, and system prompt
+        # without each world having to log_note them by hand.
+        self.log_event("user_spawned", {
+            "actor_id": u.id,
+            "model": model,
+            "persona": persona,
+            "system_prompt": resolved_prompt,
+            "hidden_state": resolved_hidden,
+        })
         return u
 
     def spawn_agent(
@@ -489,22 +662,50 @@ class World:
         model: str = "claude-sonnet-4-5",
         tools: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
+        params: Optional[Dict[str, Any]] = None,
     ) -> Agent:
+        """Spawn an agent. ``params`` is an open dict the runtime
+        forwards into the per-actor ``CompletionRequest`` so a single
+        agent can override the backend's defaults (temperature,
+        max_tokens, reasoning_effort, top_p, ...). Unknown keys are
+        forwarded verbatim; the backend chooses what to do with
+        them."""
         if id is not None and id == self._external_agent_id:
-            return self._spawn_external_agent(id, list(tools or []))
-        native = self._native.spawn_agent(
-            id=id, model=model, tools=tools, system_prompt=system_prompt
-        )
+            agent = self._spawn_external_agent(id, list(tools or []))
+            self.log_event("agent_spawned", {
+                "actor_id": agent.id,
+                "model": "external",
+                "tools": list(tools or []),
+                "system_prompt": system_prompt,
+                "external": True,
+            })
+            return agent
+        # Forward params via JSON when the native side accepts them.
+        # We try both signatures so older _native builds still work.
+        try:
+            native = self._native.spawn_agent(
+                id=id,
+                model=model,
+                tools=tools,
+                system_prompt=system_prompt,
+                params_json=json.dumps(params) if params else None,
+            )
+        except TypeError:
+            native = self._native.spawn_agent(
+                id=id, model=model, tools=tools, system_prompt=system_prompt,
+            )
         a = Agent(native, self)
         self.agents.append(a)
+        self.log_event("agent_spawned", {
+            "actor_id": a.id,
+            "model": model,
+            "tools": list(tools) if tools is not None else None,
+            "system_prompt": system_prompt,
+            "params": params,
+        })
         return a
 
     def _spawn_external_agent(self, id: str, tools: List[str]) -> "_ExternalAgent":
-        """Register an externally-driven agent slot at the native
-        level and return a lightweight proxy the scenario function
-        can bind to. The proxy's ``say`` routes through the world's
-        ``external_send_as`` so messages from the connected MCP
-        client land in the trace under the slot's id."""
         self._native.register_external_agent(id, tools)
         agent = _ExternalAgent(id, self)
         self._external_agent = agent
@@ -514,17 +715,29 @@ class World:
 
     def until(self, condition: Any) -> Until:
         """Coerce a condition into an `Until`. Accepts an existing
-        `Until` (returns as-is) or a magic comparison result."""
+        `Until` (returned as-is) or a magic comparison result."""
         if isinstance(condition, Until):
             return condition
         if isinstance(condition, bool):
             raise TypeError(
                 "world.until() received a bool; did you compare an int directly? "
-                "Use world.turn_count > N (not int(world.turn_count) > N)."
+                "Use world.turn_count > N (not int(world.turn_count) > N), or "
+                "compose with until_predicate(name) for halt-on-predicate."
             )
         raise TypeError(f"cannot coerce {type(condition).__name__} into Until")
 
-    # Test-only scripting passthrough.
+    def until_predicate(self, name: str, **args: Any) -> Until:
+        """Build an Until that fires when the named predicate returns
+        true. ``until_predicate('submit_called') | (world.turn_count > 30)``
+        is the canonical "stop on submit, give up after N turns"
+        shape."""
+        if name not in self._registered_predicate_names and name not in self.predicate_names():
+            raise PredicateError(
+                f"no predicate named {name!r} on world {self.name!r}; "
+                f"registered: {sorted(self.predicate_names())}"
+            )
+        return until_predicate(name, **args)
+
     def _mock_say(self, model: str, text: str) -> None:
         self._native._mock_say(model, text)
 
@@ -532,23 +745,9 @@ class World:
         self._native._mock_tool(model, tool, json.dumps(args))
 
     def apply(self, tool: str, **kwargs: Any) -> Dict[str, Any]:
-        """Run a tool as a system-level mutation: no actor, no model
-        turn, no scheduler involvement. Records `ToolCall`, the
-        registered tool's `ToolResult`, and an optional `StateDiff`
-        in the trace with no actor attribution.
-
-        This is the python equivalent of the rust
-        ``WorldHandle::apply_and_log`` path. Use it from scenario
-        setup or in tests when state should evolve without any
-        actor having to issue the call (database seeding, time-of-
-        day rollover, world-level scheduled events). For actions
-        attributed to a simulated user, call ``user.act(...)``
-        instead.
-
-        Returns the parsed envelope: ``{"effect": ..., "diff"?: ...}``
-        on success, or ``{"effect": {"ok": false, "error": ...},
-        "is_error": true}`` if the tool raised.
-        """
+        """Run a tool as a system-level mutation with no actor
+        attribution. Records the ToolCall, ToolResult, and any
+        StateDiff in the trace; returns the parsed envelope."""
         raw = self._native.apply(tool, json.dumps(kwargs))
         return json.loads(raw)
 
@@ -557,38 +756,88 @@ class World:
         return [json.loads(e) for e in self._native.trace_events()]
 
     def simulate(self) -> "Simulation":
-        """Power-user path: start the scheduler in the background and
-        return an async context manager that exposes `wait_until` for
-        mid-run intervention."""
         return Simulation(self)
 
     def trace(self) -> List[Dict[str, Any]]:
         return [json.loads(e) for e in self._native.trace_events()]
 
-    # Predicate evaluation against the current trace. Worlds publish
-    # named predicates (see ensemble-core's PredicateRegistry); both
-    # the `User` convenience methods and TOML grader expressions
-    # delegate here.
-
     def evaluate_predicate(
-        self, name: str, args: Optional[Dict[str, Any]] = None
-    ) -> Optional[bool]:
+        self,
+        name: str,
+        args: Optional[Dict[str, Any]] = None,
+        *,
+        default: Any = _PREDICATE_NO_DEFAULT,
+    ) -> Any:
+        """Evaluate a registered predicate against the current trace.
+
+        Unknown predicate names raise :class:`PredicateError` by
+        default. Pass ``default=...`` to opt into the old silent
+        behaviour (portable graders that target multiple worlds with
+        different predicate sets sometimes want this); typo-shaped
+        bugs in your own world's predicate names should not silently
+        score zero, so the raise-by-default reads loudly in CI.
+        """
         args_json = json.dumps(args) if args else None
-        return self._native.evaluate_predicate(name, args_json)
+        result = self._native.evaluate_predicate(name, args_json)
+        if result is None:
+            if default is _PREDICATE_NO_DEFAULT:
+                raise PredicateError(
+                    f"predicate {name!r} is not registered on world "
+                    f"{self.name!r}; registered: {sorted(self.predicate_names())}"
+                )
+            return default
+        return result
 
     def predicate_names(self) -> List[str]:
-        return list(self._native.predicate_names())
+        """Names of every predicate the world has registered.
+        Combines what the rust side reports with predicates the
+        python wrapper added so freshly registered subclass methods
+        show up immediately."""
+        names = set(self._native.predicate_names())
+        names.update(self._registered_predicate_names)
+        return sorted(names)
 
-    # World-level convenience predicates. Scenarios call these from
-    # graders; they return False when the world has not registered the
-    # named predicate, so graders stay robust to plug-in worlds.
+    def tool_names(self) -> List[str]:
+        """Names of every tool the world has registered."""
+        return list(self._native.tool_names())
+
+    def actor_hidden_state(self, actor_id: str) -> Dict[str, Any]:
+        """Snapshot of the hidden state for ``actor_id``. Returns an
+        empty dict for actors with no hidden state attached (most
+        agents). Useful for graders that read a reviewer agent's
+        verdict after the run completes."""
+        for u in self.users:
+            if u.id == actor_id:
+                return u.hidden_state
+        return {}
+
+    def log_note(self, text: str) -> None:
+        """Append a free-form system note to the trace. Use for
+        ad-hoc human-readable annotations; for structured events
+        prefer :meth:`log_event`."""
+        try:
+            self._native.log_note(text)
+        except AttributeError:
+            pass
+
+    def log_event(self, kind: str, payload: Optional[Dict[str, Any]] = None) -> None:
+        """Append a structured event to the trace. The runtime
+        encodes it as a system note whose body is
+        ``{"kind": kind, **payload}``; the viewer renders known
+        kinds (``agent_spawned``, ``user_spawned``, ``grader``,
+        ``problem_prompt``) specially and falls back to a generic
+        notes panel for unknown kinds."""
+        body: Dict[str, Any] = {"kind": kind}
+        if payload:
+            for k, v in payload.items():
+                body[k] = v
+        try:
+            self._native.log_note(json.dumps(body))
+        except (AttributeError, TypeError):
+            pass
 
     def had_double_refund(self) -> bool:
-        return bool(self.evaluate_predicate("had_double_refund"))
-
-    # Cost / budget API. Tool cost annotations land here through the
-    # bus; the scheduler halts with BudgetExceeded when a recorded
-    # cost would push the running total past a configured cap.
+        return bool(self.evaluate_predicate("had_double_refund", default=False))
 
     def set_budget(
         self,
@@ -596,18 +845,9 @@ class World:
         amount: float,
         actor: Optional[str] = None,
     ) -> None:
-        """Cap spend for ``unit``. Once a recorded cost would push the
-        running total past ``amount`` the scheduler halts.
-
-        When ``actor`` is supplied the cap is scoped to that actor's
-        own running total; a different actor's costs do not consume
-        the cap. Per-actor and world-wide caps coexist; each is
-        checked independently."""
         self._native.set_budget(unit, float(amount), actor)
 
     def cost_total(self, unit: str, actor: Optional[str] = None) -> float:
-        """Running total for ``unit``. World-wide unless ``actor`` is
-        supplied, in which case the actor's own total is returned."""
         return float(self._native.cost_total(unit, actor))
 
     def record_cost(
@@ -616,22 +856,14 @@ class World:
         amount: float,
         actor: Optional[str] = None,
     ) -> None:
-        """Manually annotate a cost (tests, external accounting). Tool
-        dispatch records costs against the calling actor automatically;
-        this helper is for manual or test paths."""
         self._native.record_cost(unit, float(amount), actor)
 
 
 class SimulationRun:
-    """The handle yielded by `async with world.simulate() as run`."""
-
     def __init__(self, world: "World") -> None:
         self._world = world
 
     async def wait_until(self, condition: Any, timeout_ms: int = 30_000) -> bool:
-        """Block until `condition` fires. Yields control to the event
-        loop in small slices via asyncio.to_thread so other tasks can
-        proceed (e.g., test instrumentation)."""
         until = self._world.until(condition)
         return await asyncio.to_thread(
             self._world._native.wait_for_until, until.to_json(), timeout_ms
@@ -659,13 +891,7 @@ def scenario(name: str, *, world: Optional[str] = None) -> Callable:
     """Register a scenario. The wrapped function may be either an
     async generator (yield once with the until, yield once with the
     grader dict) or a regular async function (returns the grader
-    dict directly).
-
-    ``world`` names the world this scenario expects to run against;
-    the CLI uses it as the default when ``--world`` is not supplied.
-    Callers may still pass a different world to the wrapper for
-    cross-world testing (e.g. running a generic scenario against the
-    "noop" world)."""
+    dict directly)."""
 
     def deco(func: Callable) -> Callable:
         is_gen = inspect.isasyncgenfunction(func)
@@ -683,9 +909,6 @@ def scenario(name: str, *, world: Optional[str] = None) -> Callable:
             external_agent_id: Optional[str] = None,
             on_world_constructed: Optional[Callable[["World"], None]] = None,
         ) -> RunResult:
-            # Caller-supplied world wins; otherwise fall back to the
-            # decorator's declared world; otherwise "noop" so the
-            # scaffold flow still works without a world plugin.
             resolved_world = world_name or world or "noop"
             world_obj = World(
                 resolved_world,
@@ -714,13 +937,9 @@ def scenario(name: str, *, world: Optional[str] = None) -> Callable:
                 if scores is None:
                     scores = {}
                 _log_grader_scores(world_obj, name, scores)
-                # Re-pull the trace so the grader note lands in the
-                # returned trace too; the live sink already wrote it.
                 trace = [json.loads(e) for e in world_obj._native.trace_events()]
                 return RunResult(name=name, scores=dict(scores), trace=trace)
             else:
-                # Regular async function: scenario author calls
-                # world.run(until) themselves and returns the grader dict.
                 scores = await func(world_obj)
                 _log_grader_scores(world_obj, name, scores or {})
                 trace = [json.loads(e) for e in world_obj._native.trace_events()]
@@ -748,9 +967,6 @@ def run_scenario(
     base_url: Optional[str] = None,
     trace_path: Optional[str] = None,
 ) -> RunResult:
-    """Synchronous helper: look up a scenario by name and run it.
-    ``world_name`` overrides the world declared on the @scenario;
-    leave it None to use the declared default."""
     if name not in _REGISTRY:
         raise KeyError(f"no scenario registered as {name!r}")
     return asyncio.run(

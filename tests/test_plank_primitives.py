@@ -123,5 +123,8 @@ def test_slow_billing_check_progress_appears_in_trace():
     alice.act("slow_billing_check", user_id="u-alice", steps=2)
     trace = world.trace()
     kinds = [e["payload"]["kind"] for e in trace]
-    # Order: tool_call, progress*, tool_result.
-    assert kinds == ["system", "tool_call", "progress", "progress", "tool_result"], kinds
+    # The spawn_user call emits a structured user_spawned event (as a
+    # system note); after the backend banner that is the second entry.
+    # Drop the leading system notes and assert the tool sequence.
+    tool_kinds = [k for k in kinds if k != "system"]
+    assert tool_kinds == ["tool_call", "progress", "progress", "tool_result"], kinds

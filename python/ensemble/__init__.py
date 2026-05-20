@@ -3,6 +3,7 @@
 from ._native import __version__
 from .scenario import (
     Agent,
+    PredicateError,
     RunResult,
     Until,
     User,
@@ -12,6 +13,7 @@ from .scenario import (
     any_of,
     run_scenario,
     scenario,
+    until_predicate,
 )
 from .persona import (
     PersonaResolver,
@@ -39,6 +41,7 @@ __all__ = [
     "PersonaSpec",
     "PluginPredicate",
     "PluginTool",
+    "PredicateError",
     "RunResult",
     "Until",
     "User",
@@ -61,4 +64,5 @@ __all__ = [
     "safe_eval",
     "scenario",
     "tool",
+    "until_predicate",
 ]
