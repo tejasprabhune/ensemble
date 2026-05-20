@@ -10,6 +10,7 @@ use ensemble_core::actor::ActorHandle;
 use ensemble_core::bus::{Bus, Message, Recipient};
 use ensemble_core::event::{EventLog, EventPayload};
 use ensemble_core::ids::{ActorId, MessageId};
+use ensemble_core::predicate::{PredicateCtx, PredicateRegistry};
 use ensemble_core::scheduler::{Scheduler, StopReason, TickBudget};
 use ensemble_core::until::{turn_count_exceeds, Until, UntilCtx};
 use ensemble_runtime::{
@@ -21,14 +22,17 @@ mod world_registry;
 use world_registry::{WorldBundle, WorldRegistry};
 
 fn noop_world_builder() -> WorldBundle {
-    WorldBundle { tools: ToolRegistry::new() }
+    WorldBundle {
+        tools: ToolRegistry::new(),
+        predicates: PredicateRegistry::new(),
+    }
 }
 
 fn plank_world_builder() -> WorldBundle {
-    let (_state, tools) = plank::build();
-    // The state Arc lives on inside each tool closure; tools holds it
-    // alive for as long as the world instance does.
-    WorldBundle { tools }
+    let (_state, tools, predicates) = plank::build();
+    // The state Arc lives on inside each tool and predicate closure;
+    // the bundle holds them alive for as long as the world instance.
+    WorldBundle { tools, predicates }
 }
 
 /// Inner world state shared between `World`, `User`, and `Agent`.
@@ -41,8 +45,8 @@ pub(crate) struct WorldInner {
     pub(crate) backend: SharedBackend,
     pub(crate) backend_kind: BackendKind,
     pub(crate) script: MockScript,
-    #[allow(dead_code)]
     pub(crate) tools: Arc<ToolRegistry>,
+    pub(crate) predicates: Arc<PredicateRegistry>,
     pub(crate) actors: Vec<ActorSpec>,
     pub(crate) seed_messages: Vec<(ActorId, ActorId, Message)>,
     pub(crate) budget: TickBudget,
@@ -124,6 +128,7 @@ impl World {
                 backend_kind: kind,
                 script,
                 tools: Arc::new(bundle.tools),
+                predicates: Arc::new(bundle.predicates),
                 actors: vec![],
                 seed_messages: vec![],
                 budget,
@@ -511,6 +516,26 @@ impl World {
                 msg,
             ))
             .map_err(|e| PyRuntimeError::new_err(format!("send: {e}")))
+    }
+
+    /// Names of the predicates this world has registered. Mostly used
+    /// for introspection in tests and docs.
+    fn predicate_names(&self) -> Vec<String> {
+        self.inner.lock().predicates.names()
+    }
+
+    /// Evaluate a named predicate against the current trace. Returns
+    /// `None` if the predicate is not registered. Predicates are
+    /// world-supplied: a Plank world exposes things like
+    /// `had_double_refund` and `agent_recommended_upgrade`.
+    fn evaluate_predicate(&self, name: &str) -> PyResult<Option<bool>> {
+        let (log, preds) = {
+            let inner = self.inner.lock();
+            (inner.log.clone(), inner.predicates.clone())
+        };
+        let runtime = global_runtime();
+        let events = runtime.block_on(log.snapshot());
+        Ok(preds.evaluate(name, &PredicateCtx { trace: &events }))
     }
 
     /// Return the trace events as a list of JSON-encoded strings, one

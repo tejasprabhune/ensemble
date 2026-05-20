@@ -42,6 +42,38 @@ fn ok<T: Serialize>(data: T) -> serde_json::Value {
     serde_json::to_value(OkPayload { ok: true, data }).unwrap()
 }
 
+pub fn open_ticket(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
+    let state = state.clone();
+    tools.register(Tool::new(
+        "open_ticket",
+        "Open a support ticket on behalf of a user. Required for any \
+         follow-up tool that takes a ticket_id.",
+        json!({
+            "type": "object",
+            "properties": {
+                "ticket_id": { "type": "string" },
+                "user_id": { "type": "string" },
+                "subject": { "type": "string" }
+            },
+            "required": ["ticket_id", "user_id", "subject"]
+        }),
+        move |args| {
+            let ticket_id = arg_str(args, "ticket_id")?;
+            let user_id = arg_str(args, "user_id")?;
+            let subject = arg_str(args, "subject")?;
+            let s = state.lock();
+            let rec = s.open_ticket(ticket_id, user_id, subject, now_ms())?;
+            s.audit(
+                "user",
+                "open_ticket",
+                &json!({"ticket_id": ticket_id, "user_id": user_id, "subject": subject}),
+                now_ms(),
+            )?;
+            Ok(ok(rec))
+        },
+    ));
+}
+
 pub fn lookup_user(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new(
@@ -211,21 +243,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn six_tools_register() {
-        let (_state, tools) = crate::build();
+    fn all_tools_register() {
+        let (_state, tools, _preds) = crate::build();
         let names: Vec<String> = tools.schemas().into_iter().map(|s| s.name).collect();
-        assert!(names.contains(&"lookup_user".to_string()));
-        assert!(names.contains(&"lookup_ticket".to_string()));
-        assert!(names.contains(&"issue_refund".to_string()));
-        assert!(names.contains(&"escalate".to_string()));
-        assert!(names.contains(&"search_kb".to_string()));
-        assert!(names.contains(&"update_subscription".to_string()));
-        assert_eq!(names.len(), 6);
+        for expected in [
+            "open_ticket",
+            "lookup_user",
+            "lookup_ticket",
+            "issue_refund",
+            "escalate",
+            "search_kb",
+            "update_subscription",
+        ] {
+            assert!(names.contains(&expected.to_string()), "missing tool {expected}");
+        }
+        assert_eq!(names.len(), 7);
     }
 
     #[test]
     fn lookup_user_returns_seeded_user() {
-        let (_state, tools) = crate::build();
+        let (_state, tools, _preds) = crate::build();
         let res = tools
             .dispatch("lookup_user", &json!({"user_id": "u-alice"}))
             .unwrap();
@@ -235,7 +272,7 @@ mod tests {
 
     #[test]
     fn double_refund_is_blocked() {
-        let (_state, tools) = crate::build();
+        let (_state, tools, _preds) = crate::build();
         tools
             .dispatch(
                 "issue_refund",
@@ -249,5 +286,18 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(err, ToolError::Execution(_)));
+    }
+
+    #[test]
+    fn open_ticket_persists_to_state() {
+        let (state, tools, _preds) = crate::build();
+        tools
+            .dispatch(
+                "open_ticket",
+                &json!({"ticket_id": "t-x1", "user_id": "u-alice", "subject": "hi"}),
+            )
+            .unwrap();
+        let rec = state.lock().lookup_ticket("t-x1").unwrap();
+        assert!(rec.is_some());
     }
 }
