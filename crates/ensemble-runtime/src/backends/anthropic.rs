@@ -148,6 +148,7 @@ impl LLMBackend for AnthropicBackend {
             tool_calls,
             stop_reason: parsed.stop_reason,
             usage,
+            reasoning_text: None,
         })
     }
 }

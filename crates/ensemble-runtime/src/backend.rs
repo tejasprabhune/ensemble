@@ -114,6 +114,17 @@ pub struct CompletionResponse {
     /// against the calling actor.
     #[serde(default)]
     pub usage: Option<Usage>,
+    /// Reasoning summary text produced by a reasoning-capable model
+    /// (OpenAI Responses API, Anthropic with `thinking` enabled). The
+    /// runtime emits this as its own `agent_message` event tagged
+    /// `reasoning=true` on the trace, immediately before the
+    /// associated `tool_call` events, so a viewer can show the
+    /// model's stated rationale above the actions it produced.
+    /// `None` when the model did not return a reasoning summary on
+    /// this turn (typical for non-reasoning models or
+    /// `reasoning_effort=minimal`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_text: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

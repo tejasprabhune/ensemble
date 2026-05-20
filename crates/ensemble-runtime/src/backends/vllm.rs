@@ -170,6 +170,7 @@ impl LLMBackend for LocalAdapterBackend {
             tool_calls,
             stop_reason: choice.finish_reason,
             usage,
+            reasoning_text: None,
         })
     }
 }

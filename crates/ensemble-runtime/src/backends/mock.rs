@@ -125,6 +125,7 @@ impl LLMBackend for MockBackend {
             tool_calls: turn.tool_calls,
             stop_reason: turn.stop_reason,
             usage: None,
+            reasoning_text: None,
         })
     }
 }

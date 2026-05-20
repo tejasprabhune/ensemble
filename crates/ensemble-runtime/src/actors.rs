@@ -236,10 +236,14 @@ impl Actor for AgentActor {
 
         // Standard tool-use loop: each iteration is one model turn.
         // The cap stops a model that keeps calling tools without ever
-        // replying to the user. Eight is generous; most multi-step
-        // plans resolve in three or four.
-        const MAX_TOOL_TURNS: usize = 8;
-        for _ in 0..MAX_TOOL_TURNS {
+        // replying to the user. Eight is generous for the typical
+        // helpdesk scenario; long iterative-coding loops want more.
+        // ENSEMBLE_MAX_TOOL_TURNS overrides at process start.
+        let max_tool_turns: usize = std::env::var("ENSEMBLE_MAX_TOOL_TURNS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8);
+        for _ in 0..max_tool_turns {
             let messages = self.history.lock().clone();
             let req = CompletionRequest {
                 model: self.model.clone(),
@@ -271,6 +275,22 @@ impl Actor for AgentActor {
             for call in resp.tool_calls.iter_mut() {
                 if call.id.is_none() {
                     call.id = Some(MessageId::new().to_string());
+                }
+            }
+
+            // Surface the model's reasoning summary on the bus
+            // before the assistant text and tool_calls so chat-view
+            // renderers see it above the actions it produced.
+            // Backends that do not return a reasoning summary leave
+            // this None and the loop continues unchanged.
+            if let Some(reasoning) = resp.reasoning_text.clone() {
+                if !reasoning.trim().is_empty() {
+                    bus.send(
+                        self.id.clone(),
+                        Recipient::Actor(from.clone()),
+                        Message::AgentMessage { text: reasoning },
+                    )
+                    .await?;
                 }
             }
 

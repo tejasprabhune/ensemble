@@ -237,6 +237,14 @@ impl World {
         if kind != "mock" {
             budget.quiescence_ms = 60_000;
         }
+        // Allow an override for long-running blocking tool dispatches
+        // (CUDA compiles, container starts) that routinely exceed the
+        // default. Read once at world construction.
+        if let Ok(env) = std::env::var("ENSEMBLE_QUIESCENCE_MS") {
+            if let Ok(v) = env.parse::<u64>() {
+                budget.quiescence_ms = v;
+            }
+        }
         let resources = Arc::new(ensemble_runtime::resources::shared(&name));
         Ok(Self {
             inner: Arc::new(Mutex::new(WorldInner {
