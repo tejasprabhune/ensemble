@@ -488,6 +488,27 @@ class World:
     def _mock_tool(self, model: str, tool: str, **args: Any) -> None:
         self._native._mock_tool(model, tool, json.dumps(args))
 
+    def apply(self, tool: str, **kwargs: Any) -> Dict[str, Any]:
+        """Run a tool as a system-level mutation: no actor, no model
+        turn, no scheduler involvement. Records `ToolCall`, the
+        registered tool's `ToolResult`, and an optional `StateDiff`
+        in the trace with no actor attribution.
+
+        This is the python equivalent of the rust
+        ``WorldHandle::apply_and_log`` path. Use it from scenario
+        setup or in tests when state should evolve without any
+        actor having to issue the call (database seeding, time-of-
+        day rollover, world-level scheduled events). For actions
+        attributed to a simulated user, call ``user.act(...)``
+        instead.
+
+        Returns the parsed envelope: ``{"effect": ..., "diff"?: ...}``
+        on success, or ``{"effect": {"ok": false, "error": ...},
+        "is_error": true}`` if the tool raised.
+        """
+        raw = self._native.apply(tool, json.dumps(kwargs))
+        return json.loads(raw)
+
     def run(self, until: Until) -> List[Dict[str, Any]]:
         self._native.run_until(until.to_json())
         return [json.loads(e) for e in self._native.trace_events()]

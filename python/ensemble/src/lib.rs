@@ -936,6 +936,123 @@ impl World {
         Ok(outcome_json)
     }
 
+    /// World-level apply: invoke a tool as a system mutation, with
+    /// no actor attribution. The python equivalent of the Rust
+    /// `WorldHandle::apply_and_log` path: appends a `ToolCall`, runs
+    /// the registered tool, and appends `ToolResult` plus an optional
+    /// `StateDiff` to the trace. Used by python world authors who
+    /// want to evolve world state outside of an actor's turn (test
+    /// setup, scenario-author seed actions that don't belong to any
+    /// user, scheduled world events). Returns the effect JSON.
+    fn apply(
+        &self,
+        py: Python<'_>,
+        tool_name: &str,
+        args_json: &str,
+    ) -> PyResult<String> {
+        let args: serde_json::Value = serde_json::from_str(args_json)
+            .map_err(|e| PyValueError::new_err(format!("bad args json: {e}")))?;
+        let (bus, tools, resources) = {
+            let inner = self.inner.lock();
+            (
+                inner.bus.clone(),
+                inner.tools.clone(),
+                inner.resources.clone(),
+            )
+        };
+        let call_id = MessageId::new().to_string();
+        let tool_owned = tool_name.to_string();
+        let runtime = global_runtime();
+
+        let outcome_json = py.allow_threads(move || {
+            runtime.block_on(async move {
+                bus.append_event(
+                    None,
+                    EventPayload::ToolCall {
+                        id: call_id.clone(),
+                        name: tool_owned.clone(),
+                        args: args.clone(),
+                    },
+                )
+                .await;
+                let dispatch = tools
+                    .dispatch_async(&tool_owned, &args, Some(&resources))
+                    .await;
+                for entry in dispatch.progress {
+                    bus.append_event(
+                        None,
+                        EventPayload::Progress {
+                            id: call_id.clone(),
+                            tool: tool_owned.clone(),
+                            fraction: entry.fraction,
+                            message: entry.message,
+                        },
+                    )
+                    .await;
+                }
+                if let Some(after) = dispatch.timed_out_after {
+                    bus.append_event(
+                        None,
+                        EventPayload::ToolTimeout {
+                            id: call_id.clone(),
+                            name: tool_owned.clone(),
+                            after_ms: after.as_millis() as u64,
+                        },
+                    )
+                    .await;
+                }
+                let mut body = serde_json::Map::new();
+                match dispatch.outcome {
+                    Ok(outcome) => {
+                        body.insert("effect".into(), outcome.effect.clone());
+                        if let Some(diff) = outcome.diff.clone() {
+                            body.insert("diff".into(), diff);
+                        }
+                        let costs = outcome.costs.clone();
+                        bus.append_event(
+                            None,
+                            EventPayload::ToolResult {
+                                id: call_id.clone(),
+                                name: tool_owned.clone(),
+                                result: outcome.effect,
+                                is_error: false,
+                            },
+                        )
+                        .await;
+                        if let Some(diff) = outcome.diff {
+                            bus.append_event(
+                                None,
+                                EventPayload::StateDiff { diff },
+                            )
+                            .await;
+                        }
+                        for (unit, amount) in costs {
+                            bus.record_cost(unit, amount, None).await;
+                        }
+                    }
+                    Err(e) => {
+                        let err_json =
+                            serde_json::json!({"ok": false, "error": e.to_string()});
+                        body.insert("effect".into(), err_json.clone());
+                        body.insert("is_error".into(), serde_json::Value::Bool(true));
+                        bus.append_event(
+                            None,
+                            EventPayload::ToolResult {
+                                id: call_id,
+                                name: tool_owned,
+                                result: err_json,
+                                is_error: true,
+                            },
+                        )
+                        .await;
+                    }
+                }
+                serde_json::Value::Object(body).to_string()
+            })
+        });
+        Ok(outcome_json)
+    }
+
     /// Register a python-callable tool. The callable receives the
     /// args JSON as a string and must return a JSON string of either
     /// `{"effect": ...}` or `{"effect": ..., "diff": ...}`. The diff,
