@@ -148,11 +148,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     safe = args.scenario.replace("/", "_").replace(".", "_")
     trace_path = args.traces_dir / f"{safe}.jsonl"
 
-    # Attach the live sink before the scenario runs so a watcher
-    # tailing the file sees events as they are appended. The final
-    # write_text below is a no-op idempotent rewrite; we keep it for
-    # callers that load the trace from RunResult.trace and assume the
-    # file matches exactly.
+    # Each `ensemble run` starts from a clean trace file. The sink
+    # itself appends so an interactive session that reattaches to a
+    # path mid-run does not discard earlier events; the CLI handles
+    # the "fresh run wants the prior trace gone" case by unlinking
+    # before the scenario constructs its World.
+    if trace_path.exists():
+        trace_path.unlink()
+
     result = asyncio.run(
         _REGISTRY[args.scenario](
             args.world,

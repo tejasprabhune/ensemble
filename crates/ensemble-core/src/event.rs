@@ -89,7 +89,25 @@ pub struct TraceFile {
 }
 
 impl TraceFile {
+    /// Open `path` as a trace sink, appending to it if it already
+    /// exists. This is the default that `set_trace_path` from a
+    /// python session expects, so reattaching to the same file does
+    /// not silently discard the prior contents. Use
+    /// [`Self::create_truncated`] for callers that want a fresh
+    /// file (the CLI's `ensemble run` does this so each new run
+    /// starts from an empty trace).
     pub async fn create(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        Self::open(path, false).await
+    }
+
+    /// Open `path` and truncate any existing contents. Use when the
+    /// caller is starting a new run and intends to overwrite the
+    /// previous trace at this path.
+    pub async fn create_truncated(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        Self::open(path, true).await
+    }
+
+    async fn open(path: impl AsRef<Path>, truncate: bool) -> std::io::Result<Self> {
         let path = path.as_ref().to_path_buf();
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -99,7 +117,8 @@ impl TraceFile {
         let file = OpenOptions::new()
             .create(true)
             .write(true)
-            .truncate(true)
+            .truncate(truncate)
+            .append(!truncate)
             .open(&path)
             .await?;
         Ok(Self { path, file: Arc::new(Mutex::new(file)) })
