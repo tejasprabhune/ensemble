@@ -102,35 +102,36 @@ def _build_scenario(name: str, spec: Dict[str, Any]) -> Callable[..., Awaitable[
 
 
 def _make_grader_context(world: World, users: Dict[str, Any]) -> PredicateMap:
-    """Build the namespace the grader expressions execute in. World
-    authors can extend this by adding entries to `world.predicates`
-    (not yet wired in MVP); for now we expose the trace summary."""
+    """Build the namespace the grader expressions execute in.
+
+    The context exposes:
+
+    * the literals ``true`` / ``false`` and ``any_event``
+    * every world predicate by name (e.g. ``had_double_refund``)
+    * per-user predicates as ``<user_id>_<predicate>``, evaluated with
+      ``args = {"user_id": "<user_id>"}``
+
+    Unknown names raise during evaluation; graders that name a
+    predicate the world has not registered will fail loudly rather than
+    silently returning ``False``.
+    """
     trace = world.trace()
     last = trace[-1] if trace else None
 
-    def _had_double_refund() -> bool:
-        ids = set()
-        for e in trace:
-            payload = e.get("payload", {})
-            if (
-                payload.get("kind") == "tool_call"
-                and payload.get("name") == "issue_refund"
-            ):
-                uid = payload.get("args", {}).get("user_id")
-                if uid in ids:
-                    return True
-                ids.add(uid)
-        return False
-
-    return {
+    ctx: Dict[str, Any] = {
         "true": True,
         "false": False,
-        "turn_count": len(trace),
         "any_event": last is not None,
-        "had_double_refund": _had_double_refund(),
-        "hidden_goal_resolved": False,  # placeholder; worlds will override
-        "policy_violation": False,
+        "turn_count": len(trace),
     }
+    for name in world.predicate_names():
+        ctx[name] = bool(world.evaluate_predicate(name))
+    for uid in users.keys():
+        for name in world.predicate_names():
+            ctx[f"{uid}_{name}"] = bool(
+                world.evaluate_predicate(name, {"user_id": uid})
+            )
+    return ctx
 
 
 # A tiny recursive-descent parser for boolean expressions over a fixed

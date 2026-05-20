@@ -41,6 +41,16 @@ impl PredicateRegistry {
         Self::default()
     }
 
+    /// Build a registry pre-populated with a few generic predicates that
+    /// every world inherits: `any_event` (true when the trace has at
+    /// least one event), and `had_double_refund` (a generic
+    /// `issue_refund` repetition check keyed by `args.user_id`).
+    pub fn with_defaults() -> Self {
+        let mut reg = Self::default();
+        defaults::install(&mut reg);
+        reg
+    }
+
     pub fn register<F>(&mut self, name: impl Into<String>, f: F)
     where
         F: Fn(&PredicateCtx<'_>) -> bool + Send + Sync + 'static,
@@ -56,6 +66,31 @@ impl PredicateRegistry {
 
     pub fn evaluate(&self, name: &str, ctx: &PredicateCtx<'_>) -> Option<bool> {
         self.preds.get(name).map(|p| p(ctx))
+    }
+}
+
+mod defaults {
+    use super::PredicateRegistry;
+    use crate::event::EventPayload;
+    use std::collections::HashSet;
+
+    pub fn install(reg: &mut PredicateRegistry) {
+        reg.register("any_event", |ctx| !ctx.trace.is_empty());
+        reg.register("had_double_refund", |ctx| {
+            let mut seen = HashSet::new();
+            for e in ctx.trace {
+                if let EventPayload::ToolCall { name, args, .. } = &e.payload {
+                    if name == "issue_refund" {
+                        if let Some(uid) = args.get("user_id").and_then(|v| v.as_str()) {
+                            if !seen.insert(uid.to_string()) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            false
+        });
     }
 }
 

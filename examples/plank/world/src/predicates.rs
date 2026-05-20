@@ -17,21 +17,8 @@ use crate::state::PlankState;
 pub fn register_all(state: &Arc<Mutex<PlankState>>, preds: &mut PredicateRegistry) {
     let _ = state; // most predicates compute from the trace; some will use state later.
 
-    preds.register("had_double_refund", |ctx| {
-        let mut seen = std::collections::HashSet::new();
-        for e in ctx.trace {
-            if let EventPayload::ToolCall { name, args, .. } = &e.payload {
-                if name == "issue_refund" {
-                    if let Some(uid) = args.get("user_id").and_then(|v| v.as_str()) {
-                        if !seen.insert(uid.to_string()) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        false
-    });
+    // Plank inherits the core defaults (had_double_refund, any_event).
+    *preds = PredicateRegistry::with_defaults();
 
     preds.register("any_refund_issued", |ctx| {
         ctx.trace.iter().any(|e| {
@@ -65,4 +52,102 @@ pub fn register_all(state: &Arc<Mutex<PlankState>>, preds: &mut PredicateRegistr
             }
         })
     });
+
+    // The per-user predicates take args = {"user_id": "<actor_id>"}.
+    // They walk the trace to find the plank user_id ("u-...") that the
+    // actor opened a ticket as, then check what happened to that user.
+
+    preds.register("hidden_goal_resolved", |ctx| {
+        let Some(actor_id) = ctx.args.get("user_id").and_then(|v| v.as_str()) else {
+            return false;
+        };
+        let Some(plank_uid) = plank_user_id_for_actor(ctx.trace, actor_id) else {
+            return false;
+        };
+        // Resolved if the agent issued a refund or escalated the ticket
+        // the actor opened. Either action constitutes the agent acting
+        // on the user's behalf.
+        ctx.trace.iter().any(|e| match &e.payload {
+            EventPayload::ToolResult {
+                name,
+                result,
+                is_error,
+                ..
+            } if name == "issue_refund" && !is_error => result
+                .get("data")
+                .and_then(|d| d.get("user_id"))
+                .and_then(|v| v.as_str())
+                .map(|u| u == plank_uid)
+                .unwrap_or(false),
+            EventPayload::ToolResult {
+                name,
+                result,
+                is_error,
+                ..
+            } if name == "escalate" && !is_error => {
+                ticket_belongs_to(ctx.trace, result, &plank_uid)
+            }
+            _ => false,
+        })
+    });
+
+    preds.register("was_redirected_to_upgrade", |ctx| {
+        // Coarse: any agent message in the trace mentions upgrading.
+        // The worked example pairs each user with a single agent so
+        // this is accurate enough; richer routing would need recipient
+        // metadata on bus events.
+        let needles = ["upgrade", "premium", "team plan", "enterprise plan"];
+        ctx.trace.iter().any(|e| {
+            if let EventPayload::AgentMessage { text } = &e.payload {
+                let t = text.to_lowercase();
+                needles.iter().any(|n| t.contains(n))
+            } else {
+                false
+            }
+        })
+    });
+}
+
+/// Find the plank `u-...` id the actor opened a ticket as. Returns the
+/// `user_id` from the actor's first `open_ticket` ToolCall, or None.
+fn plank_user_id_for_actor(trace: &[ensemble_core::event::Event], actor: &str) -> Option<String> {
+    for e in trace {
+        let Some(a) = e.actor.as_ref() else { continue };
+        if a.as_str() != actor {
+            continue;
+        }
+        if let EventPayload::ToolCall { name, args, .. } = &e.payload {
+            if name == "open_ticket" {
+                if let Some(u) = args.get("user_id").and_then(|v| v.as_str()) {
+                    return Some(u.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// True if the ticket referenced by `escalate`'s result belongs to the
+/// given plank user.
+fn ticket_belongs_to(
+    trace: &[ensemble_core::event::Event],
+    escalate_result: &serde_json::Value,
+    plank_uid: &str,
+) -> bool {
+    let Some(ticket_id) = escalate_result
+        .get("data")
+        .and_then(|d| d.get("ticket_id"))
+        .and_then(|v| v.as_str())
+    else {
+        return false;
+    };
+    trace.iter().any(|e| {
+        matches!(
+            &e.payload,
+            EventPayload::ToolCall { name, args, .. }
+                if name == "open_ticket"
+                    && args.get("ticket_id").and_then(|v| v.as_str()) == Some(ticket_id)
+                    && args.get("user_id").and_then(|v| v.as_str()) == Some(plank_uid)
+        )
+    })
 }

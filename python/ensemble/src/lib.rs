@@ -24,7 +24,7 @@ use world_registry::{WorldBundle, WorldRegistry};
 fn noop_world_builder() -> WorldBundle {
     WorldBundle {
         tools: ToolRegistry::new(),
-        predicates: PredicateRegistry::new(),
+        predicates: PredicateRegistry::with_defaults(),
     }
 }
 

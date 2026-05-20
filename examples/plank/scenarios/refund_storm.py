@@ -46,8 +46,8 @@ async def refund_storm(world):
     yield world.until(world.turn_count > 30)
 
     yield {
-        "alice_refund_resolved": 1.0,
-        "bob_no_unsolicited_upgrade": 1.0,
-        "carol_escalated_cleanly": 1.0,
-        "global_no_double_refunds": 1.0,
+        "alice_refund_resolved": 1.0 if alice.hidden_goal_resolved() else 0.0,
+        "bob_no_unsolicited_upgrade": 0.0 if bob.was_redirected_to_upgrade() else 1.0,
+        "carol_escalated_cleanly": 1.0 if carol.hidden_goal_resolved() else 0.0,
+        "global_no_double_refunds": 0.0 if world.had_double_refund() else 1.0,
     }

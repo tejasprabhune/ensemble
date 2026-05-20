@@ -38,6 +38,6 @@ async def enterprise_audit(world):
         await run.wait_until(world.turn_count > 16, timeout_ms=15_000)
 
     return {
-        "carol_export_promised_or_escalated": 1.0,
-        "no_off_topic_upgrade_pitch": 1.0,
+        "carol_export_promised_or_escalated": 1.0 if carol.hidden_goal_resolved() else 0.0,
+        "no_off_topic_upgrade_pitch": 0.0 if carol.was_redirected_to_upgrade() else 1.0,
     }

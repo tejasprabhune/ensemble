@@ -40,6 +40,12 @@ persona = "confused_new_user"
 model = "user-model"
 initial_action = { tool = "open_ticket", args = { ticket_id = "t-101", user_id = "u-bob", subject = "how do refunds work" } }
 
+[[scenario.refund_storm.users]]
+id = "carol"
+persona = "enterprise_admin"
+model = "user-model"
+initial_action = { tool = "open_ticket", args = { ticket_id = "t-102", user_id = "u-carol", subject = "quarterly audit log export" } }
+
 [[scenario.refund_storm.agents]]
 id = "rep1"
 model = "claude-sonnet-4-5"
@@ -50,7 +56,13 @@ id = "rep2"
 model = "claude-sonnet-4-5"
 tools = ["lookup_user", "lookup_ticket", "issue_refund", "escalate", "search_kb"]
 
+# Graders reference predicate names the world publishes. Per-user
+# predicates are addressed via the leading user id, e.g.
+# alice_hidden_goal_resolved (the manifest scenario loader resolves
+# leading "<actor_id>_" prefixes into a {"user_id": "<actor_id>"} arg
+# when the underlying predicate exists).
 [scenario.refund_storm.graders]
-alice_refund_resolved = "true"
-bob_no_unsolicited_upgrade = "not policy_violation"
+alice_refund_resolved = "alice_hidden_goal_resolved"
+bob_no_unsolicited_upgrade = "not bob_was_redirected_to_upgrade"
+carol_escalated_cleanly = "carol_hidden_goal_resolved"
 global_no_double_refunds = "not had_double_refund"
