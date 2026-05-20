@@ -65,16 +65,20 @@
 ensemble init smoke_only --world plank
 # scaffolds smoke_only/scenarios/ pointing at the already-installed plank</code></pre>
 <h2 id="ensemble-run">ensemble run</h2>
-<pre><code>ensemble run &lt;scenario&gt; [--world W] [--manifest M] [--package-dir D]</code></pre>
-<p>Runs a registered scenario and writes the trace to <code>./traces/&lt;scenario&gt;.jsonl</code>. The CLI shells to <code>uv run python -m ensemble.cli_run</code> so error traces land in tracebacks rather than opaque string-formatting failures.</p>
+<pre><code>ensemble run &lt;scenario&gt; [--world W] [--manifest M] [--package-dir D]
+                        [--backend B] [--traces-dir TD] [--no-sync]</code></pre>
+<p>Runs a registered scenario and writes the trace to `<code>./traces/&lt;scenario&gt;.jsonl</code><code>. By default the CLI shells to </code><code>uv run python -m ensemble.cli_run</code><code> so the host project&#x27;s lockfile is honoured; </code><code>--no-sync</code><code> (or the </code><code>ENSEMBLE_NO_SYNC</code><code> env var) bypasses uv and uses the active python interpreter directly. The bypass matters when the host&#x27;s </code><code>pyproject.toml</code>` has a yanked dependency or a stale lockfile that would crash uv before the scenario even started.</p>
 <p>Arguments:</p>
 <ul>
-<li><code>&lt;scenario&gt;</code> (positional, required): the scenario name as registered with <code>@scenario</code> or in a <code>scenarios.toml</code> manifest.</li>
-<li><code>--world W</code>: the world the scenario constructs. Resolves through the worlds registry at <code>~/.ensemble/worlds.toml</code>. Defaults to <code>&quot;plank&quot;</code> so the README&#x27;s quick start works without flags; passing the scenario&#x27;s declared world is the usual case.</li>
-<li><code>--manifest M</code>: optional path to a <code>scenarios.toml</code> file the loader registers before lookup. Used to drive declarative scenarios from the CLI.</li>
-<li><code>--package-dir D</code>: directory holding the <code>scenarios/</code> python package to import. Defaults to the registered world&#x27;s directory when <code>--world</code> resolves; otherwise to <code>examples/plank</code>.</li>
+<li>`<code>&lt;scenario&gt;</code><code> (positional, required): the scenario name as registered with </code><code>@scenario</code><code> or in a </code><code>scenarios.toml</code>` manifest.</li>
+<li>`<code>--world W</code><code>: the world the scenario constructs. Resolves through the worlds registry at </code><code>~/.ensemble/worlds.toml</code><code>. Defaults to </code><code>&quot;plank&quot;</code>` so the README&#x27;s quick start works without flags; passing the scenario&#x27;s declared world is the usual case.</li>
+<li>`<code>--manifest M</code><code>: optional path to a </code><code>scenarios.toml</code>` file the loader registers before lookup.</li>
+<li>`<code>--package-dir D</code><code>: directory holding the </code><code>scenarios/</code><code> python package to import. Defaults to the registered world&#x27;s directory. The loader tolerates a missing </code><code>scenarios/__init__.py</code><code> and walks the directory to import each </code><code>*.py</code><code> module by file path, so a freshly-cloned scenario project without the boilerplate </code><code>__init__</code>` still registers its scenarios.</li>
+<li>`<code>--backend B</code><code>: </code><code>mock</code><code> | </code><code>anthropic</code><code> | </code><code>openai</code><code> | </code><code>vllm</code><code> | </code><code>auto</code><code>. Forwarded to the python entry point and printed as a system note before any LLM round trip so a silent </code><code>mock</code>`-fallback is visible up front.</li>
+<li>`<code>--traces-dir TD</code><code>: where to write the trace JSONL. Defaults to </code><code>./traces</code>`.</li>
+<li>`<code>--no-sync</code><code>: skip </code><code>uv run</code><code> and use the active python (or the one in </code><code>VIRTUAL_ENV/bin/python</code><code> when set). Use when the host project&#x27;s lockfile is broken or when you want to invoke the scenario from a venv that already has </code><code>ensemble</code>` installed.</li>
 </ul>
-<p>Side effects: writes <code>./traces/&lt;safe_scenario_name&gt;.jsonl</code> (creating <code>./traces/</code> if missing); unlinks any prior file at the same path so each run starts fresh. Prints a single JSON line on stdout containing the scenario name, the grader scores, and the trace path.</p>
+<p>Side effects: writes `<code>&lt;traces-dir&gt;/&lt;safe_scenario_name&gt;.jsonl</code>` (creating the directory if missing); unlinks any prior file at the same path so each run starts fresh. Prints a single JSON line on stdout containing the scenario name, the grader scores, and the trace path.</p>
 <p>Example:</p>
 <pre><code class="language-bash">ensemble run plank.refund_storm --world plank
 # {&quot;scenario&quot;: &quot;plank.refund_storm&quot;, &quot;scores&quot;: {...}, &quot;trace_path&quot;: &quot;traces/plank_refund_storm.jsonl&quot;}</code></pre>

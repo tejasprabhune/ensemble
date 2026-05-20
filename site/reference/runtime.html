@@ -73,6 +73,15 @@ pub type SharedBackend = Arc&lt;dyn LLMBackend&gt;;</code></pre>
     pub tools: Vec&lt;ToolSchema&gt;,
     pub temperature: Option&lt;f32&gt;,
     pub max_tokens: Option&lt;u32&gt;,
+    pub extra_params: HashMap&lt;String, serde_json::Value&gt;,
+}
+
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+    pub name: Option&lt;String&gt;,
+    pub tool_calls: Vec&lt;ProposedToolCall&gt;,
+    pub tool_call_id: Option&lt;String&gt;,
 }
 
 pub struct CompletionResponse {
@@ -93,8 +102,11 @@ pub struct ProposedToolCall {
     pub name: String,
     pub args: serde_json::Value,
 }</code></pre>
-<p><code>request.model</code> is the provider&#x27;s model identifier (or the mock backend&#x27;s script key). <code>request.system</code> is the rendered system prompt; <code>PromptedPersona</code> is what fills this in for users with a persona. <code>request.messages</code> is the chat history, <code>request.tools</code> is the agent&#x27;s tool schemas (already filtered by the per-agent allowed set; see the <a href="scenarios.html#spawn_agent">scenarios reference</a>).</p>
-<p><code>response.text</code> is the assistant&#x27;s plain-text content. <code>response.tool_calls</code> is the list of tool invocations the model returned; the agent loop dispatches them through the world&#x27;s tool registry. <code>response.usage</code> is populated when the provider returned a usage block; the runtime turns it into cost annotations.</p>
+<p>`<code>request.model</code><code> is the provider&#x27;s model identifier (or the mock backend&#x27;s script key). </code><code>request.system</code><code> is the rendered system prompt; </code><code>PromptedPersona</code><code> is what fills this in for users with a persona. </code><code>request.messages</code><code> is the chat history, </code><code>request.tools</code>` is the agent&#x27;s tool schemas (already filtered by the per-agent allowed set; see the <a href="scenarios.html#spawn_agent">scenarios reference</a>).</p>
+<p>`<code>request.temperature</code><code> and </code><code>request.max_tokens</code>` are optional; the runtime only emits them on the wire when set, so reasoning models (gpt-5, o1, o3, Azure deployments that lock these) that reject explicit values stay usable.</p>
+<p>`<code>request.extra_params</code><code> is an open dict the runtime forwards verbatim into the provider&#x27;s JSON body. A scenario sets it by passing </code><code>params={&quot;reasoning_effort&quot;: &quot;high&quot;}</code><code> to </code><code>spawn_agent</code>`; unknown keys are forwarded as-is and the underlying API rejects bad values with its own error.</p>
+<p>`<code>ChatMessage</code><code> carries the full structure OpenAI requires for multi-turn tool use: </code><code>tool_calls</code><code> on the assistant message that proposed them, </code><code>tool_call_id</code><code> on the matching </code><code>role: &quot;tool&quot;</code><code> reply, and an optional </code><code>name</code>` field on user/tool messages so a multi-actor scenario can attribute speakers. Anthropic ignores the extra fields because it speaks block-shaped content; OpenAI 400s without them. The runtime always emits the full structure so a backend swap does not change the wire shape.</p>
+<p>`<code>response.text</code><code> is the assistant&#x27;s plain-text content. </code><code>response.tool_calls</code><code> is the list of tool invocations the model returned; the agent loop pre-mints any missing call ids before pushing the assistant message into history so the matching tool replies (</code><code>role: &quot;tool&quot;</code><code>, </code><code>tool_call_id: ...</code>`) line up on the next request.</p>
 <h2 id="usage-and-cost-annotation">Usage and cost annotation</h2>
 <p>Every shipped backend parses the usage block from its provider&#x27;s response. After each completion the agent (or user) actor records three cost events against itself:</p>
 <ul>

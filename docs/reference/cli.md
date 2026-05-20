@@ -50,33 +50,52 @@ ensemble init smoke_only --world plank
 
 ```
 ensemble run <scenario> [--world W] [--manifest M] [--package-dir D]
+                        [--backend B] [--traces-dir TD] [--no-sync]
 ```
 
 Runs a registered scenario and writes the trace to
-`./traces/<scenario>.jsonl`. The CLI shells to
-`uv run python -m ensemble.cli_run` so error traces land in
-tracebacks rather than opaque string-formatting failures.
+``./traces/<scenario>.jsonl``. By default the CLI shells to
+``uv run python -m ensemble.cli_run`` so the host project's
+lockfile is honoured; ``--no-sync`` (or the ``ENSEMBLE_NO_SYNC``
+env var) bypasses uv and uses the active python interpreter
+directly. The bypass matters when the host's ``pyproject.toml``
+has a yanked dependency or a stale lockfile that would crash uv
+before the scenario even started.
 
 Arguments:
 
-- `<scenario>` (positional, required): the scenario name as
-  registered with `@scenario` or in a `scenarios.toml` manifest.
-- `--world W`: the world the scenario constructs. Resolves through
-  the worlds registry at `~/.ensemble/worlds.toml`. Defaults to
-  `"plank"` so the README's quick start works without flags;
-  passing the scenario's declared world is the usual case.
-- `--manifest M`: optional path to a `scenarios.toml` file the
-  loader registers before lookup. Used to drive declarative
-  scenarios from the CLI.
-- `--package-dir D`: directory holding the `scenarios/` python
-  package to import. Defaults to the registered world's directory
-  when `--world` resolves; otherwise to `examples/plank`.
+- ``<scenario>`` (positional, required): the scenario name as
+  registered with ``@scenario`` or in a ``scenarios.toml``
+  manifest.
+- ``--world W``: the world the scenario constructs. Resolves
+  through the worlds registry at ``~/.ensemble/worlds.toml``.
+  Defaults to ``"plank"`` so the README's quick start works
+  without flags; passing the scenario's declared world is the
+  usual case.
+- ``--manifest M``: optional path to a ``scenarios.toml`` file the
+  loader registers before lookup.
+- ``--package-dir D``: directory holding the ``scenarios/`` python
+  package to import. Defaults to the registered world's directory.
+  The loader tolerates a missing ``scenarios/__init__.py`` and
+  walks the directory to import each ``*.py`` module by file path,
+  so a freshly-cloned scenario project without the boilerplate
+  ``__init__`` still registers its scenarios.
+- ``--backend B``: ``mock`` | ``anthropic`` | ``openai`` | ``vllm``
+  | ``auto``. Forwarded to the python entry point and printed as
+  a system note before any LLM round trip so a silent
+  ``mock``-fallback is visible up front.
+- ``--traces-dir TD``: where to write the trace JSONL. Defaults to
+  ``./traces``.
+- ``--no-sync``: skip ``uv run`` and use the active python (or the
+  one in ``VIRTUAL_ENV/bin/python`` when set). Use when the host
+  project's lockfile is broken or when you want to invoke the
+  scenario from a venv that already has ``ensemble`` installed.
 
-Side effects: writes `./traces/<safe_scenario_name>.jsonl`
-(creating `./traces/` if missing); unlinks any prior file at the
-same path so each run starts fresh. Prints a single JSON line on
-stdout containing the scenario name, the grader scores, and the
-trace path.
+Side effects: writes ``<traces-dir>/<safe_scenario_name>.jsonl``
+(creating the directory if missing); unlinks any prior file at
+the same path so each run starts fresh. Prints a single JSON line
+on stdout containing the scenario name, the grader scores, and
+the trace path.
 
 Example:
 

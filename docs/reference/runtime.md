@@ -36,6 +36,15 @@ pub struct CompletionRequest {
     pub tools: Vec<ToolSchema>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
+    pub extra_params: HashMap<String, serde_json::Value>,
+}
+
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+    pub name: Option<String>,
+    pub tool_calls: Vec<ProposedToolCall>,
+    pub tool_call_id: Option<String>,
 }
 
 pub struct CompletionResponse {
@@ -58,18 +67,40 @@ pub struct ProposedToolCall {
 }
 ```
 
-`request.model` is the provider's model identifier (or the mock
-backend's script key). `request.system` is the rendered system
-prompt; `PromptedPersona` is what fills this in for users with a
-persona. `request.messages` is the chat history, `request.tools`
+``request.model`` is the provider's model identifier (or the mock
+backend's script key). ``request.system`` is the rendered system
+prompt; ``PromptedPersona`` is what fills this in for users with a
+persona. ``request.messages`` is the chat history, ``request.tools``
 is the agent's tool schemas (already filtered by the per-agent
-allowed set; see the [scenarios reference](scenarios.md#spawn_agent)).
+allowed set; see the
+[scenarios reference](scenarios.md#spawn_agent)).
 
-`response.text` is the assistant's plain-text content.
-`response.tool_calls` is the list of tool invocations the model
-returned; the agent loop dispatches them through the world's tool
-registry. `response.usage` is populated when the provider returned
-a usage block; the runtime turns it into cost annotations.
+``request.temperature`` and ``request.max_tokens`` are optional;
+the runtime only emits them on the wire when set, so reasoning
+models (gpt-5, o1, o3, Azure deployments that lock these) that
+reject explicit values stay usable.
+
+``request.extra_params`` is an open dict the runtime forwards
+verbatim into the provider's JSON body. A scenario sets it by
+passing ``params={"reasoning_effort": "high"}`` to
+``spawn_agent``; unknown keys are forwarded as-is and the
+underlying API rejects bad values with its own error.
+
+``ChatMessage`` carries the full structure OpenAI requires for
+multi-turn tool use: ``tool_calls`` on the assistant message that
+proposed them, ``tool_call_id`` on the matching ``role: "tool"``
+reply, and an optional ``name`` field on user/tool messages so a
+multi-actor scenario can attribute speakers. Anthropic ignores the
+extra fields because it speaks block-shaped content; OpenAI 400s
+without them. The runtime always emits the full structure so a
+backend swap does not change the wire shape.
+
+``response.text`` is the assistant's plain-text content.
+``response.tool_calls`` is the list of tool invocations the model
+returned; the agent loop pre-mints any missing call ids before
+pushing the assistant message into history so the matching tool
+replies (``role: "tool"``, ``tool_call_id: ...``) line up on the
+next request.
 
 ## Usage and cost annotation
 
