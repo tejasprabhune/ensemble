@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble, tools reference</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="../index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Site</div>
+        <a href="../index.html">Overview</a>
+        <a href="../docs.html">Docs</a>
+        <a href="../scenarios.html">Scenarios overview</a>
+        <a href="../plank.html">Plank</a>
+        <a href="../personas.html">Personas overview</a>
+        <a href="../mcp.html">MCP</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="index.html">Reference home</a>
+        <a href="world-api.html">World API</a>
+        <a href="scenarios.html">Scenarios</a>
+        <a href="tools.html" class="active">Tools</a>
+        <a href="personas.html">Personas</a>
+        <a href="cli.html">CLI</a>
+        <a href="runtime.html">Runtime</a>
+        <a href="traces.html">Traces</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">On this page</div>
+        <a href="#plugintool">PluginTool</a>
+        <a href="#tool-helper">tool() helper</a>
+        <a href="#effect-diff-costs-progress-envelope">Effect, diff, costs, progress envelope</a>
+        <a href="#resources">Resources</a>
+        <a href="#timeouts">Timeouts</a>
+        <a href="#progress">Progress</a>
+        <a href="#costs">Costs</a>
+        <a href="#sandboxed-tools">Sandboxed tools</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+<h1>Tools</h1>
+<p>This page documents how to declare a tool a world&#x27;s agents can call. It covers the <code>PluginTool</code> dataclass at the bottom of the stack, the <code>tool()</code> helper that wraps a plain Python function for the common case, the JSON-string envelope the runtime expects, and the four optional capabilities a tool can opt into: resource locks, timeouts, progress emission, and cost annotations. The last section covers sandboxed dispatch.</p>
+<h2 id="plugintool">PluginTool</h2>
+<p><code>PluginTool</code> is the dataclass <code>register_world</code> accepts. Every plugin tool eventually lands as one of these:</p>
+<pre><code class="language-python">@dataclass
+class PluginTool:
+    name: str
+    description: str
+    parameters: Dict[str, Any]      # JSON Schema
+    fn: Callable[[str], str]        # args_json -&gt; result_json
+    timeout_ms: Optional[int] = None
+    resources: Optional[List[str]] = None
+    sandbox: bool = False
+    sandbox_world: Optional[str] = None</code></pre>
+<ul>
+<li><code>name</code> is what the model sees and what <code>register_tool</code> keys the registry by.</li>
+<li><code>description</code> is the LLM-facing hint. Both Anthropic and OpenAI forward it to the model verbatim.</li>
+<li><code>parameters</code> is the JSON Schema for the tool&#x27;s argument object. The runtime does not enforce the schema; it forwards it to the model so the model produces compliant args.</li>
+<li><code>fn</code> is the callable the runtime dispatches to. The args-in/result-out shape is the JSON-string ABI documented in the envelope section below. Most authors do not write <code>fn</code> directly; they write a plain Python function and let <code>tool()</code> wrap it.</li>
+<li><code>timeout_ms</code>, <code>resources</code>, and <code>sandbox</code> are documented in their own sections.</li>
+</ul>
+<h2 id="tool-helper">tool() helper</h2>
+<p><code>tool(name, description, parameters, fn)</code> wraps a plain Python function into a <code>PluginTool</code>. The wrapper handles JSON parsing, keyword routing, return-shape detection, and progress-emitter injection, so most worlds never write a JSON-string ABI by hand.</p>
+<pre><code class="language-python"># my_world/__init__.py
+from ensemble import register_world, tool
+
+
+def lookup_user(user_id: str):
+    user = db.lookup_user(user_id)
+    return {&quot;ok&quot;: True, &quot;data&quot;: user}
+
+
+register_world(
+    &quot;my_world&quot;,
+    tools=[
+        tool(
+            name=&quot;lookup_user&quot;,
+            description=&quot;Look up a user by id.&quot;,
+            parameters={
+                &quot;type&quot;: &quot;object&quot;,
+                &quot;properties&quot;: {&quot;user_id&quot;: {&quot;type&quot;: &quot;string&quot;}},
+                &quot;required&quot;: [&quot;user_id&quot;],
+            },
+            fn=lookup_user,
+        ),
+    ],
+)</code></pre>
+<p>The wrapper accepts three return shapes:</p>
+<ul>
+<li>A dict, sent as the tool&#x27;s effect.</li>
+<li>A <code>(effect, diff)</code> tuple. The diff is emitted as a <code>state_diff</code> event alongside the <code>tool_result</code>.</li>
+<li>A dict that contains one or more of <code>effect</code>, <code>diff</code>, <code>costs</code>, <code>progress</code>. This is the &quot;structured envelope&quot; form, used when the tool wants to annotate cost or emit progress without using the <code>emit_progress</code> injection path.</li>
+</ul>
+<p>Argument routing tries <code>fn(**args)</code> first and falls back to <code>fn(args)</code> if the function rejects keyword expansion. A function that declares an <code>emit_progress</code> parameter receives a callable for progress reporting; see the <a href="#progress">progress section</a>.</p>
+<h2 id="effect-diff-costs-progress-envelope">Effect, diff, costs, progress envelope</h2>
+<p>The raw <code>fn</code> callable a <code>PluginTool</code> carries takes one string (the JSON of the args dict) and returns one string (the JSON of the result envelope). The envelope schema:</p>
+<pre><code class="language-json">{
+  &quot;effect&quot;: &lt;any JSON&gt;,
+  &quot;diff&quot;:    &lt;any JSON, optional&gt;,
+  &quot;costs&quot;:   {&quot;&lt;unit&gt;&quot;: &lt;number&gt;, ...},
+  &quot;progress&quot;: [{&quot;fraction&quot;: 0..1, &quot;message&quot;: &quot;...&quot;}],
+  &quot;is_error&quot;: &lt;bool, optional; the MCP path uses this&gt;
+}</code></pre>
+<p>The runtime forwards <code>effect</code> to the calling agent as the tool&#x27;s return value. It emits a <code>state_diff</code> event when <code>diff</code> is present, a <code>cost</code> event per unit in <code>costs</code>, and a <code>progress</code> event per entry in <code>progress</code> (flushed in order, ahead of the trailing <code>tool_result</code>). Any other keys are ignored; the contract is intentionally strict to keep tool authors from accidentally shipping fields no consumer reads.</p>
+<h2 id="resources">Resources</h2>
+<pre><code class="language-python">PluginTool(..., resources=[&quot;billing_db&quot;])</code></pre>
+<p>Each name in <code>resources</code> is a permit the runtime acquires before the closure runs and releases when it returns. Two dispatches that share a name serialize through the world&#x27;s <code>ResourceManager</code>; unrelated names run in parallel. Resources can be declared up front via <code>register_world(..., resources={&quot;billing_db&quot;: 1})</code> (the <a href="world-api.html#worldtoml-manifest-schema">world api reference</a> covers the manifest form). A name a tool references but no one declared is created lazily as an exclusive lock on first use.</p>
+<p>A <code>Shared{permits = N}</code> resource lets up to <code>N</code> concurrent dispatches hold a permit simultaneously, which is the right shape for a connection pool or a GPU lane shared across tools.</p>
+<h2 id="timeouts">Timeouts</h2>
+<pre><code class="language-python">PluginTool(..., timeout_ms=2000)</code></pre>
+<p>Caps a single dispatch at the given duration. When the timeout fires the runtime emits a <code>tool_timeout</code> event, the calling agent sees a tool error, and the scenario continues. The closure runs on the tokio blocking pool; the timeout is applied around the <code>spawn_blocking</code> future, so a closure that ignores the deadline still leaks until it completes, but the agent moves on.</p>
+<p>Pair <code>timeout_ms</code> with progress emission for long-running work so the trace is observable while the dispatch is in flight.</p>
+<h2 id="progress">Progress</h2>
+<p>A python tool that declares an <code>emit_progress</code> parameter receives a callable; each invocation records one <code>(fraction, message)</code> pair that the runtime flushes to the trace as a <code>progress</code> event right before the trailing <code>tool_result</code>. The helper inspects the function&#x27;s signature, so a tool that does not need progress reporting simply omits the parameter and the call shape stays the same.</p>
+<pre><code class="language-python"># emit_progress is detected by signature
+from ensemble import tool
+
+
+def reconcile(user_id: str, months: int, emit_progress):
+    for i in range(1, months + 1):
+        emit_progress(i / months, f&quot;scanned month {i}/{months}&quot;)
+        ...
+    return {&quot;ok&quot;: True, &quot;months_reconciled&quot;: months}
+
+
+reconcile_tool = tool(
+    name=&quot;reconcile_billing&quot;,
+    description=&quot;Walk a user&#x27;s billing history.&quot;,
+    parameters={
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;properties&quot;: {
+            &quot;user_id&quot;: {&quot;type&quot;: &quot;string&quot;},
+            &quot;months&quot;: {&quot;type&quot;: &quot;integer&quot;},
+        },
+        &quot;required&quot;: [&quot;user_id&quot;, &quot;months&quot;],
+    },
+    fn=reconcile,
+)</code></pre>
+<p>The structured-envelope form (<code>return {&quot;progress&quot;: [...]}</code> from the tool) is still supported for tools that compute progress in bulk. The runtime concatenates both sources in order, so a tool that emits progress mid-run and then returns final entries in its envelope gets both flushed.</p>
+<h2 id="costs">Costs</h2>
+<p>Tools annotate cost by returning a <code>costs</code> dict in their envelope:</p>
+<pre><code class="language-python">def heavy_op(...):
+    ...
+    return {
+        &quot;effect&quot;: {&quot;ok&quot;: True, &quot;result&quot;: result},
+        &quot;costs&quot;: {&quot;gpu_seconds&quot;: 4.2, &quot;usd&quot;: 0.03},
+    }</code></pre>
+<p>Units are open strings. Each entry becomes one <code>cost</code> event on the trace, attributed to the calling actor; the runtime maintains a running total per unit (both world-wide and per-actor). A budget declared via <code>world.set_budget(unit, amount, actor=...)</code> halts the scheduler with <code>StopReason::BudgetExceeded</code> when a recorded cost would push the total past the cap.</p>
+<p>LLM backends also annotate cost on their own behalf. Each completion records <code>tokens_in</code>, <code>tokens_out</code>, and (when the model is in <code>crates/ensemble-runtime/pricing.toml</code>) <code>usd</code> against the actor that issued the call. The <a href="runtime.html#usage-and-cost-annotation">runtime reference</a> covers the pricing table.</p>
+<h2 id="sandboxed-tools">Sandboxed tools</h2>
+<pre><code class="language-python">PluginTool(..., sandbox=True)</code></pre>
+<p>A sandboxed tool runs each dispatch in a fresh <code>python -m ensemble.tool_worker</code> subprocess. The worker imports the world&#x27;s python package (which re-registers all of the world&#x27;s tools, building per-instance state from scratch), looks up the named tool, calls it once with the supplied JSON args, prints the result envelope on stdout, and exits. A crash in the worker surfaces as a structured error envelope rather than killing the scheduler.</p>
+<p>The cost is process startup per dispatch (tens to hundreds of milliseconds), so sandbox mode pays off only when isolation is worth more than the latency: tools that run untrusted code, tools that leave CUDA contexts in a bad state, tools that import a binary library that occasionally segfaults. State the parent&#x27;s closures held is not shared with the worker, so a sandboxed tool must encode its entire input in its JSON args and its entire output in its JSON return; anything that needs parent-process state stays in-process.</p>
+<p><code>sandbox_world</code> is the world name the worker imports to re-register the tool. The wrapper fills it in automatically at <code>World(name)</code> construction time, so authors rarely set it themselves.</p>
+  </main>
+</body>
+</html>

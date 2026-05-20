@@ -23,6 +23,9 @@ fi
 echo "==> baking deterministic refund_storm trace"
 (cd "$HERE" && uv run python examples/plank/bake_trace.py)
 
+echo "==> rendering docs/reference/*.md -> site/reference/*.html"
+(cd "$HERE" && uv run python scripts/render_reference.py)
+
 echo "==> rsyncing site/ -> $TARGET"
 mkdir -p "$TARGET"
 rsync -av --delete \

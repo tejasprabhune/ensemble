@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble, traces reference</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="../index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Site</div>
+        <a href="../index.html">Overview</a>
+        <a href="../docs.html">Docs</a>
+        <a href="../scenarios.html">Scenarios overview</a>
+        <a href="../plank.html">Plank</a>
+        <a href="../personas.html">Personas overview</a>
+        <a href="../mcp.html">MCP</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="index.html">Reference home</a>
+        <a href="world-api.html">World API</a>
+        <a href="scenarios.html">Scenarios</a>
+        <a href="tools.html">Tools</a>
+        <a href="personas.html">Personas</a>
+        <a href="cli.html">CLI</a>
+        <a href="runtime.html">Runtime</a>
+        <a href="traces.html" class="active">Traces</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">On this page</div>
+        <a href="#event-envelope">Event envelope</a>
+        <a href="#eventpayload-kinds">EventPayload kinds</a>
+        <a href="#seeded-events">Seeded events</a>
+        <a href="#reading-a-trace-from-python">Reading a trace from Python</a>
+        <a href="#reading-a-trace-from-rust">Reading a trace from Rust</a>
+        <a href="#the-trace-viewers-data-model">The trace viewer&#x27;s data model</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+<h1>Traces</h1>
+<p>This page is the reference for the JSONL trace format: every event kind, its schema, when the runtime emits it, and how to read a trace from Python or Rust. The trace is the canonical output of a scenario: anything a grader cares about has to leave a footprint here.</p>
+<h2 id="event-envelope">Event envelope</h2>
+<p>Every line of a JSONL trace decodes to one event:</p>
+<pre><code class="language-json">{
+  &quot;tick&quot;: 7,
+  &quot;ts_ms&quot;: 1737332112345,
+  &quot;actor&quot;: &quot;alice&quot;,
+  &quot;message_id&quot;: &quot;msg-...&quot;,
+  &quot;payload&quot;: { &quot;kind&quot;: &quot;user_message&quot;, &quot;text&quot;: &quot;...&quot; }
+}</code></pre>
+<p>Fields:</p>
+<ul>
+<li><code>tick</code>: monotonically increasing counter equal to the number of events the bus has appended so far. The watcher uses this to evaluate <code>world.turn_count &gt; N</code> predicates.</li>
+<li><code>ts_ms</code>: unix epoch milliseconds at append time.</li>
+<li><code>actor</code>: the actor id that produced the event, or <code>null</code> for system-level events (<code>world.apply</code>, scheduler notes).</li>
+<li><code>message_id</code>: present on bus-routed messages, absent on direct log appends. Used to correlate request/response pairs across the bus.</li>
+<li><code>payload</code>: the tagged-union body; the <code>kind</code> discriminator names the variant.</li>
+</ul>
+<p>The rust type lives in <code>crates/ensemble-core/src/event.rs</code>:</p>
+<pre><code class="language-rust">pub struct Event {
+    pub tick: Tick,
+    pub ts_ms: u128,
+    pub actor: Option&lt;ActorId&gt;,
+    pub message_id: Option&lt;MessageId&gt;,
+    pub payload: EventPayload,
+}</code></pre>
+<h2 id="eventpayload-kinds">EventPayload kinds</h2>
+<p>Each <code>kind</code> value below appears as a <code>payload.kind</code> discriminator in the JSON. Variants new in phase 2 (the <code>seed</code> flag) default to <code>false</code> in deserialisation, so older traces round-trip.</p>
+<h3 id="user-message">user_message</h3>
+<pre><code class="language-json">{&quot;kind&quot;: &quot;user_message&quot;, &quot;text&quot;: &quot;i pay every month for nothing.&quot;}</code></pre>
+<p>A simulated user said something. Emitted by <code>Bus::send</code> when a <code>UserActor::step</code> reply lands or when scenario setup seeded a message via <code>user.say(target, text)</code>. The <code>actor</code> field names the user; the <code>to</code> field of the underlying envelope (not exposed in the JSON; the bus drops it after routing) was the agent the user addressed.</p>
+<h3 id="agent-message">agent_message</h3>
+<pre><code class="language-json">{&quot;kind&quot;: &quot;agent_message&quot;, &quot;text&quot;: &quot;Refunding the most recent cycle now.&quot;}</code></pre>
+<p>An agent actor said something. Same shape as <code>user_message</code> with the roles flipped.</p>
+<h3 id="tool-call">tool_call</h3>
+<pre><code class="language-json">{
+  &quot;kind&quot;: &quot;tool_call&quot;,
+  &quot;id&quot;: &quot;tc-12ab&quot;,
+  &quot;name&quot;: &quot;issue_refund&quot;,
+  &quot;args&quot;: {&quot;user_id&quot;: &quot;u-alice&quot;, &quot;amount_cents&quot;: 5000, &quot;reason&quot;: &quot;...&quot;},
+  &quot;seed&quot;: false
+}</code></pre>
+<p>Emitted whenever a tool dispatch starts. <code>id</code> is the provider-supplied call id (Anthropic&#x27;s <code>tool_use.id</code>, OpenAI&#x27;s <code>tool_calls[].id</code>) when available, or a freshly minted id for seeded actions. <code>name</code> is the tool the agent (or seed) chose. <code>args</code> is the JSON the model produced. <code>seed</code> is <code>true</code> when the call came from <code>User.act</code> or <code>World.apply</code> rather than from an actor&#x27;s runtime turn; see <a href="#seeded-events">seeded events</a>.</p>
+<h3 id="tool-result">tool_result</h3>
+<pre><code class="language-json">{
+  &quot;kind&quot;: &quot;tool_result&quot;,
+  &quot;id&quot;: &quot;tc-12ab&quot;,
+  &quot;name&quot;: &quot;issue_refund&quot;,
+  &quot;result&quot;: {&quot;ok&quot;: true, &quot;data&quot;: {&quot;refund_id&quot;: &quot;r-...&quot;}},
+  &quot;is_error&quot;: false,
+  &quot;seed&quot;: false
+}</code></pre>
+<p>The dispatch&#x27;s outcome. <code>id</code> matches the originating <code>tool_call</code>. <code>result</code> is the tool&#x27;s <code>effect</code> envelope. <code>is_error</code> is <code>true</code> when the dispatch raised; the result then carries an <code>error</code> string and the calling agent sees a tool error in its next turn.</p>
+<h3 id="state-diff">state_diff</h3>
+<pre><code class="language-json">{
+  &quot;kind&quot;: &quot;state_diff&quot;,
+  &quot;diff&quot;: [{
+    &quot;table&quot;: &quot;refunds&quot;,
+    &quot;row_id&quot;: &quot;r-...&quot;,
+    &quot;field&quot;: &quot;row&quot;,
+    &quot;old&quot;: null,
+    &quot;new&quot;: {&quot;user_id&quot;: &quot;u-alice&quot;, &quot;amount_cents&quot;: 5000, &quot;reason&quot;: &quot;...&quot;}
+  }],
+  &quot;seed&quot;: false
+}</code></pre>
+<p>A structured description of the world state change a tool just applied. Emitted when a tool returns a <code>diff</code> in its envelope, or when <code>WorldHandle::apply_and_log</code> runs on the rust side. Always follows a <code>tool_result</code> with the same <code>id</code> (correlated by the preceding event&#x27;s id field). The viewer&#x27;s state-changes panel reads this directly; predicates that walk state changes pattern-match on it.</p>
+<h3 id="progress">progress</h3>
+<pre><code class="language-json">{
+  &quot;kind&quot;: &quot;progress&quot;,
+  &quot;id&quot;: &quot;tc-12ab&quot;,
+  &quot;tool&quot;: &quot;slow_billing_check&quot;,
+  &quot;fraction&quot;: 0.4,
+  &quot;message&quot;: &quot;scanned 2/5 months&quot;
+}</code></pre>
+<p>Buffered while a tool runs, flushed in order ahead of the trailing <code>tool_result</code>. <code>fraction</code> is a <code>0.0..=1.0</code> estimate of completion; the viewer renders a progress line per entry.</p>
+<h3 id="tool-timeout">tool_timeout</h3>
+<pre><code class="language-json">{
+  &quot;kind&quot;: &quot;tool_timeout&quot;,
+  &quot;id&quot;: &quot;tc-12ab&quot;,
+  &quot;name&quot;: &quot;slow_billing_check&quot;,
+  &quot;after_ms&quot;: 2000
+}</code></pre>
+<p>Emitted when a tool dispatch exceeded its declared timeout. The calling agent sees a tool error; the scenario continues.</p>
+<h3 id="cost">cost</h3>
+<pre><code class="language-json">{
+  &quot;kind&quot;: &quot;cost&quot;,
+  &quot;unit&quot;: &quot;tokens_in&quot;,
+  &quot;amount&quot;: 1342,
+  &quot;running_total&quot;: 5612
+}</code></pre>
+<p>A cost annotation. <code>unit</code> is an open string (<code>&quot;usd&quot;</code>, <code>&quot;tokens_in&quot;</code>, <code>&quot;tokens_out&quot;</code>, <code>&quot;gpu_seconds&quot;</code>, ...). <code>amount</code> is the increment from this event. <code>running_total</code> is the world-wide total for the unit after this event. The <code>actor</code> field at the envelope level distinguishes per-actor accounting from world-wide annotations.</p>
+<h3 id="system">system</h3>
+<pre><code class="language-json">{&quot;kind&quot;: &quot;system&quot;, &quot;note&quot;: &quot;scheduler quiescent; halting&quot;}</code></pre>
+<p>A framework-level note. The scheduler emits one at termination (describing why), the backend layer emits one on construction (naming the chosen backend), and the python <code>_log_grader_scores</code> helper emits one with the JSON of the final grader scores so the trace is self-contained.</p>
+<h2 id="seeded-events">Seeded events</h2>
+<p><code>tool_call</code>, <code>tool_result</code>, and <code>state_diff</code> events carry a <code>seed: bool</code> field. It is <code>true</code> when the event originated from scenario setup rather than an actor&#x27;s runtime turn:</p>
+<ul>
+<li><code>User.act(tool, **kwargs)</code> from a scenario marks every event it emits with <code>seed=true</code>. The events still carry the user&#x27;s id as the <code>actor</code>, because the seed action is the user&#x27;s, but the flag tells consumers the event is not the user&#x27;s runtime reaction.</li>
+<li><code>World.apply(tool, **kwargs)</code> produces a seeded sequence with <code>actor=null</code>. System-level mutation, no actor in play.</li>
+<li>The <code>AgentActor</code> runtime loop, the <code>UserActor</code> runtime loop, and <code>dispatch_as</code> (the MCP external slot) all leave <code>seed=false</code>.</li>
+</ul>
+<p>Predicates that aggregate &quot;what the agent decided to do&quot; filter on <code>seed=false</code> to avoid double-counting setup mutations. The trace viewer renders seeded tool lines with a muted left border and a <code>[seed]</code> tag so the visual flow stays clear.</p>
+<h2 id="reading-a-trace-from-python">Reading a trace from Python</h2>
+<p>The simplest path: each line is one JSON object.</p>
+<pre><code class="language-python">import json
+
+with open(&quot;traces/plank_refund_storm.jsonl&quot;) as f:
+    events = [json.loads(line) for line in f if line.strip()]
+
+tool_calls = [e for e in events if e[&quot;payload&quot;][&quot;kind&quot;] == &quot;tool_call&quot;]
+non_seed = [c for c in tool_calls if not c[&quot;payload&quot;][&quot;seed&quot;]]</code></pre>
+<p>When the trace is the result of a freshly-run scenario, the <code>RunResult.trace</code> field already carries the parsed events:</p>
+<pre><code class="language-python">from ensemble import run_scenario
+
+result = run_scenario(&quot;plank.refund_storm&quot;, backend=&quot;mock&quot;)
+result.trace      # already parsed
+result.scores     # the grader dict</code></pre>
+<p>A scenario can also pull the trace mid-run:</p>
+<pre><code class="language-python">events = world.trace()           # snapshot at the moment of the call</code></pre>
+<p>The list grows as the run continues, so calling <code>world.trace()</code> again later returns more events without rerunning anything.</p>
+<h2 id="reading-a-trace-from-rust">Reading a trace from Rust</h2>
+<p><code>Event</code> is the canonical type. Deserialise with <code>serde_json</code>:</p>
+<pre><code class="language-rust">// crates/ensemble-core/src/event.rs
+use ensemble_core::event::Event;
+
+let mut events: Vec&lt;Event&gt; = Vec::new();
+for line in std::io::BufRead::lines(reader) {
+    let line = line?;
+    if line.trim().is_empty() {
+        continue;
+    }
+    events.push(serde_json::from_str(&amp;line)?);
+}</code></pre>
+<p>A live <code>EventLog</code> snapshot is available from inside the runtime:</p>
+<pre><code class="language-rust">let events: Vec&lt;Event&gt; = log.snapshot().await;</code></pre>
+<p>The serialised form on disk is the same shape as <code>Event</code>&#x27;s serde output, so a snapshot and a re-read JSONL are interchangeable.</p>
+<h2 id="the-trace-viewers-data-model">The trace viewer&#x27;s data model</h2>
+<p>The viewer (<code>site/viewer.js</code>) fetches <code>trace.jsonl</code>, parses one event per line, and renders two views: a three-panel timeline (actors / tool calls / state changes) and a linear chat feed. The slider scrubs through events; the viewer polls the file every two seconds, so a long run appended-to in real time keeps growing in the browser.</p>
+<p>Actor identity is collected from the <code>actor</code> field. The viewer infers each actor&#x27;s kind (user or agent) by looking at the kinds of payloads they produced: an actor that emits <code>tool_call</code> or <code>agent_message</code> is an agent; one that emits <code>user_message</code> first is a user.</p>
+<p>The state-changes panel reads <code>state_diff</code> events when present and falls back to summarising <code>tool_result</code> payloads otherwise. Seeded events are styled with a muted left border so they stay visually distinct from runtime decisions.</p>
+<p>The chat view renders code blocks (fenced triple-backtick), inline backticks, and bare newlines from the markdown subset the viewer ships. Tool calls and results show as inline annotations in the conversation; <code>[cost]</code>, <code>[progress]</code>, and <code>[state]</code> notes appear as muted lines so an extended run stays readable.</p>
+  </main>
+</body>
+</html>

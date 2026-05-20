@@ -10,7 +10,7 @@ forward-references that ask you to continue on the next page; if
 two pages overlap, the relevant sections cross-link, so following
 the link reaches what you need without sequential reading.
 
-## [world-api.md](world-api.md)
+## [World API](world-api.md)
 
 How to write a world plugin. `register_world` and its kwargs, the
 python plugin path through `PluginTool` and predicates, the
@@ -20,7 +20,7 @@ python plugin path through `PluginTool` and predicates, the
 when you are extending the framework with a new world or wiring
 an existing rust state library into a world plugin.
 
-## [scenarios.md](scenarios.md)
+## [Scenarios](scenarios.md)
 
 The `@scenario` decorator (both flavours), the `World` instance
 the scenario function binds against, every method and property the
@@ -30,7 +30,7 @@ the `scenarios.toml` declarative format with its grader-expression
 DSL. Start here when you are authoring a new scenario or reading
 an existing one closely.
 
-## [tools.md](tools.md)
+## [Tools](tools.md)
 
 How to declare a tool a world's agents can call. The `PluginTool`
 dataclass, the `tool()` helper for the common case, the
@@ -40,7 +40,7 @@ into: resource locks, timeouts, progress emission, and cost
 annotations. The last section covers sandboxed dispatch through
 `ensemble.tool_worker`.
 
-## [personas.md](personas.md)
+## [Personas](personas.md)
 
 The persona TOML schema field by field, the hidden-state
 mechanism that travels with a user actor and is rendered into the
@@ -51,7 +51,7 @@ system prompt, the `PromptedPersona` wrapper, the
 you are writing or tuning a persona, or when you are wiring a
 trained adapter from `ensemble-train` back into a scenario.
 
-## [cli.md](cli.md)
+## [CLI](cli.md)
 
 Every `ensemble` subcommand and every flag, with type, default,
 behavior, side effects, and one example invocation. `init`,
@@ -60,7 +60,7 @@ behavior, side effects, and one example invocation. `init`,
 `train`. Reach for this page when you are looking up a flag you
 forgot or wiring the binary into a script.
 
-## [runtime.md](runtime.md)
+## [Runtime](runtime.md)
 
 The `LLMBackend` trait and the four shipped implementations
 (`AnthropicBackend`, `OpenAIBackend`, `LocalAdapterBackend`,
@@ -71,7 +71,7 @@ providers, and the minimal contract a custom backend implements.
 Reach for this page when you are debugging a real-network run or
 writing a new backend.
 
-## [traces.md](traces.md)
+## [Traces](traces.md)
 
 The JSONL trace format. Every event kind with its schema, when
 the runtime emits it, what the `seed` flag means and which paths

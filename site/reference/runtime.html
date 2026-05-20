@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble, runtime reference</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="../index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Site</div>
+        <a href="../index.html">Overview</a>
+        <a href="../docs.html">Docs</a>
+        <a href="../scenarios.html">Scenarios overview</a>
+        <a href="../plank.html">Plank</a>
+        <a href="../personas.html">Personas overview</a>
+        <a href="../mcp.html">MCP</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="index.html">Reference home</a>
+        <a href="world-api.html">World API</a>
+        <a href="scenarios.html">Scenarios</a>
+        <a href="tools.html">Tools</a>
+        <a href="personas.html">Personas</a>
+        <a href="cli.html">CLI</a>
+        <a href="runtime.html" class="active">Runtime</a>
+        <a href="traces.html">Traces</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">On this page</div>
+        <a href="#llmbackend-trait">LLMBackend trait</a>
+        <a href="#completionrequest-and-completionresponse">CompletionRequest and CompletionResponse</a>
+        <a href="#usage-and-cost-annotation">Usage and cost annotation</a>
+        <a href="#anthropicbackend">AnthropicBackend</a>
+        <a href="#openaibackend">OpenAIBackend</a>
+        <a href="#localadapterbackend">LocalAdapterBackend</a>
+        <a href="#mockbackend">MockBackend</a>
+        <a href="#backend-selection">Backend selection</a>
+        <a href="#auto-backend-precedence">Auto-backend precedence</a>
+        <a href="#max-tokens-divergence">max_tokens divergence</a>
+        <a href="#writing-a-new-backend">Writing a new backend</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+<h1>Runtime</h1>
+<p>This page is the reference for the LLM backend layer: the trait contract, the four implementations that ship in <code>ensemble-runtime</code>, how token and USD cost are recorded against the calling actor, and the protocol a custom backend implements.</p>
+<h2 id="llmbackend-trait">LLMBackend trait</h2>
+<pre><code class="language-rust">// crates/ensemble-runtime/src/backend.rs
+#[async_trait]
+pub trait LLMBackend: Send + Sync {
+    async fn complete(
+        &amp;self,
+        request: CompletionRequest,
+    ) -&gt; Result&lt;CompletionResponse, BackendError&gt;;
+}
+
+pub type SharedBackend = Arc&lt;dyn LLMBackend&gt;;</code></pre>
+<p>A backend is anything that turns a <code>CompletionRequest</code> into a <code>CompletionResponse</code>. The trait has exactly one method; the runtime is otherwise transport- and provider-agnostic. <code>Arc</code> wrapping is what makes the same backend cheaply shareable across many actors.</p>
+<h2 id="completionrequest-and-completionresponse">CompletionRequest and CompletionResponse</h2>
+<pre><code class="language-rust">pub struct CompletionRequest {
+    pub model: String,
+    pub system: Option&lt;String&gt;,
+    pub messages: Vec&lt;ChatMessage&gt;,
+    pub tools: Vec&lt;ToolSchema&gt;,
+    pub temperature: Option&lt;f32&gt;,
+    pub max_tokens: Option&lt;u32&gt;,
+}
+
+pub struct CompletionResponse {
+    pub text: String,
+    pub tool_calls: Vec&lt;ProposedToolCall&gt;,
+    pub stop_reason: Option&lt;String&gt;,
+    pub usage: Option&lt;Usage&gt;,
+}
+
+pub struct Usage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub usd: Option&lt;f64&gt;,
+}
+
+pub struct ProposedToolCall {
+    pub id: Option&lt;String&gt;,
+    pub name: String,
+    pub args: serde_json::Value,
+}</code></pre>
+<p><code>request.model</code> is the provider&#x27;s model identifier (or the mock backend&#x27;s script key). <code>request.system</code> is the rendered system prompt; <code>PromptedPersona</code> is what fills this in for users with a persona. <code>request.messages</code> is the chat history, <code>request.tools</code> is the agent&#x27;s tool schemas (already filtered by the per-agent allowed set; see the <a href="scenarios.html#spawn_agent">scenarios reference</a>).</p>
+<p><code>response.text</code> is the assistant&#x27;s plain-text content. <code>response.tool_calls</code> is the list of tool invocations the model returned; the agent loop dispatches them through the world&#x27;s tool registry. <code>response.usage</code> is populated when the provider returned a usage block; the runtime turns it into cost annotations.</p>
+<h2 id="usage-and-cost-annotation">Usage and cost annotation</h2>
+<p>Every shipped backend parses the usage block from its provider&#x27;s response. After each completion the agent (or user) actor records three cost events against itself:</p>
+<ul>
+<li><code>tokens_in</code>: prompt tokens consumed.</li>
+<li><code>tokens_out</code>: completion tokens produced.</li>
+<li><code>usd</code>: the dollar cost, looked up from <code>crates/ensemble-runtime/pricing.toml</code> by the model id. The entry is omitted when the model is not in the table; the runtime never fabricates a number.</li>
+</ul>
+<p><code>pricing.toml</code> carries per-million-token pricing for the models the shipped backends use in tests. Update it when a model&#x27;s pricing changes; the lookup is exact-match on the model id the scenario passes to <code>World(...)</code>. A custom backend implementer who wants USD annotation calls <code>pricing::usd_for(provider, model, input_tokens, output_tokens)</code> and stuffs the result into <code>Usage.usd</code> before returning.</p>
+<p>Cost annotations land in the world&#x27;s ledger: <code>world.cost_total(unit)</code> returns the world-wide total, <code>world.cost_total(unit, actor=...)</code> returns the per-actor total, and <code>world.set_budget(unit, amount, actor=...)</code> caps either ledger. See the <a href="tools.html#costs">tools reference</a> for the parallel path tools take to annotate cost from their dispatch return.</p>
+<h2 id="anthropicbackend">AnthropicBackend</h2>
+<pre><code class="language-rust">let be = AnthropicBackend::from_env()?;       // reads ANTHROPIC_API_KEY
+let be = AnthropicBackend::with_key(&quot;sk-...&quot;);
+let be = be.with_base_url(&quot;https://...&quot;);      // for proxies</code></pre>
+<p>A minimal Anthropic Messages API client. Tool use is via the official <code>tools</code> and <code>tool_use</code> content blocks. Streaming is off deliberately; the framework is non-streaming everywhere.</p>
+<p>The base URL defaults to <code>https://api.anthropic.com/v1</code>. The <code>ANTHROPIC_BASE_URL</code> env var or <code>World(base_url=...)</code> overrides it, which is the path for Azure AI Foundry or a self-hosted proxy.</p>
+<p>The <code>anthropic-version</code> header is pinned to <code>2023-06-01</code>. Token usage is parsed from <code>response.usage.input_tokens</code> and <code>output_tokens</code>.</p>
+<h2 id="openaibackend">OpenAIBackend</h2>
+<pre><code class="language-rust">let be = OpenAIBackend::from_env()?;          // reads OPENAI_API_KEY
+let be = OpenAIBackend::with_key(&quot;sk-...&quot;);
+let be = be.with_base_url(&quot;https://...&quot;);</code></pre>
+<p>A minimal Chat Completions client with function-calling support. The base URL defaults to <code>https://api.openai.com/v1</code> and is override-able the same way Anthropic&#x27;s is. Token usage comes from <code>response.usage.prompt_tokens</code> and <code>completion_tokens</code>.</p>
+<p>The backend always sends <code>max_completion_tokens</code> rather than the legacy <code>max_tokens</code>. See the <a href="#max_tokens-divergence">max_tokens divergence</a> section for the rationale.</p>
+<h2 id="localadapterbackend">LocalAdapterBackend</h2>
+<pre><code class="language-rust">let be = LocalAdapterBackend::new(&quot;http://localhost:8000/v1&quot;);
+let be = be.with_adapter(&quot;my-adapter&quot;);</code></pre>
+<p>Hits a vLLM-compatible OpenAI-shaped HTTP server. The request shape is OpenAI&#x27;s Chat Completions, with the <code>adapter</code> field (when set) forwarded as the <code>model</code> field of the request so a single vLLM server hosting multiple adapters can route by name.</p>
+<p>The vLLM backend is what trained personas auto-wire to. The <a href="personas.html#trained-persona-auto-wiring">personas reference</a> has the resolution rules; the short version is: a persona TOML with <code>mode = &quot;trained&quot;</code> and <code>adapter_name</code> set picks up <code>serve_url</code> (or the <code>ENSEMBLE_VLLM_BASE_URL</code> env var) and constructs a per-user <code>LocalAdapterBackend</code> from those.</p>
+<p>Token usage is parsed in OpenAI&#x27;s shape. USD is looked up against the OpenAI pricing table; locally-hosted models that aren&#x27;t on the public price list don&#x27;t get a USD entry, which matches the spirit of the runtime never fabricating a number.</p>
+<h2 id="mockbackend">MockBackend</h2>
+<pre><code class="language-rust">let script = MockScript::new();
+script.push_for(&quot;agent-model&quot;, MockTurn::say_then_tool(
+    &quot;Looking up.&quot;, &quot;lookup_user&quot;, json!({&quot;user_id&quot;: &quot;u-alice&quot;})
+));
+script.push_for(&quot;agent-model&quot;, MockTurn::text(&quot;Done.&quot;));
+let be = MockBackend::new(script);</code></pre>
+<p>A deterministic scripted backend. Each call pulls the next <code>MockTurn</code> from the script keyed by <code>request.model</code>, returning text and tool calls as the script dictates. When the script runs out, the mock returns an empty response with <code>stop_reason = &quot;script_exhausted&quot;</code>.</p>
+<p>The mock is what the test suite uses everywhere a real provider is not in play, and what bakes the demo trace served by the front page. It records no usage, so completions through the mock leave the cost ledger untouched.</p>
+<h2 id="backend-selection">Backend selection</h2>
+<p><code>World(name, backend=...)</code> and <code>run_scenario(..., backend=...)</code> accept five strings:</p>
+<ul>
+<li><code>&quot;mock&quot;</code>: the deterministic scripted backend. The default. No network.</li>
+<li><code>&quot;anthropic&quot;</code>: Anthropic Messages API. Requires <code>ANTHROPIC_API_KEY</code>.</li>
+<li><code>&quot;openai&quot;</code>: OpenAI Chat Completions. Requires <code>OPENAI_API_KEY</code>.</li>
+<li><code>&quot;vllm&quot;</code>: a self-hosted vLLM endpoint. Requires <code>base_url=&quot;...&quot;</code>.</li>
+<li><code>&quot;auto&quot;</code>: picks the first provider with an API key in the environment.</li>
+</ul>
+<p>A scenario that wants to point any backend at a different host passes <code>base_url=&quot;...&quot;</code> to <code>World(...)</code>, which overrides the provider&#x27;s default base URL. The env var equivalents (<code>ANTHROPIC_BASE_URL</code>, <code>OPENAI_BASE_URL</code>) are honoured when the kwarg is unset.</p>
+<h2 id="auto-backend-precedence">Auto-backend precedence</h2>
+<p><code>backend=&quot;auto&quot;</code> resolves in this order:</p>
+<ol>
+<li>Anthropic, when <code>ANTHROPIC_API_KEY</code> is set in the environment (or in a <code>.env</code> file <code>World()</code> auto-loads on construction).</li>
+<li>OpenAI, when <code>OPENAI_API_KEY</code> is set.</li>
+<li>Mock, when neither key is set.</li>
+</ol>
+<p>Anthropic wins ties: a process with both keys gets Anthropic from <code>auto</code>. Pass an explicit <code>backend=&quot;openai&quot;</code> when the other choice is intended. The runtime announces the resolved backend on stderr on construction and appends a <code>system</code> event to the trace, so the final choice is visible without printing it yourself.</p>
+<h2 id="max-tokens-divergence">max_tokens divergence</h2>
+<p><code>CompletionRequest.max_tokens</code> is one field, but the three shipped real-network backends serialize it differently:</p>
+<ul>
+<li>Anthropic sends <code>max_tokens</code> (the Messages API&#x27;s name).</li>
+<li>OpenAI sends <code>max_completion_tokens</code>. Newer chat models (<code>o1</code>, <code>gpt-5</code>, ...) reject the legacy <code>max_tokens</code> field, and every chat-completions model since mid-2024 accepts the new name, so the framework always uses the new field.</li>
+<li>vLLM sends <code>max_tokens</code>. vLLM accepts both names; the smaller open models people serve through it tend not to track the new field, so we stay on the legacy form.</li>
+</ul>
+<p>The translation happens inside each backend&#x27;s <code>complete</code>. Scenario authors only ever interact with the single <code>max_tokens</code> field on <code>CompletionRequest</code>.</p>
+<h2 id="writing-a-new-backend">Writing a new backend</h2>
+<p>A custom backend implements <code>LLMBackend::complete</code>. The minimal shape:</p>
+<pre><code class="language-rust">use async_trait::async_trait;
+use ensemble_runtime::backend::{
+    BackendError, CompletionRequest, CompletionResponse, LLMBackend, Usage,
+};
+
+pub struct MyBackend { /* ... */ }
+
+#[async_trait]
+impl LLMBackend for MyBackend {
+    async fn complete(
+        &amp;self,
+        request: CompletionRequest,
+    ) -&gt; Result&lt;CompletionResponse, BackendError&gt; {
+        // ... send the request, parse the response ...
+        Ok(CompletionResponse {
+            text: text,
+            tool_calls: tool_calls,
+            stop_reason: stop_reason,
+            usage: Some(Usage {
+                input_tokens: input_tokens,
+                output_tokens: output_tokens,
+                usd: None,  // or pricing::usd_for(...) if you have a table
+            }),
+        })
+    }
+}</code></pre>
+<p>Wrap the backend in <code>Arc::new(MyBackend { ... })</code> to get a <code>SharedBackend</code>, then thread it into the actors however your integration calls for. The python <code>World</code> constructor builds its backend internally from the <code>backend=</code> string, so a custom backend needs either a thin pyo3 wrapper or a scenario that constructs rust actors directly (<code>tests/integration_live/</code> is the pattern).</p>
+<h1>Traces</h1>
+<p>See the companion <a href="traces.html">traces reference</a> for the full event-log format.</p>
+  </main>
+</body>
+</html>

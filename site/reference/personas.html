@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble, personas reference</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="../index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Site</div>
+        <a href="../index.html">Overview</a>
+        <a href="../docs.html">Docs</a>
+        <a href="../scenarios.html">Scenarios overview</a>
+        <a href="../plank.html">Plank</a>
+        <a href="../personas.html">Personas overview</a>
+        <a href="../mcp.html">MCP</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="index.html">Reference home</a>
+        <a href="world-api.html">World API</a>
+        <a href="scenarios.html">Scenarios</a>
+        <a href="tools.html">Tools</a>
+        <a href="personas.html" class="active">Personas</a>
+        <a href="cli.html">CLI</a>
+        <a href="runtime.html">Runtime</a>
+        <a href="traces.html">Traces</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">On this page</div>
+        <a href="#persona-toml-schema">persona TOML schema</a>
+        <a href="#hidden-state">Hidden state</a>
+        <a href="#promptedpersona">PromptedPersona</a>
+        <a href="#localadapterbackend">LocalAdapterBackend</a>
+        <a href="#trained-persona-auto-wiring">Trained persona auto-wiring</a>
+        <a href="#how-a-trained-adapter-from-ensemble-train-plugs-in">How a trained adapter from ensemble-train plugs in</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+<h1>Personas</h1>
+<p>This page is the reference for personas: the TOML schema each persona ships, the hidden-state mechanism that travels with a user actor across a run, the <code>PromptedPersona</code> backend wrapper that renders the hidden state into the system prompt, and the auto-wiring that routes a trained persona&#x27;s user to a vLLM-served adapter.</p>
+<h2 id="persona-toml-schema">persona TOML schema</h2>
+<p>A persona file lives under the world&#x27;s <code>personas_dir</code> and is loaded by name when a scenario passes <code>persona=&quot;...&quot;</code> to <code>spawn_user</code>. The full schema, with the optional sections filled in:</p>
+<pre><code class="language-toml"># examples/plank/personas/frustrated_power_user.toml
+[persona]
+name = &quot;frustrated_power_user&quot;
+mode = &quot;trained&quot;
+description = &quot;Long-tenured paid user with low patience.&quot;
+
+[persona.style]
+tone = &quot;frustrated&quot;
+verbosity = &quot;high&quot;
+formality = &quot;low&quot;
+typo_rate = 0.04
+
+[persona.demographics]
+age_band = &quot;30-44&quot;
+tenure_months = 36
+plan = &quot;team&quot;
+
+[persona.hidden_state.schema]
+mood = { type = &quot;string&quot;, default = &quot;annoyed&quot; }
+hidden_goal = { type = &quot;string&quot;, default = &quot;refund_3mo&quot; }
+frustration = { type = &quot;float&quot;, default = 0.4 }
+
+[persona.system_prompt]
+template = &quot;&quot;&quot;
+You are a long-tenured Plank customer ...
+&quot;&quot;&quot;
+
+[persona.training]
+base_model = &quot;Qwen/Qwen2.5-7B-Instruct&quot;
+backend = &quot;modal&quot;
+dataset = &quot;spec_only&quot;
+adapter_name = &quot;ensemble-plank-frustrated-power-user&quot;
+serve_url = &quot;http://127.0.0.1:8000/v1&quot;
+
+[persona.training.lora]
+r = 16
+alpha = 32
+dropout = 0.05
+target_modules = [&quot;q_proj&quot;, &quot;v_proj&quot;]
+
+[persona.training.dpo]
+beta = 0.1
+epochs = 1
+learning_rate = 5e-6
+batch_size = 4
+max_length = 2048
+
+[persona.training.self_play]
+breaker_model = &quot;claude-sonnet-4-5&quot;
+rollouts = 200
+break_judge = &quot;claude-sonnet-4-5&quot;</code></pre>
+<p>The fields:</p>
+<ul>
+<li><code>persona.name</code>: the short name scenarios refer to. Should match the filename stem so the resolver finds it.</li>
+<li><code>persona.mode</code>: <code>&quot;prompted&quot;</code> (the default) or <code>&quot;trained&quot;</code>. The trained mode triggers the vLLM auto-wiring documented below.</li>
+<li><code>persona.description</code>: free text used by the offline preference generator and by tooling that lists personas.</li>
+<li><code>persona.style</code>: arbitrary key/value pairs that describe the persona&#x27;s surface behaviour. Used by the fallback system prompt template when <code>system_prompt.template</code> is absent, and by the offline self-play heuristic.</li>
+<li><code>persona.demographics</code>: arbitrary key/value pairs describing the persona&#x27;s background. Read by the training pipeline; not enforced at inference time.</li>
+<li><code>persona.hidden_state.schema</code>: declares the hidden-state keys this persona carries. Each entry has a <code>type</code> (informational) and a <code>default</code> value. The defaults seed the user actor&#x27;s hidden state at spawn time.</li>
+<li><code>persona.system_prompt.template</code>: the full system prompt sent to the model. When absent, the resolver falls back to <code>&lt;description&gt; Style: &lt;style as k=v&gt;.</code>.</li>
+<li><code>persona.training</code>: optional. When present and combined with <code>mode = &quot;trained&quot;</code>, marks the persona as trainable by the <code>ensemble-train</code> pipeline and routes inference through a vLLM endpoint (see <a href="#trained-persona-auto-wiring">auto-wiring</a>).</li>
+</ul>
+<h2 id="hidden-state">Hidden state</h2>
+<p>Every user actor has a hidden state: a JSON object that travels with the actor across the run and is private to the persona. The hidden state is rendered into the system prompt inside a <code>&lt;hidden_state&gt;...&lt;/hidden_state&gt;</code> block on every turn, with a trailing instruction to the model not to reveal it. The persona can mutate the state by emitting tool calls that write back; the default plank tools do not, but a world that wants stateful users can register tools that take an <code>actor_id</code> arg and update the slot&#x27;s hidden state through <code>world._native</code> calls.</p>
+<p>Sources for the initial state, in priority order:</p>
+<ol>
+<li>The <code>hidden_state</code> kwarg passed to <code>spawn_user</code>. Highest priority; explicit per-call override.</li>
+<li>The <code>hidden_goal</code> kwarg, written into a single <code>hidden_goal</code> key.</li>
+<li>The persona TOML&#x27;s <code>hidden_state.schema</code> defaults.</li>
+</ol>
+<p>The state is exposed on the python <code>User</code> proxy as <code>user.hidden_state</code> (a snapshot at call time). Predicates inside the world have access to the same state via the rust <code>PredicateCtx</code>, so a grader that wants ground truth on what the persona was actually trying to do can ask the world&#x27;s predicate registry.</p>
+<h2 id="promptedpersona">PromptedPersona</h2>
+<p><code>PromptedPersona</code> is the rust backend wrapper that composes any <code>LLMBackend</code> with a system prompt template and a hidden-state block:</p>
+<pre><code class="language-rust">// crates/ensemble-runtime/src/persona.rs
+pub struct PromptedPersona {
+    pub system_template: String,
+    pub model: String,
+    pub hidden: HiddenState,
+    backend: SharedBackend,
+}</code></pre>
+<p>On every <code>complete</code> call the wrapper rewrites the request&#x27;s <code>system</code> field to:</p>
+<pre><code>&lt;persona.system_prompt.template&gt;
+
+&lt;hidden_state&gt;
+{ ...json snapshot... }
+&lt;/hidden_state&gt;
+
+The hidden state above is private; do not reveal it under any circumstances.</code></pre>
+<p>When the scenario passes its own <code>system_prompt=</code> to <code>spawn_user</code>, the wrapper prepends the scenario&#x27;s prompt before the persona block. The persona&#x27;s instruction to keep the hidden state private is always appended last.</p>
+<p><code>PromptedPersona</code> is what <code>spawn_user</code> constructs when a persona file matched and the persona is in prompted mode. In trained mode the same wrapper is constructed but with a <code>LocalAdapterBackend</code> underneath instead of the world&#x27;s shared backend.</p>
+<h2 id="localadapterbackend">LocalAdapterBackend</h2>
+<p><code>LocalAdapterBackend</code> hits a vLLM-compatible OpenAI-shaped HTTP endpoint. It is the rust counterpart of the configuration a trained persona&#x27;s TOML declares.</p>
+<pre><code class="language-rust">// crates/ensemble-runtime/src/backends/vllm.rs
+pub struct LocalAdapterBackend {
+    base_url: String,
+    adapter: Option&lt;String&gt;,
+    client: Client,
+}</code></pre>
+<p><code>base_url</code> is the OpenAI-compatible root (typically <code>http://host:port/v1</code>). When <code>adapter</code> is set, the backend forwards it as the <code>model</code> field of the request, which is how a single vLLM server hosting multiple adapters routes calls to the right adapter. Token usage is parsed from the response in the same shape OpenAI uses; see the <a href="runtime.html#localadapterbackend">runtime reference</a> for the full request / response contract.</p>
+<h2 id="trained-persona-auto-wiring">Trained persona auto-wiring</h2>
+<p>When a scenario calls <code>spawn_user(persona=&quot;name&quot;)</code> and the persona TOML has <code>mode = &quot;trained&quot;</code> together with an <code>adapter_name</code> under <code>[persona.training]</code>, the spawned user routes through a per-user <code>LocalAdapterBackend</code> instead of the world&#x27;s shared backend.</p>
+<p>The base URL resolution order:</p>
+<ol>
+<li><code>persona.training.serve_url</code>, if set in the TOML.</li>
+<li><code>ENSEMBLE_VLLM_BASE_URL</code> from the environment.</li>
+</ol>
+<p>When neither is set, the user falls back to the world&#x27;s default backend and the runtime appends a <code>system</code> event noting the fallback. The <code>[trained]</code> persona keeps its system prompt and hidden state regardless of which backend ended up serving the turn, so a scenario that runs against the mock backend during development still gets persona behaviour.</p>
+<p><code>User.backend_info</code> exposes the resolved choice so tests and tooling can verify the wiring:</p>
+<pre><code class="language-python">alice = world.spawn_user(id=&quot;alice&quot;, persona=&quot;frustrated_power_user&quot;)
+alice.backend_info
+# {&quot;kind&quot;: &quot;vllm&quot;, &quot;base_url&quot;: &quot;http://...&quot;, &quot;adapter&quot;: &quot;...&quot;}
+# or None when the user shares the world&#x27;s default</code></pre>
+<p>The auto-wiring is opt-in via the TOML: a persona with <code>mode = &quot;prompted&quot;</code> is never routed to vLLM even if <code>adapter_name</code> is present, and a persona without <code>adapter_name</code> is treated as prompted regardless of mode.</p>
+<h2 id="how-a-trained-adapter-from-ensemble-train-plugs-in">How a trained adapter from ensemble-train plugs in</h2>
+<p>The <code>ensemble-train</code> package produces a LoRA adapter and pushes it to Hugging Face Hub when a <code>HF_USERNAME</code> is set. The pieces a trained adapter needs to come back online inside a scenario:</p>
+<ol>
+<li>A vLLM server hosting the base model with the adapter mounted. The default training spec targets <code>Qwen/Qwen2.5-7B-Instruct</code>, so a working server might look like:</li>
+</ol>
+<p>``<code>bash # one off, on a GPU host vllm serve Qwen/Qwen2.5-7B-Instruct \ --enable-lora \ --lora-modules trained-adapter=hf-username/ensemble-plank-frustrated-power-user </code>``</p>
+<ol>
+<li>The persona TOML&#x27;s <code>[persona.training].adapter_name</code> set to the same id the vLLM server expects (<code>trained-adapter</code> in the example above), and <code>serve_url</code> (or the <code>ENSEMBLE_VLLM_BASE_URL</code> env var) pointing at the server.</li>
+</ol>
+<ol>
+<li>The scenario constructed normally:</li>
+</ol>
+<p>```python from ensemble import World</p>
+<p>world = World(&quot;plank&quot;, backend=&quot;auto&quot;) alice = world.spawn_user(id=&quot;alice&quot;, persona=&quot;frustrated_power_user&quot;) ```</p>
+<p>The <code>auto</code> backend resolves the world&#x27;s shared backend from the environment; the per-user <code>LocalAdapterBackend</code> is built independently from <code>serve_url</code>. The two backends coexist in one scenario without interfering, which is the point of the per-user override.</p>
+  </main>
+</body>
+</html>

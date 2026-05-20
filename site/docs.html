@@ -22,6 +22,17 @@
         <a href="mcp.html">MCP</a>
       </div>
       <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="reference/index.html">Reference home</a>
+        <a href="reference/world-api.html">World API</a>
+        <a href="reference/scenarios.html">Scenarios</a>
+        <a href="reference/tools.html">Tools</a>
+        <a href="reference/personas.html">Personas</a>
+        <a href="reference/cli.html">CLI</a>
+        <a href="reference/runtime.html">Runtime</a>
+        <a href="reference/traces.html">Traces</a>
+      </div>
+      <div class="nav-group">
         <div class="nav-group-title">Docs sections</div>
         <a href="docs.html#what-it-is">What Ensemble is</a>
         <a href="docs.html#mental-model">Mental model</a>
@@ -153,7 +164,7 @@ export OPENAI_API_KEY=sk-...</code></pre>
     <section id="first-scenario">
       <h2>Your first scenario</h2>
       <p class="reference-link">
-        Reference: <a href="../docs/reference/scenarios.md">scenarios</a>.
+        Reference: <a href="reference/scenarios.html">scenarios</a>.
       </p>
       <p>
         A scenario is a Python coroutine registered with the
@@ -229,7 +240,7 @@ print(len(result.trace), "events")</code></pre>
     <section id="first-world">
       <h2>Your first world</h2>
       <p class="reference-link">
-        Reference: <a href="../docs/reference/world-api.md">world api</a>.
+        Reference: <a href="reference/world-api.html">world api</a>.
       </p>
       <p>
         Worlds are plugins. Each world is a directory with three
@@ -371,7 +382,7 @@ register_world(
     <section id="tools">
       <h2>Tools and how agents call them</h2>
       <p class="reference-link">
-        Reference: <a href="../docs/reference/tools.md">tools</a>.
+        Reference: <a href="reference/tools.html">tools</a>.
       </p>
       <p>
         Agents do not poke at the world directly. They issue tool calls,
@@ -579,7 +590,7 @@ world.cost_total("usd", actor="alice")            # alice's own running total</c
     <section id="users-personas">
       <h2>Users and personas</h2>
       <p class="reference-link">
-        Reference: <a href="../docs/reference/personas.md">personas</a>.
+        Reference: <a href="reference/personas.html">personas</a>.
       </p>
       <p>
         A user actor is a wrapper around an <code>LLMBackend</code>, but in
@@ -765,7 +776,7 @@ for r in batch:
     <section id="power-user">
       <h2>Mid-run intervention</h2>
       <p class="reference-link">
-        Reference: <a href="../docs/reference/scenarios.md">scenarios</a>.
+        Reference: <a href="reference/scenarios.html">scenarios</a>.
       </p>
       <p>
         The yield flavor covers most cases, but sometimes you want to
@@ -837,7 +848,7 @@ async def enterprise_audit(world: World) -> dict[str, float]:
     <section id="toml">
       <h2>Declarative TOML scenarios</h2>
       <p class="reference-link">
-        Reference: <a href="../docs/reference/scenarios.md">scenarios</a>.
+        Reference: <a href="reference/scenarios.html">scenarios</a>.
       </p>
       <p>
         When you want to enumerate a matrix of similar scenarios without
@@ -877,7 +888,7 @@ no_double_refund = "not had_double_refund"</code></pre>
     <section id="cli">
       <h2>The ensemble CLI</h2>
       <p class="reference-link">
-        Reference: <a href="../docs/reference/cli.md">cli</a>.
+        Reference: <a href="reference/cli.html">cli</a>.
       </p>
       <p>
         The <code>ensemble</code> binary is a thin wrapper around the
@@ -920,8 +931,8 @@ no_double_refund = "not had_double_refund"</code></pre>
     <section id="training">
       <h2>Training personas</h2>
       <p class="reference-link">
-        Reference: <a href="../docs/reference/personas.md">personas</a>,
-        <a href="../docs/reference/runtime.md">runtime</a>.
+        Reference: <a href="reference/personas.html">personas</a>,
+        <a href="reference/runtime.html">runtime</a>.
       </p>
       <p>
         Prompted personas are a fine starting point but they drift. As
@@ -1256,7 +1267,7 @@ alice = world.spawn_user(
     <section id="trace-format">
       <h2>Trace format reference</h2>
       <p class="reference-link">
-        Reference: <a href="../docs/reference/traces.md">traces</a>.
+        Reference: <a href="reference/traces.html">traces</a>.
       </p>
       <p>
         Traces are JSONL files. One line per event, ordered by tick:

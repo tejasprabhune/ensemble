@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble, world api reference</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="../index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Site</div>
+        <a href="../index.html">Overview</a>
+        <a href="../docs.html">Docs</a>
+        <a href="../scenarios.html">Scenarios overview</a>
+        <a href="../plank.html">Plank</a>
+        <a href="../personas.html">Personas overview</a>
+        <a href="../mcp.html">MCP</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="index.html">Reference home</a>
+        <a href="world-api.html" class="active">World API</a>
+        <a href="scenarios.html">Scenarios</a>
+        <a href="tools.html">Tools</a>
+        <a href="personas.html">Personas</a>
+        <a href="cli.html">CLI</a>
+        <a href="runtime.html">Runtime</a>
+        <a href="traces.html">Traces</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">On this page</div>
+        <a href="#register-world">register_world</a>
+        <a href="#worldstate-python-plugin-path">WorldState (python plugin path)</a>
+        <a href="#worldapply">World.apply</a>
+        <a href="#worldstate-rust-trait">WorldState (rust trait)</a>
+        <a href="#worldtoml-manifest-schema">world.toml manifest schema</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+<h1>World API</h1>
+<p>This page is the reference for authoring a world plugin. A world is the typed, mutable state a scenario&#x27;s actors share, the tools that mutate it, and the predicates that ask questions of the resulting trace. The Python plugin path is what most worlds use; the Rust <code>WorldState</code> trait is available for worlds whose state is best expressed as a typed Rust core. Both paths produce the same trace events, so a scenario does not change shape based on which one a world picked.</p>
+<h2 id="register-world">register_world</h2>
+<p>A world&#x27;s Python package calls <code>register_world</code> exactly once at import time. The registry is global to the process; importing <code>plank</code> (or any other world&#x27;s package) is what makes <code>World(&quot;plank&quot;)</code> resolve later.</p>
+<pre><code class="language-python"># examples/plank/plank/__init__.py
+from ensemble import PluginTool, PluginPredicate, register_world
+
+def _setup():
+    db = _native.PlankDb()
+    tools = [...]      # PluginTool list
+    predicates = [...] # PluginPredicate list
+    return tools, predicates
+
+register_world(
+    &quot;plank&quot;,
+    setup=_setup,
+    personas_dir=PERSONAS_DIR,
+    resources={&quot;billing_db&quot;: 1},
+)</code></pre>
+<p>The keyword arguments:</p>
+<ul>
+<li><code>setup</code>: a zero-arg callable returning a <code>(tools, predicates)</code> pair. Invoked once per <code>World(name)</code> construction, so worlds with per-instance state (a fresh in-memory SQLite database, a new random seed) return a new batch each time. Mutually exclusive with <code>tools</code>/<code>predicates</code>.</li>
+<li><code>tools</code>: a sequence of <code>PluginTool</code>, used when the world&#x27;s tool set is stateless. Mutually exclusive with <code>setup</code>.</li>
+<li><code>predicates</code>: a sequence of <code>PluginPredicate</code>, with the same stateless semantics as <code>tools</code>.</li>
+<li><code>personas_dir</code>: a path the persona resolver consults when a scenario passes <code>persona=&quot;...&quot;</code> to <code>spawn_user</code>. The path is also the namespace key under which the world&#x27;s personas live, so a scenario constructed against this world name finds the right TOMLs.</li>
+<li><code>resources</code>: a dict mapping resource name to permit count. <code>1</code> declares an exclusive lock, <code>N</code> declares a shared resource with <code>N</code> simultaneous holders. The runtime calls <code>ResourceManager.declare</code> for each entry at <code>World(name)</code> construction. Tools that reference a resource by name in <code>Tool.with_resources</code> still get the lazy exclusive declaration if the manifest did not pre-declare it.</li>
+</ul>
+<p><code>register_world</code> is idempotent. A second call for the same name overwrites the prior <code>WorldDefinition</code>, which lets a world package re-register itself after a hot reload during development.</p>
+<h2 id="worldstate-python-plugin-path">WorldState (python plugin path)</h2>
+<p>A Python world&#x27;s state lives inside the closures its tools hold. There is no <code>WorldState</code> class to subclass on the Python side; the world expresses itself entirely through the tools <code>register_world</code> returns. Each tool&#x27;s callable takes a JSON string of arguments and returns a JSON string envelope; the <a href="tools.html">tools reference</a> documents the envelope schema and the <code>tool()</code> helper that hides it for the common case.</p>
+<p>A tool that returns a <code>diff</code> in its envelope emits a <code>state_diff</code> event on the trace alongside its <code>tool_result</code>. That is the mechanism the trace viewer&#x27;s state-changes panel reads, and the mechanism predicates use to detect concrete world mutations. A scenario that wants to mutate state outside of an actor&#x27;s turn (a test fixture, a scheduled world event, a deterministic seed action that does not belong to any user) calls <code>World.apply</code> instead.</p>
+<h2 id="worldapply">World.apply</h2>
+<p><code>World.apply(name, **kwargs)</code> runs a tool as a system-level mutation. The runtime records a <code>ToolCall</code>, the registered tool&#x27;s <code>ToolResult</code>, and an optional <code>StateDiff</code> in the trace with no actor attribution. The events carry <code>seed=true</code> so a trace consumer can distinguish setup mutations from agent or user decisions made during the run.</p>
+<pre><code class="language-python"># any python session
+from ensemble import World
+
+world = World(&quot;plank&quot;, backend=&quot;mock&quot;)
+out = world.apply(
+    &quot;open_ticket&quot;,
+    ticket_id=&quot;t-seed-1&quot;,
+    user_id=&quot;u-alice&quot;,
+    subject=&quot;seeded by scenario setup&quot;,
+)
+# out is {&quot;effect&quot;: {...}, &quot;diff&quot;: [...]}</code></pre>
+<p>This is the Python equivalent of the Rust <code>WorldHandle::apply_and_log</code> path. Use <code>User.act(tool, **kwargs)</code> when the seeded action should be attributed to a simulated user; use <code>World.apply</code> when the mutation has no actor.</p>
+<h2 id="worldstate-rust-trait">WorldState (rust trait)</h2>
+<p>The Rust trait is what worlds with a typed rust core implement. Plank reaches for this so its tool dispatch can keep typed <code>PlankCall</code> enums and structured <code>Diff</code> types instead of the JSON-string ABI. The trait lives in <code>ensemble-core</code>:</p>
+<pre><code class="language-rust">// crates/ensemble-core/src/world.rs
+pub trait WorldState: Send + Sync + &#x27;static {
+    type ToolCall: DeserializeOwned + Send;
+    type ToolEffect: Serialize + Send;
+    type Diff: Serialize + Send;
+
+    fn apply(
+        &amp;mut self,
+        call: Self::ToolCall,
+    ) -&gt; Result&lt;(Self::ToolEffect, Self::Diff), ToolError&gt;;
+
+    fn snapshot(&amp;self) -&gt; Vec&lt;u8&gt;;
+    fn restore(&amp;mut self, snapshot: &amp;[u8]) -&gt; Result&lt;(), RestoreError&gt;;
+}</code></pre>
+<p><code>apply</code> is the single mutation entry point. The runtime wraps the typed state in a <code>WorldHandle&lt;S&gt;</code> (cheap to clone, all clones share the same <code>tokio::sync::Mutex&lt;S&gt;</code>), and <code>WorldHandle::apply_and_log(bus, actor, call_id, name, call)</code> applies the call, emits <code>ToolResult</code> + <code>StateDiff</code> events on the bus, and returns the typed effect.</p>
+<p><code>snapshot</code> and <code>restore</code> exist so the runtime can checkpoint a world before a risky branch and roll back; they are not used by the scheduler today but are the contract for any future counterfactual-rollout path.</p>
+<p>The Rust trait is not directly reachable from Python; pyo3 cannot lower generic associated types cleanly. Worlds that want to expose a typed rust core to Python ship their own thin pyo3 wrapper (plank&#x27;s <code>PlankDb</code> does this in <code>examples/plank/python_ext/</code>).</p>
+<h2 id="worldtoml-manifest-schema">world.toml manifest schema</h2>
+<p>Every world ships a <code>world.toml</code> at the root of its directory. The worlds registry (<code>~/.ensemble/worlds.toml</code>, managed by <code>ensemble worlds add</code>) reads it to learn where the world&#x27;s python package and rust crate live, and what personas and resources the world expects.</p>
+<pre><code class="language-toml"># examples/plank/world.toml
+[world]
+name = &quot;plank&quot;
+python_package = &quot;plank&quot;
+rust_crate = &quot;world&quot;
+personas_dir = &quot;personas&quot;
+
+[[world.default_personas]]
+name = &quot;frustrated_power_user&quot;
+
+[[world.default_tools]]
+name = &quot;issue_refund&quot;
+
+[world.resources]
+billing_db = { permits = 1 }
+inference_pool = { permits = 4 }</code></pre>
+<p>The fields:</p>
+<ul>
+<li><code>world.name</code> (required): the short name the registry and scenarios use to refer to the world. Must match the name the world&#x27;s python package passes to <code>register_world</code>.</li>
+<li><code>world.python_package</code>: the importable name of the world&#x27;s python package, defaulting to <code>world.name</code>. The CLI&#x27;s <code>run</code> and <code>mcp</code> subcommands import this package to trigger <code>register_world</code> before the scenario constructs <code>World(name)</code>.</li>
+<li><code>world.rust_crate</code>: the relative path (or crate name) of the world&#x27;s rust crate. Informational; the build system finds the crate through the maturin manifest, not this field.</li>
+<li><code>world.personas_dir</code>: directory holding <code>*.toml</code> persona files relative to the manifest. The persona resolver indexes by this directory when a scenario passes <code>persona=&quot;name&quot;</code> to <code>spawn_user</code>.</li>
+<li><code>world.default_personas</code>: list of persona names the world ships. Used by <code>ensemble worlds show</code> and reserved for future use by tooling; the runtime does not enforce that a scenario must use one of them.</li>
+<li><code>world.default_tools</code>: parallel list of tool names. Same informational role.</li>
+<li><code>world.resources</code>: table mapping resource name to a <code>{permits = N}</code> declaration. Declared at world load time so a shared resource is actually shared rather than silently downgraded to exclusive on first use.</li>
+<li><code>world.cli</code>: reserved for world-specific CLI subcommands. Tolerated by the parser, not yet wired into the runtime.</li>
+</ul>
+<p>The manifest loader (<code>ensemble.load_world_manifest</code>) returns a <code>WorldManifest</code> dataclass. The <code>ensemble worlds add</code> command validates the manifest at registration time, so a typo in the manifest is caught before the first scenario run.</p>
+  </main>
+</body>
+</html>

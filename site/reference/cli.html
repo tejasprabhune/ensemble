@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble, cli reference</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="../index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Site</div>
+        <a href="../index.html">Overview</a>
+        <a href="../docs.html">Docs</a>
+        <a href="../scenarios.html">Scenarios overview</a>
+        <a href="../plank.html">Plank</a>
+        <a href="../personas.html">Personas overview</a>
+        <a href="../mcp.html">MCP</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="index.html">Reference home</a>
+        <a href="world-api.html">World API</a>
+        <a href="scenarios.html">Scenarios</a>
+        <a href="tools.html">Tools</a>
+        <a href="personas.html">Personas</a>
+        <a href="cli.html" class="active">CLI</a>
+        <a href="runtime.html">Runtime</a>
+        <a href="traces.html">Traces</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">On this page</div>
+        <a href="#ensemble-init">ensemble init</a>
+        <a href="#ensemble-run">ensemble run</a>
+        <a href="#ensemble-trace-view">ensemble trace view</a>
+        <a href="#ensemble-worlds">ensemble worlds</a>
+        <a href="#ensemble-mcp-serve">ensemble mcp serve</a>
+        <a href="#ensemble-train">ensemble train</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+<h1>CLI</h1>
+<p>This page is the reference for the <code>ensemble</code> binary. Every subcommand, every flag, with type, default, behavior, side effects, and one example invocation. The binary itself lives at <code>./target/debug/ensemble</code> after <code>cargo build -p ensemble-cli</code>; the release build lands at <code>./target/release/ensemble</code>.</p>
+<h2 id="ensemble-init">ensemble init</h2>
+<pre><code>ensemble init &lt;name&gt; [--path PATH] [--world EXISTING_WORLD]</code></pre>
+<p>Scaffolds a new project skeleton. Two modes: with no <code>--world</code>, creates a fresh world (a rust crate, a python package, a scenarios directory, a personas directory, a <code>world.toml</code> manifest, and a smoke scenario). With <code>--world EXISTING_WORLD</code>, creates just a scenarios package bound to an already-registered world, skipping the world boilerplate.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>&lt;name&gt;</code> (positional, required): the name of the new world or the scenario directory. Used as the world&#x27;s registry name in the full-world form, and as the scenarios directory name in the bound form.</li>
+<li><code>--path PATH</code>: where to create the project. Defaults to <code>./&lt;name&gt;</code>. The directory must not already exist; the command refuses to overwrite.</li>
+<li><code>--world EXISTING_WORLD</code>: when set, scaffolds a scenarios directory bound to <code>EXISTING_WORLD</code> rather than creating a new world. The scaffolded scenario imports <code>EXISTING_WORLD</code> at module top so the world plugin registers itself.</li>
+</ul>
+<p>Side effects: creates the directory tree and writes the files. Prints the resulting root path to stdout.</p>
+<p>Example:</p>
+<pre><code class="language-bash">ensemble init my_world
+# scaffolds my_world/world/, my_world/my_world/, my_world/scenarios/, etc.
+
+ensemble init smoke_only --world plank
+# scaffolds smoke_only/scenarios/ pointing at the already-installed plank</code></pre>
+<h2 id="ensemble-run">ensemble run</h2>
+<pre><code>ensemble run &lt;scenario&gt; [--world W] [--manifest M] [--package-dir D]</code></pre>
+<p>Runs a registered scenario and writes the trace to <code>./traces/&lt;scenario&gt;.jsonl</code>. The CLI shells to <code>uv run python -m ensemble.cli_run</code> so error traces land in tracebacks rather than opaque string-formatting failures.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>&lt;scenario&gt;</code> (positional, required): the scenario name as registered with <code>@scenario</code> or in a <code>scenarios.toml</code> manifest.</li>
+<li><code>--world W</code>: the world the scenario constructs. Resolves through the worlds registry at <code>~/.ensemble/worlds.toml</code>. Defaults to <code>&quot;plank&quot;</code> so the README&#x27;s quick start works without flags; passing the scenario&#x27;s declared world is the usual case.</li>
+<li><code>--manifest M</code>: optional path to a <code>scenarios.toml</code> file the loader registers before lookup. Used to drive declarative scenarios from the CLI.</li>
+<li><code>--package-dir D</code>: directory holding the <code>scenarios/</code> python package to import. Defaults to the registered world&#x27;s directory when <code>--world</code> resolves; otherwise to <code>examples/plank</code>.</li>
+</ul>
+<p>Side effects: writes <code>./traces/&lt;safe_scenario_name&gt;.jsonl</code> (creating <code>./traces/</code> if missing); unlinks any prior file at the same path so each run starts fresh. Prints a single JSON line on stdout containing the scenario name, the grader scores, and the trace path.</p>
+<p>Example:</p>
+<pre><code class="language-bash">ensemble run plank.refund_storm --world plank
+# {&quot;scenario&quot;: &quot;plank.refund_storm&quot;, &quot;scores&quot;: {...}, &quot;trace_path&quot;: &quot;traces/plank_refund_storm.jsonl&quot;}</code></pre>
+<h2 id="ensemble-trace-view">ensemble trace view</h2>
+<pre><code>ensemble trace view &lt;trace&gt; [--port PORT] [--site SITE_DIR]</code></pre>
+<p>Serves the trace viewer with the supplied trace baked in. The viewer itself ships embedded in the binary; the trace is held in memory and served from <code>/trace.jsonl</code>.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>&lt;trace&gt;</code> (positional, required): path to a JSONL trace file.</li>
+<li><code>--port PORT</code>: TCP port to bind on <code>127.0.0.1</code>. Default <code>8765</code>.</li>
+<li><code>--site SITE_DIR</code>: directory to serve static assets from. When unset, the embedded viewer (html, js, css) is served. When set, the directory&#x27;s files take precedence over the embedded copy and the trace is also written to <code>&lt;site&gt;/trace.jsonl</code> so the viewer can be reloaded after edits to the html.</li>
+</ul>
+<p>Side effects: binds the listener and serves until interrupted. Writes <code>&lt;site&gt;/trace.jsonl</code> when <code>--site</code> is provided.</p>
+<p>Example:</p>
+<pre><code class="language-bash">ensemble trace view traces/plank_refund_storm.jsonl
+# serving embedded viewer on http://127.0.0.1:8765
+
+ensemble trace view site/trace.jsonl --site site --port 8765
+# serving ./site/ on http://127.0.0.1:8765 with the file as the live trace</code></pre>
+<h2 id="ensemble-worlds">ensemble worlds</h2>
+<p>Manages the user-level registry at <code>~/.ensemble/worlds.toml</code>. The <code>ENSEMBLE_HOME</code> env var overrides the location (used by tests). All four subcommands shell to <code>uv run python -m ensemble.cli_worlds</code>.</p>
+<h3 id="worlds-list">worlds list</h3>
+<pre><code>ensemble worlds list</code></pre>
+<p>Prints one line per registered world: <code>name  path  git=&lt;url&gt;</code>. The git column is omitted for worlds without a remote.</p>
+<p>Example:</p>
+<pre><code class="language-bash">ensemble worlds list
+# plank  /Users/jane/code/ensemble/examples/plank</code></pre>
+<h3 id="worlds-add">worlds add</h3>
+<pre><code>ensemble worlds add &lt;name&gt; &lt;path&gt; [--git URL]</code></pre>
+<p>Registers a world by local path. The manifest at <code>&lt;path&gt;/world.toml</code> is parsed eagerly; a typo in the manifest fails at add time rather than at scenario-run time.</p>
+<ul>
+<li><code>&lt;name&gt;</code>: the short name. Must match the <code>world.name</code> field in the manifest.</li>
+<li><code>&lt;path&gt;</code>: the world&#x27;s directory.</li>
+<li><code>--git URL</code>: optional informational git URL. Recorded but not used for cloning today.</li>
+</ul>
+<p>Side effects: rewrites <code>~/.ensemble/worlds.toml</code>.</p>
+<p>Example:</p>
+<pre><code class="language-bash">ensemble worlds add plank examples/plank
+# registered plank -&gt; /Users/jane/code/ensemble/examples/plank</code></pre>
+<h3 id="worlds-remove">worlds remove</h3>
+<pre><code>ensemble worlds remove &lt;name&gt;</code></pre>
+<p>Removes a world from the registry. Returns exit code 1 if the name was not present.</p>
+<h3 id="worlds-show">worlds show</h3>
+<pre><code>ensemble worlds show &lt;name&gt;</code></pre>
+<p>Prints the world&#x27;s manifest details: path, python package, rust crate, personas dir, default personas, default tools.</p>
+<h2 id="ensemble-mcp-serve">ensemble mcp serve</h2>
+<pre><code>ensemble mcp serve --world W
+ensemble mcp serve --world W --scenario S --as-agent A
+                   [--package-dir D] [--backend BACKEND]</code></pre>
+<p>Runs an MCP server over stdio that exposes a world&#x27;s tools to a connected MCP-aware client. Two modes:</p>
+<ul>
+<li>Tools-only mode (<code>--world</code> only): the server exposes the world&#x27;s tools as MCP tools. A client can list and call them but there is no scenario context.</li>
+<li>Scenario-driving mode (<code>--world --scenario --as-agent</code>): the named scenario runs in a background thread with the named agent slot registered as an external proxy. The connected MCP client drives that slot: its tool calls land in the trace attributed to the slot, and the meta tools <code>inbox_recv</code> / <code>agent_say</code> plumb scenario messages back and forth.</li>
+</ul>
+<p>Arguments:</p>
+<ul>
+<li><code>--world W</code> (required): the world name, resolved through the worlds registry.</li>
+<li><code>--scenario S</code>: scenario to run while the server is up. Requires <code>--as-agent</code>.</li>
+<li><code>--as-agent A</code>: agent slot id the connected client drives. The scenario must spawn an agent with this id; the server times out after 5 seconds if no matching spawn happens.</li>
+<li><code>--package-dir D</code>: directory holding the scenarios package to import. Defaults to the world&#x27;s directory.</li>
+<li><code>--backend BACKEND</code>: the LLM backend for the non-external actors in the scenario. Defaults to <code>mock</code>.</li>
+</ul>
+<p>Side effects: holds stdio open until the connected client disconnects; runs the scenario in a daemon thread when <code>--scenario</code> is set.</p>
+<p>Example:</p>
+<pre><code class="language-bash">ensemble mcp serve --world plank
+# expose plank&#x27;s tools to whatever stdio client connects
+
+ensemble mcp serve --world plank \
+  --scenario plank.refund_storm --as-agent rep1
+# rep1 is now driven by the connected client</code></pre>
+<h2 id="ensemble-train">ensemble train</h2>
+<pre><code>ensemble train &lt;persona.toml&gt; [--backend modal|skypilot|local]</code></pre>
+<p>Hands a persona TOML to the <code>ensemble-train</code> pipeline. The CLI shells to <code>uv run ensemble-train</code>, so the training extra (<code>torch</code>, <code>trl</code>, <code>peft</code>, etc.) must be installed for anything beyond a dry run.</p>
+<p>Arguments:</p>
+<ul>
+<li><code>&lt;persona.toml&gt;</code> (positional, required): path to the persona TOML.</li>
+<li><code>--backend</code>: where to dispatch the training job. <code>modal</code> (the default), <code>skypilot</code>, or <code>local</code>. The Modal backend falls back to a dry-run when the <code>modal</code> package isn&#x27;t installed; the SkyPilot backend writes the YAML and prints the dispatch command when <code>sky</code> isn&#x27;t on PATH.</li>
+</ul>
+<p>Side effects: depends on the backend. <code>local</code> runs the trainer in-process and writes a LoRA adapter under <code>checkpoints/&lt;persona_name&gt;/</code>. <code>modal</code> submits a remote job and writes a <code>DRY_RUN.json</code> next to the checkpoint when running without the SDK installed. <code>skypilot</code> writes a SkyPilot YAML and either launches via <code>sky</code> or prints the manual command.</p>
+<p>Example:</p>
+<pre><code class="language-bash">ensemble train examples/plank/personas/frustrated_power_user.toml --backend modal</code></pre>
+  </main>
+</body>
+</html>
