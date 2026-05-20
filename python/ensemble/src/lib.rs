@@ -277,13 +277,24 @@ impl World {
 
     /// Build and run the scheduler synchronously. `until_spec` is a
     /// JSON spec like `{"kind":"turn_count_gt","n":30}`. Blocks the
-    /// calling thread until the scheduler stops.
+    /// calling thread until the scheduler stops. A world only knows
+    /// how to run once: spawn_user/spawn_agent populates a queue that
+    /// is drained at run time, so calling run_until twice without
+    /// re-spawning actors raises a clear error rather than silently
+    /// running an empty world.
     fn run_until(&self, until_spec_json: &str) -> PyResult<()> {
         let spec: serde_json::Value = serde_json::from_str(until_spec_json)
             .map_err(|e| PyValueError::new_err(format!("bad until spec: {e}")))?;
         let until = build_until(&spec)?;
         let (bus, actor_handles, seed_messages, budget) = {
             let mut inner = self.inner.lock();
+            if inner.actors.is_empty() && !inner.registered_inboxes.is_empty() {
+                return Err(PyRuntimeError::new_err(
+                    "world.run() called twice without re-spawning actors. \
+                     Worlds run once per construction; build a fresh World \
+                     for another scenario.",
+                ));
+            }
             let backend = inner.backend.clone();
             let tools = inner.tools.clone();
             let bus = inner.bus.clone();
@@ -293,6 +304,7 @@ impl World {
                 let actor = build_actor(spec, backend.clone(), tools.clone());
                 handles.push(actor);
             }
+            inner.registered_inboxes = handles.iter().map(|(id, _)| id.clone()).collect();
             let seed = inner.seed_messages.drain(..).collect::<Vec<_>>();
             (bus, handles, seed, budget)
         };

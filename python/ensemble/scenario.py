@@ -26,6 +26,35 @@ class Until:
     def to_json(self) -> str:
         return json.dumps(self.spec)
 
+    def __or__(self, other: "Until") -> "Until":
+        return any_of(self, other)
+
+    def __and__(self, other: "Until") -> "Until":
+        return all_of(self, other)
+
+
+def any_of(*conditions: Until) -> Until:
+    """Halts when any of the supplied conditions fire. Flattens nested
+    `any_of` for the rust side."""
+    parts: List[Dict[str, Any]] = []
+    for c in conditions:
+        if c.spec.get("kind") == "any_of":
+            parts.extend(c.spec.get("parts", []))
+        else:
+            parts.append(c.spec)
+    return Until({"kind": "any_of", "parts": parts})
+
+
+def all_of(*conditions: Until) -> Until:
+    """Halts when all of the supplied conditions hold simultaneously."""
+    parts: List[Dict[str, Any]] = []
+    for c in conditions:
+        if c.spec.get("kind") == "all_of":
+            parts.extend(c.spec.get("parts", []))
+        else:
+            parts.append(c.spec)
+    return Until({"kind": "all_of", "parts": parts})
+
 
 class TurnCount:
     """A sentinel that supports rich comparison ops so users can write
