@@ -197,6 +197,17 @@ class User:
     def persona(self) -> Optional["PersonaSpec"]:
         return self._persona
 
+    @property
+    def backend_info(self) -> Optional[Dict[str, Any]]:
+        """Resolved per-user backend, or ``None`` when this user
+        shares the world's default. Populated for trained personas
+        whose TOML supplied an ``adapter_name``; the dict reports the
+        kind (currently always ``"vllm"``), the base URL, and the
+        adapter name. Useful for verifying the trained-persona auto-
+        wiring without standing up the backend itself."""
+        info = self._native.backend_info()
+        return info if isinstance(info, dict) else None
+
     def say(self, target: str, text: str) -> None:
         self._native.say(target, text)
 
@@ -377,7 +388,17 @@ class World:
         world (see `ensemble.persona.register_personas_dir`), the
         loader pulls the system prompt template and default hidden
         state from the file. `hidden_goal` and `hidden_state` overrides
-        win on top of the file defaults."""
+        win on top of the file defaults.
+
+        When the persona TOML declares ``mode = "trained"`` together
+        with ``[persona.training].adapter_name``, the spawned user
+        routes through a per-user vLLM backend rather than the
+        world's shared backend, so a trained adapter and a frontier
+        agent can share one scenario. The vLLM base URL comes from
+        ``persona.training.serve_url`` if set, otherwise from the
+        ``ENSEMBLE_VLLM_BASE_URL`` environment variable; one of them
+        must be present or the call raises.
+        """
 
         overrides: Dict[str, Any] = {}
         if hidden_goal is not None:
@@ -396,9 +417,27 @@ class World:
                     resolved_prompt = spec.system_prompt
                 resolved_hidden = spec.hidden_state
         if spec is None and overrides:
-            # No persona file matched; still carry the overrides as the
-            # initial hidden state so graders can read them post-run.
             resolved_hidden = overrides
+
+        vllm_base_url: Optional[str] = None
+        vllm_adapter: Optional[str] = None
+        if spec is not None and spec.is_trained:
+            vllm_base_url = spec.serve_url or os.environ.get("ENSEMBLE_VLLM_BASE_URL")
+            if vllm_base_url:
+                vllm_adapter = spec.adapter_name
+            else:
+                note = (
+                    f"persona {persona!r} declares mode=\"trained\" with "
+                    f"adapter_name={spec.adapter_name!r} but no "
+                    "persona.training.serve_url and no "
+                    "ENSEMBLE_VLLM_BASE_URL; the spawned user is using "
+                    "the world's default backend. Set one of those to "
+                    "route through the trained adapter."
+                )
+                try:
+                    self._native.log_note("trained-persona fallback: " + note)
+                except AttributeError:
+                    pass
 
         native = self._native.spawn_user(
             id=id,
@@ -409,6 +448,8 @@ class World:
             hidden_state_json=(
                 json.dumps(resolved_hidden) if resolved_hidden is not None else None
             ),
+            vllm_base_url=vllm_base_url,
+            vllm_adapter=vllm_adapter,
         )
         u = User(native, self, persona_spec=spec)
         self.users.append(u)

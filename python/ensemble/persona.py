@@ -79,11 +79,26 @@ class PersonaSpec:
         system_prompt: str,
         hidden_state: Dict[str, Any],
         raw: Dict[str, Any],
+        mode: str = "prompted",
+        adapter_name: Optional[str] = None,
+        serve_url: Optional[str] = None,
     ) -> None:
         self.name = name
         self.system_prompt = system_prompt
         self.hidden_state = hidden_state
         self.raw = raw
+        self.mode = mode
+        self.adapter_name = adapter_name
+        self.serve_url = serve_url
+
+    @property
+    def is_trained(self) -> bool:
+        """A persona whose inference should route through a trained
+        adapter rather than the world's default backend. Both
+        ``mode = "trained"`` and an ``adapter_name`` from
+        ``[persona.training]`` are required; a persona missing one
+        falls back to prompted inference."""
+        return self.mode == "trained" and bool(self.adapter_name)
 
 
 def load_persona(
@@ -93,6 +108,7 @@ def load_persona(
     data = _toml.loads(Path(path).read_text())
     persona = data.get("persona") or {}
     name = persona.get("name") or Path(path).stem
+    mode = persona.get("mode", "prompted")
 
     template = (
         persona.get("system_prompt", {}).get("template")
@@ -107,11 +123,18 @@ def load_persona(
     if hidden_overrides:
         hidden_state.update({k: v for k, v in hidden_overrides.items() if v is not None})
 
+    training = persona.get("training") or {}
+    adapter_name = training.get("adapter_name") if isinstance(training, dict) else None
+    serve_url = training.get("serve_url") if isinstance(training, dict) else None
+
     return PersonaSpec(
         name=name,
         system_prompt=template.strip(),
         hidden_state=hidden_state,
         raw=persona,
+        mode=mode,
+        adapter_name=adapter_name,
+        serve_url=serve_url,
     )
 
 

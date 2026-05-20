@@ -101,6 +101,19 @@ pub(crate) struct ActorSpec {
     /// external agent slot. The scheduler-spawned actor pushes
     /// incoming messages here; the MCP entry point pops them.
     pub(crate) external_inbox: Option<ExternalAgentInbox>,
+    /// Optional per-actor backend override. The python layer sets
+    /// this when a persona's training adapter should route to a
+    /// dedicated vLLM endpoint rather than the world's shared
+    /// backend, so a trained persona and a frontier-served agent can
+    /// coexist in the same scenario.
+    pub(crate) backend_override: Option<BackendChoice>,
+}
+
+/// A resolved per-actor backend chosen by the python layer. Built into
+/// a `SharedBackend` by `build_actor` at scheduler launch time.
+#[derive(Clone, Debug)]
+pub(crate) enum BackendChoice {
+    Vllm { base_url: String, adapter: Option<String> },
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -275,7 +288,7 @@ impl World {
         self.inner.lock().actors.len()
     }
 
-    #[pyo3(signature = (id=None, persona=None, hidden_goal=None, model="user-model", system_prompt=None, hidden_state_json=None))]
+    #[pyo3(signature = (id=None, persona=None, hidden_goal=None, model="user-model", system_prompt=None, hidden_state_json=None, vllm_base_url=None, vllm_adapter=None))]
     fn spawn_user(
         &self,
         id: Option<&str>,
@@ -284,6 +297,8 @@ impl World {
         model: &str,
         system_prompt: Option<&str>,
         hidden_state_json: Option<&str>,
+        vllm_base_url: Option<&str>,
+        vllm_adapter: Option<&str>,
     ) -> PyResult<User> {
         let actor_id = ActorId::from_label(id.unwrap_or_else(|| persona.unwrap_or("user")));
         let hidden = match hidden_state_json {
@@ -295,6 +310,10 @@ impl World {
             }
             None => None,
         };
+        let backend_override = vllm_base_url.map(|base| BackendChoice::Vllm {
+            base_url: base.to_string(),
+            adapter: vllm_adapter.map(str::to_string),
+        });
         let spec = ActorSpec {
             id: actor_id.clone(),
             kind: SpecKind::User,
@@ -305,12 +324,14 @@ impl World {
             system_prompt: system_prompt.map(str::to_string),
             hidden: hidden.clone(),
             external_inbox: None,
+            backend_override: backend_override.clone(),
         };
         self.inner.lock().actors.push(spec);
         Ok(User {
             id: actor_id.to_string(),
             world: self.inner.clone(),
             hidden,
+            backend_choice: backend_override,
         })
     }
 
@@ -341,6 +362,7 @@ impl World {
             system_prompt: system_prompt.map(str::to_string),
             hidden: None,
             external_inbox: None,
+            backend_override: None,
         };
         self.inner.lock().actors.push(spec);
         Ok(Agent {
@@ -745,6 +767,7 @@ impl World {
                 system_prompt: None,
                 hidden: None,
                 external_inbox: Some(inbox),
+                backend_override: None,
             });
         }
         Ok(())
@@ -1067,10 +1090,31 @@ pub struct User {
     id: String,
     world: Arc<Mutex<WorldInner>>,
     hidden: Option<HiddenState>,
+    backend_choice: Option<BackendChoice>,
 }
 
 #[pymethods]
 impl User {
+    /// Resolved per-user backend, if any. Returns a dict with the
+    /// chosen kind and parameters (e.g. `{"kind": "vllm", "base_url":
+    /// "...", "adapter": "..."}`) when the persona's training
+    /// adapter routed this user to a dedicated endpoint; returns
+    /// `None` when the user shares the world's default backend. Used
+    /// by tests and tooling to verify the resolved choice without
+    /// having to stand up the backend itself.
+    fn backend_info(&self, py: Python<'_>) -> PyResult<PyObject> {
+        match &self.backend_choice {
+            None => Ok(py.None()),
+            Some(BackendChoice::Vllm { base_url, adapter }) => {
+                let d = pyo3::types::PyDict::new_bound(py);
+                d.set_item("kind", "vllm")?;
+                d.set_item("base_url", base_url)?;
+                d.set_item("adapter", adapter.clone())?;
+                Ok(d.into())
+            }
+        }
+    }
+
     /// Current hidden-state JSON snapshot. Returns `null` if this user
     /// has no persona (i.e. no hidden state was attached at spawn).
     /// Used by post-run graders that inspect what the persona did
@@ -1223,9 +1267,12 @@ impl Agent {
 
 /// Materialize an `ActorSpec` into a concrete user or agent actor.
 /// When a user has both a system_prompt template and an attached
-/// HiddenState, the world-shared backend is wrapped in a
-/// PromptedPersona so the model sees the persona's hidden state on
-/// every turn.
+/// HiddenState, the chosen backend is wrapped in a `PromptedPersona`
+/// so the model sees the persona's hidden state on every turn. A
+/// `backend_override` (set by the python layer for a trained
+/// persona) replaces the world-shared backend before that wrapping;
+/// the persona's system prompt then layers on top of a vLLM-served
+/// adapter rather than the world default.
 fn build_actor(
     spec: ActorSpec,
     backend: SharedBackend,
@@ -1237,14 +1284,24 @@ fn build_actor(
         SpecKind::Agent => "agent-model".into(),
         SpecKind::External => "external-agent".into(),
     });
+    let base_backend: SharedBackend = match &spec.backend_override {
+        Some(BackendChoice::Vllm { base_url, adapter }) => {
+            let mut be = LocalAdapterBackend::new(base_url);
+            if let Some(adapter) = adapter {
+                be = be.with_adapter(adapter);
+            }
+            Arc::new(be)
+        }
+        None => backend,
+    };
     let backend_for_actor: SharedBackend = match (&spec.system_prompt, &spec.hidden) {
         (Some(template), Some(hidden)) => Arc::new(PromptedPersona::new(
-            backend,
+            base_backend,
             model.clone(),
             template.clone(),
             hidden.clone(),
         )),
-        _ => backend,
+        _ => base_backend,
     };
     let actor: Arc<dyn ensemble_core::actor::Actor> = match spec.kind {
         SpecKind::User => {
