@@ -70,8 +70,3 @@ uv run python examples/plank/bake_trace.py
 cargo test --workspace
 uv run pytest tests/
 ```
-
-## Decisions
-
-Non-obvious calls made under ambiguity are recorded in
-[CHOICES.md](CHOICES.md).
