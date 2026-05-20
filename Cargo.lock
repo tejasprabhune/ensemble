@@ -230,7 +230,6 @@ dependencies = [
  "ensemble-runtime",
  "once_cell",
  "parking_lot",
- "plank",
  "pyo3",
  "pyo3-asyncio-0-21",
  "serde",
@@ -889,6 +888,18 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "plank-py"
+version = "0.1.0"
+dependencies = [
+ "ensemble-core",
+ "ensemble-runtime",
+ "parking_lot",
+ "plank",
+ "pyo3",
+ "serde_json",
 ]
 
 [[package]]

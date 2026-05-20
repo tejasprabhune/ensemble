@@ -181,23 +181,31 @@ class World:
                 else:
                     path = dotenv
             load_dotenv(path, override=override)
+        definition = get_world(name)
+        # We accept "noop" implicitly so the scaffold and pure-rust
+        # tests do not need to call register_world. Any other name must
+        # have been registered as a plugin (typically by importing the
+        # world's python package, e.g. `import plank`).
+        if name != "noop" and definition is None:
+            raise ValueError(
+                f"no world named {name!r}; import the world's python package "
+                "(which calls register_world) before constructing it, or use "
+                "World(\"noop\") for a bare world"
+            )
         self._native = _NativeWorld(name, backend=backend, base_url=base_url)
         self.users: List[User] = []
         self.agents: List[Agent] = []
-        # Apply any python-registered tools and predicates for this
-        # world name. A world plugin registers itself by importing its
-        # package (e.g. `import plank`) before `World("plank")` is
-        # constructed.
-        definition = get_world(name)
+        # Apply python-registered tools and predicates for this world.
         if definition is not None:
-            for t in definition.tools:
+            tools, predicates = definition.build()
+            for t in tools:
                 self._native.register_tool(
                     t.name,
                     t.description,
                     json.dumps(t.parameters),
                     t.fn,
                 )
-            for p in definition.predicates:
+            for p in predicates:
                 self._native.register_predicate(p.name, p.fn)
         self._announce_backend(requested=backend, verbose=verbose)
 

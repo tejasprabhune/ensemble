@@ -30,11 +30,15 @@ fn noop_world_builder() -> WorldBundle {
     }
 }
 
-fn plank_world_builder() -> WorldBundle {
-    let (_state, tools, predicates) = plank::build();
-    // The state Arc lives on inside each tool and predicate closure;
-    // the bundle holds them alive for as long as the world instance.
-    WorldBundle { tools, predicates }
+/// Any world name we have not seen before still gets a usable bundle
+/// (default predicates, empty tool registry); the python plugin layer
+/// then fills in the per-world tools and predicates via
+/// register_tool / register_predicate.
+fn default_world_builder() -> WorldBundle {
+    WorldBundle {
+        tools: ToolRegistry::new(),
+        predicates: PredicateRegistry::with_defaults(),
+    }
 }
 
 /// Inner world state shared between `World`, `User`, and `Agent`.
@@ -116,11 +120,12 @@ impl World {
         base_url: Option<&str>,
     ) -> PyResult<Self> {
         let name = name.unwrap_or("noop").to_string();
-        let bundle = WorldRegistry::build(&name).ok_or_else(|| {
-            PyValueError::new_err(format!(
-                "no world named {name:?}; register one before constructing it"
-            ))
-        })?;
+        // Worlds are no longer registered in rust; the python layer
+        // owns the plugin registry and calls register_tool /
+        // register_predicate to populate this world after construction.
+        // We still take a bundle so the default predicates are in place
+        // before any plugin code runs.
+        let bundle = WorldRegistry::build(&name).unwrap_or_else(default_world_builder);
         let script = MockScript::new();
         let (backend, kind) = build_backend(backend, base_url, &script)?;
         let log = EventLog::new();
@@ -284,7 +289,7 @@ impl World {
     /// is drained at run time, so calling run_until twice without
     /// re-spawning actors raises a clear error rather than silently
     /// running an empty world.
-    fn run_until(&self, until_spec_json: &str) -> PyResult<()> {
+    fn run_until(&self, py: Python<'_>, until_spec_json: &str) -> PyResult<()> {
         let spec: serde_json::Value = serde_json::from_str(until_spec_json)
             .map_err(|e| PyValueError::new_err(format!("bad until spec: {e}")))?;
         let until = build_until(&spec)?;
@@ -312,19 +317,25 @@ impl World {
         };
 
         let runtime = global_runtime();
-        runtime.block_on(async move {
-            let mut scheduler = Scheduler::new(bus.clone(), budget);
-            for (id, actor) in actor_handles {
-                let inbox = bus.register(id).await;
-                scheduler.register(Arc::new(ActorHandle::new(actor, inbox)));
-            }
-            scheduler.set_until(until).await;
-            for (from, to, msg) in seed_messages {
-                bus.send(from, Recipient::Actor(to), msg).await.ok();
-            }
-            scheduler.run().await.map(|_stop| ())
+        // Release the GIL across the scheduler run so plugin tools and
+        // predicates implemented in python can call back into the
+        // interpreter without deadlocking on this thread's lock.
+        py.allow_threads(|| {
+            runtime
+                .block_on(async move {
+                    let mut scheduler = Scheduler::new(bus.clone(), budget);
+                    for (id, actor) in actor_handles {
+                        let inbox = bus.register(id).await;
+                        scheduler.register(Arc::new(ActorHandle::new(actor, inbox)));
+                    }
+                    scheduler.set_until(until).await;
+                    for (from, to, msg) in seed_messages {
+                        bus.send(from, Recipient::Actor(to), msg).await.ok();
+                    }
+                    scheduler.run().await.map(|_stop| ())
+                })
+                .map_err(|e| PyRuntimeError::new_err(format!("scheduler error: {e}")))
         })
-        .map_err(|e| PyRuntimeError::new_err(format!("scheduler error: {e}")))
     }
 
     /// Return the current log length. Mostly for testing; the scenario
@@ -408,7 +419,12 @@ impl World {
     /// Block until the given until-spec fires (or the scheduler exits
     /// for any reason). Returns true if the predicate fired, false if
     /// the scheduler ended first.
-    fn wait_for_until(&self, until_spec_json: &str, timeout_ms: u64) -> PyResult<bool> {
+    fn wait_for_until(
+        &self,
+        py: Python<'_>,
+        until_spec_json: &str,
+        timeout_ms: u64,
+    ) -> PyResult<bool> {
         let spec: serde_json::Value = serde_json::from_str(until_spec_json)
             .map_err(|e| PyValueError::new_err(format!("bad until spec: {e}")))?;
         let until = build_until(&spec)?;
@@ -418,23 +434,25 @@ impl World {
         let notifier = bus.notifier();
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
 
-        Ok(runtime.block_on(async move {
-            loop {
-                let cur = log.len().await as u64;
-                let ctx = UntilCtx { tick: cur, log: &log, events_seen: cur as usize };
-                if until.check(&ctx) {
-                    return true;
+        Ok(py.allow_threads(|| {
+            runtime.block_on(async move {
+                loop {
+                    let cur = log.len().await as u64;
+                    let ctx = UntilCtx { tick: cur, log: &log, events_seen: cur as usize };
+                    if until.check(&ctx) {
+                        return true;
+                    }
+                    let now = std::time::Instant::now();
+                    if now >= deadline {
+                        return false;
+                    }
+                    let remaining = deadline - now;
+                    tokio::select! {
+                        _ = notifier.notified() => continue,
+                        _ = tokio::time::sleep(remaining) => return false,
+                    }
                 }
-                let now = std::time::Instant::now();
-                if now >= deadline {
-                    return false;
-                }
-                let remaining = deadline - now;
-                tokio::select! {
-                    _ = notifier.notified() => continue,
-                    _ = tokio::time::sleep(remaining) => return false,
-                }
-            }
+            })
         }))
     }
 
@@ -901,9 +919,6 @@ fn build_until(spec: &serde_json::Value) -> PyResult<Until> {
 fn _native(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Always-available no-op world for tests and the scaffold flow.
     WorldRegistry::register("noop", noop_world_builder);
-    // Plank is built-in for the MVP. Future worlds register via their
-    // own pyo3 modules or by importing into this one.
-    WorldRegistry::register("plank", plank_world_builder);
 
     m.add_class::<World>()?;
     m.add_class::<User>()?;

@@ -1,0 +1,24 @@
+[package]
+name = "plank-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Plank's python extension. Exposes plank::PlankState as a PlankDb pyclass plus per-tool dispatch entry points."
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+plank = { path = "../world" }
+ensemble-core = { path = "../../../crates/ensemble-core" }
+ensemble-runtime = { path = "../../../crates/ensemble-runtime" }
+pyo3 = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = "0.12"

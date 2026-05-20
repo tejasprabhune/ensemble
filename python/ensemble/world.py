@@ -45,12 +45,29 @@ class PluginPredicate:
     fn: Callable[[str, str], bool]
 
 
+Setup = Callable[[], "tuple[Sequence[PluginTool], Sequence[PluginPredicate]]"]
+
+
 @dataclass
 class WorldDefinition:
     name: str
-    tools: List[PluginTool] = field(default_factory=list)
-    predicates: List[PluginPredicate] = field(default_factory=list)
+    setup: Optional[Setup] = None
     personas_dir: Optional[Path] = None
+    # Static tool / predicate lists are kept around so callers using
+    # the simple register_world(name, tools=[...]) form can introspect
+    # without invoking the factory.
+    static_tools: List[PluginTool] = field(default_factory=list)
+    static_predicates: List[PluginPredicate] = field(default_factory=list)
+
+    def build(self) -> "tuple[List[PluginTool], List[PluginPredicate]]":
+        """Materialize tools and predicates for one World instance.
+        Worlds that need per-instance state (their own SQLite db, etc.)
+        return a fresh batch each time; worlds with static tool sets
+        return the pre-registered lists every call."""
+        if self.setup is not None:
+            tools, preds = self.setup()
+            return list(tools), list(preds)
+        return list(self.static_tools), list(self.static_predicates)
 
 
 _WORLDS: Dict[str, WorldDefinition] = {}
@@ -59,19 +76,29 @@ _WORLDS: Dict[str, WorldDefinition] = {}
 def register_world(
     name: str,
     *,
+    setup: Optional[Setup] = None,
     tools: Optional[Sequence[PluginTool]] = None,
     predicates: Optional[Sequence[PluginPredicate]] = None,
     personas_dir: Optional[Path | str] = None,
 ) -> WorldDefinition:
     """Register a world plugin under ``name``. Idempotent: calling
     twice for the same name overwrites the prior definition (so a
-    world package can re-register after a hot-reload during dev)."""
+    world package can re-register after a hot-reload during dev).
+
+    Worlds with per-instance state pass ``setup``: a zero-arg callable
+    returning ``(tools, predicates)`` invoked once per ``World(name)``
+    construction. Worlds whose tools are stateless can pass ``tools``
+    and ``predicates`` directly.
+    """
+    if setup is not None and (tools is not None or predicates is not None):
+        raise ValueError("pass either setup= or tools=/predicates=, not both")
     pd = Path(personas_dir).expanduser().resolve() if personas_dir else None
     defn = WorldDefinition(
         name=name,
-        tools=list(tools or []),
-        predicates=list(predicates or []),
+        setup=setup,
         personas_dir=pd,
+        static_tools=list(tools or []),
+        static_predicates=list(predicates or []),
     )
     _WORLDS[name] = defn
     if pd is not None:

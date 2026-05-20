@@ -6,12 +6,24 @@ requires-python = ">=3.10"
 dependencies = ["ensemble"]
 
 [build-system]
-requires = ["uv_build>=0.11.7,<0.12.0"]
-build-backend = "uv_build"
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
 
-[tool.uv.build-backend]
-module-name = "plank"
-module-root = ""
+[tool.maturin]
+manifest-path = "python_ext/Cargo.toml"
+module-name = "plank._native"
+python-source = "."
+python-packages = ["plank"]
+features = ["pyo3/extension-module"]
+
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "python_ext/Cargo.toml" },
+    { file = "python_ext/src/**/*.rs" },
+    { file = "world/src/**/*.rs" },
+    { file = "world/Cargo.toml" },
+]
 
 [tool.uv.sources]
 ensemble = { workspace = true }
