@@ -883,6 +883,7 @@ impl World {
                         id: call_id.clone(),
                         name: tool_owned.clone(),
                         args: args.clone(),
+                        seed: false,
                     },
                 )
                 .await;
@@ -927,13 +928,14 @@ impl World {
                                 name: tool_owned.clone(),
                                 result: outcome.effect,
                                 is_error: false,
+                                seed: false,
                             },
                         )
                         .await;
                         if let Some(diff) = outcome.diff {
                             bus.append_event(
                                 Some(actor.clone()),
-                                EventPayload::StateDiff { diff },
+                                EventPayload::StateDiff { diff, seed: false },
                             )
                             .await;
                         }
@@ -953,6 +955,7 @@ impl World {
                                 name: tool_owned,
                                 result: err_json,
                                 is_error: true,
+                                seed: false,
                             },
                         )
                         .await;
@@ -1000,6 +1003,7 @@ impl World {
                         id: call_id.clone(),
                         name: tool_owned.clone(),
                         args: args.clone(),
+                        seed: true,
                     },
                 )
                 .await;
@@ -1044,13 +1048,14 @@ impl World {
                                 name: tool_owned.clone(),
                                 result: outcome.effect,
                                 is_error: false,
+                                seed: true,
                             },
                         )
                         .await;
                         if let Some(diff) = outcome.diff {
                             bus.append_event(
                                 None,
-                                EventPayload::StateDiff { diff },
+                                EventPayload::StateDiff { diff, seed: true },
                             )
                             .await;
                         }
@@ -1070,6 +1075,7 @@ impl World {
                                 name: tool_owned,
                                 result: err_json,
                                 is_error: true,
+                                seed: true,
                             },
                         )
                         .await;
@@ -1318,6 +1324,7 @@ impl User {
                     id: call_id.clone(),
                     name: tool_owned.clone(),
                     args: args.clone(),
+                    seed: true,
                 },
             )
             .await;
@@ -1355,13 +1362,14 @@ impl User {
                             name: tool_owned,
                             result: outcome.effect,
                             is_error: false,
+                            seed: true,
                         },
                     )
                     .await;
                     if let Some(diff) = outcome.diff {
                         bus.append_event(
                             Some(actor.clone()),
-                            EventPayload::StateDiff { diff },
+                            EventPayload::StateDiff { diff, seed: true },
                         )
                         .await;
                     }
@@ -1378,6 +1386,7 @@ impl User {
                             name: tool_owned,
                             result: err_json,
                             is_error: true,
+                            seed: true,
                         },
                     )
                     .await;

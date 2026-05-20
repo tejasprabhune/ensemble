@@ -130,6 +130,7 @@ mod tests {
             id: "x".into(),
             name: "issue_refund".into(),
             args: serde_json::json!({}),
+            seed: false,
         })];
         assert_eq!(reg.evaluate("any_refund", &PredicateCtx::new(&trace)), Some(true));
         assert_eq!(reg.evaluate("missing", &PredicateCtx::new(&trace)), None);

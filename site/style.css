@@ -565,6 +565,21 @@ footer.site a:hover { color: var(--accent); }
   word-break: break-word;
 }
 
+.tool-line.seeded {
+  background: rgba(120, 120, 120, 0.06);
+  border-left: 2px solid var(--rule);
+  padding-left: 8px;
+}
+
+.tool-line .seed-tag {
+  font-family: "calling-code", "SF Mono", monospace;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-left: 4px;
+}
+
 .tool-line .res-summary {
   color: var(--dark);
   font-family: "calling-code", "SF Mono", monospace;

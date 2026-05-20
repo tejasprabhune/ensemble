@@ -28,10 +28,17 @@ pub enum EventPayload {
     AgentMessage {
         text: String,
     },
+    /// A tool invocation. `seed` is set when the call originates
+    /// from scenario setup (`User.act` or `World.apply`) rather than
+    /// from an actor's runtime turn, so trace consumers can tell
+    /// seeded mutations apart from agent or user decisions made
+    /// while the scheduler was running.
     ToolCall {
         id: String,
         name: String,
         args: serde_json::Value,
+        #[serde(default)]
+        seed: bool,
     },
     ToolResult {
         id: String,
@@ -39,9 +46,18 @@ pub enum EventPayload {
         result: serde_json::Value,
         #[serde(default)]
         is_error: bool,
+        /// Mirrors the `seed` flag of the originating ToolCall so a
+        /// consumer that filters seeded events can drop the result
+        /// without correlating on `id`.
+        #[serde(default)]
+        seed: bool,
     },
     StateDiff {
         diff: serde_json::Value,
+        /// Same convention as ToolCall.seed: true when the diff was
+        /// produced by a seeded tool dispatch.
+        #[serde(default)]
+        seed: bool,
     },
     /// Progress signal emitted by a long-running tool. `fraction` is a
     /// 0.0..=1.0 estimate of completion; `message` is short

@@ -93,12 +93,13 @@ impl<S: WorldState> WorldHandle<S> {
                 name: tool_name.into(),
                 result: effect_json,
                 is_error: false,
+                seed: false,
             },
         )
         .await;
         bus.append_event(
             Some(actor),
-            EventPayload::StateDiff { diff: diff_json },
+            EventPayload::StateDiff { diff: diff_json, seed: false },
         )
         .await;
         Ok(effect)

@@ -116,7 +116,7 @@ async fn apply_emits_tool_result_and_diff() {
     let events = log.snapshot().await;
     assert_eq!(events.len(), 2);
     match &events[0].payload {
-        EventPayload::ToolResult { id, name, is_error, .. } => {
+        EventPayload::ToolResult { id, name, is_error, seed: _, .. } => {
             assert_eq!(id, "call-1");
             assert_eq!(name, "inc");
             assert!(!is_error);

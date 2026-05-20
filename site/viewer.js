@@ -173,10 +173,13 @@
     const html = ['<h4>tool calls</h4>'];
     for (const e of slice) {
       const k = e.payload && e.payload.kind;
+      const seed = e.payload && e.payload.seed === true;
+      const seedTag = seed ? ' <span class="seed-tag">[seed]</span>' : '';
+      const lineClass = seed ? 'tool-line seeded' : 'tool-line';
       if (k === 'tool_call') {
-        html.push(`<div class="tool-line"><div><span class="name">${escape(e.payload.name)}</span> <span class="who">[call] ${escape(e.actor || '?')} | tick ${e.tick}</span></div><div class="args">${renderArgs(e.payload.args)}</div></div>`);
+        html.push(`<div class="${lineClass}"><div><span class="name">${escape(e.payload.name)}</span>${seedTag} <span class="who">[call] ${escape(e.actor || 'system')} | tick ${e.tick}</span></div><div class="args">${renderArgs(e.payload.args)}</div></div>`);
       } else if (k === 'tool_result') {
-        html.push(`<div class="tool-line"><div><span class="name">${escape(e.payload.name)}</span> <span class="who">[result]</span></div><div class="res">${renderResult(e.payload.result)}</div></div>`);
+        html.push(`<div class="${lineClass}"><div><span class="name">${escape(e.payload.name)}</span>${seedTag} <span class="who">[result]</span></div><div class="res">${renderResult(e.payload.result)}</div></div>`);
       }
     }
     if (html.length === 1) html.push(`<div class="who">no tool activity yet</div>`);

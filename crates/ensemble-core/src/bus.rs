@@ -336,6 +336,7 @@ fn payload_for(message: &Message) -> EventPayload {
             id: id.clone(),
             name: name.clone(),
             args: args.clone(),
+            seed: false,
         },
         Message::ToolResult {
             id,
@@ -347,6 +348,7 @@ fn payload_for(message: &Message) -> EventPayload {
             name: name.clone(),
             result: result.clone(),
             is_error: *is_error,
+            seed: false,
         },
         Message::System { note } => EventPayload::System { note: note.clone() },
     }
