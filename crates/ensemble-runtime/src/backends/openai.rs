@@ -79,17 +79,9 @@ impl LLMBackend for OpenAIBackend {
         for m in &request.messages {
             messages.push(serde_json::json!({ "role": m.role, "content": m.content }));
         }
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": request.model,
             "messages": messages,
-            "tools": request.tools.iter().map(|t| serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.parameters,
-                }
-            })).collect::<Vec<_>>(),
             // Newer OpenAI / Azure models (gpt-5, o1, ...) reject the
             // legacy `max_tokens` field and require `max_completion_tokens`.
             // The new field has been accepted by every chat-completions
@@ -97,6 +89,25 @@ impl LLMBackend for OpenAIBackend {
             "max_completion_tokens": request.max_tokens.unwrap_or(1024),
             "temperature": request.temperature.unwrap_or(0.7),
         });
+        // Some OpenAI models reject an empty tools array; only attach
+        // the field when the agent actually has tools to offer.
+        if !request.tools.is_empty() {
+            let tools: Vec<serde_json::Value> = request
+                .tools
+                .iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": t.name,
+                            "description": t.description,
+                            "parameters": t.parameters,
+                        }
+                    })
+                })
+                .collect();
+            body["tools"] = serde_json::Value::Array(tools);
+        }
 
         let resp = self
             .client

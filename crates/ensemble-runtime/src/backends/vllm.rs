@@ -80,20 +80,29 @@ impl LLMBackend for LocalAdapterBackend {
         for m in &request.messages {
             messages.push(serde_json::json!({ "role": m.role, "content": m.content }));
         }
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": model,
             "messages": messages,
-            "tools": request.tools.iter().map(|t| serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.parameters,
-                }
-            })).collect::<Vec<_>>(),
             "max_tokens": request.max_tokens.unwrap_or(1024),
             "temperature": request.temperature.unwrap_or(0.7),
         });
+        if !request.tools.is_empty() {
+            let tools: Vec<serde_json::Value> = request
+                .tools
+                .iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": t.name,
+                            "description": t.description,
+                            "parameters": t.parameters,
+                        }
+                    })
+                })
+                .collect();
+            body["tools"] = serde_json::Value::Array(tools);
+        }
 
         let resp = self
             .client
