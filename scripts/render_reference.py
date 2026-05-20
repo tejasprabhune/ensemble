@@ -34,6 +34,7 @@ PAGES: List[Tuple[str, str]] = [
     ("world-api", "World API"),
     ("scenarios", "Scenarios"),
     ("tools", "Tools"),
+    ("predicates", "Predicates"),
     ("personas", "Personas"),
     ("cli", "CLI"),
     ("runtime", "Runtime"),

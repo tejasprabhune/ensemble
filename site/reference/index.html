@@ -27,6 +27,7 @@
         <a href="world-api.html">World API</a>
         <a href="scenarios.html">Scenarios</a>
         <a href="tools.html">Tools</a>
+        <a href="predicates.html">Predicates</a>
         <a href="personas.html">Personas</a>
         <a href="cli.html">CLI</a>
         <a href="runtime.html">Runtime</a>
@@ -37,6 +38,7 @@
         <a href="#world-api">[World API](world-api.md)</a>
         <a href="#scenarios">[Scenarios](scenarios.md)</a>
         <a href="#tools">[Tools](tools.md)</a>
+        <a href="#predicates">[Predicates](predicates.md)</a>
         <a href="#personas">[Personas](personas.md)</a>
         <a href="#cli">[CLI](cli.md)</a>
         <a href="#runtime">[Runtime](runtime.md)</a>
@@ -55,6 +57,8 @@
 <p>The <code>@scenario</code> decorator (both flavours), the <code>World</code> instance the scenario function binds against, every method and property the scenario calls (<code>spawn_user</code>, <code>spawn_agent</code>, <code>until</code>, <code>run</code>, <code>simulate</code>, <code>apply</code>, the cost ledger, predicate evaluation), and the <code>scenarios.toml</code> declarative format with its grader-expression DSL. Start here when you are authoring a new scenario or reading an existing one closely.</p>
 <h2 id="tools"><a href="tools.html">Tools</a></h2>
 <p>How to declare a tool a world&#x27;s agents can call. The <code>PluginTool</code> dataclass, the <code>tool()</code> helper for the common case, the JSON-string envelope (<code>effect</code>, <code>diff</code>, <code>costs</code>, <code>progress</code>) the runtime expects, and the four optional capabilities tools opt into: resource locks, timeouts, progress emission, and cost annotations. The last section covers sandboxed dispatch through <code>ensemble.tool_worker</code>.</p>
+<h2 id="predicates"><a href="predicates.html">Predicates</a></h2>
+<p>The named yes/no questions a world publishes for scenarios to ask. The <code>PluginPredicate</code> type, the <code>predicate</code> helper for the common case, the <code>evaluate_predicate</code> / <code>predicate_names</code> surface, how user-scoped predicates dispatch on <code>args[&quot;user_id&quot;]</code>, and how grader expressions compile predicate names into scores. Worked example from popcorn-world&#x27;s trace-walking and state-reading predicates. Reach for this page when you are writing a grader, an <code>until</code> condition, or a new world&#x27;s predicate set.</p>
 <h2 id="personas"><a href="personas.html">Personas</a></h2>
 <p>The persona TOML schema field by field, the hidden-state mechanism that travels with a user actor and is rendered into the system prompt, the <code>PromptedPersona</code> wrapper, the <code>LocalAdapterBackend</code>, and the auto-wiring that routes a <code>mode = &quot;trained&quot;</code> persona&#x27;s user to a vLLM-served adapter via <code>serve_url</code> or <code>ENSEMBLE_VLLM_BASE_URL</code>. Reach for this page when you are writing or tuning a persona, or when you are wiring a trained adapter from <code>ensemble-train</code> back into a scenario.</p>
 <h2 id="cli"><a href="cli.html">CLI</a></h2>

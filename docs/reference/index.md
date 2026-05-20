@@ -40,6 +40,10 @@ into: resource locks, timeouts, progress emission, and cost
 annotations. The last section covers sandboxed dispatch through
 `ensemble.tool_worker`.
 
+## [Predicates](predicates.md)
+
+The named yes/no questions a world publishes for scenarios to ask. The `PluginPredicate` type, the `predicate` helper for the common case, the `evaluate_predicate` / `predicate_names` surface, how user-scoped predicates dispatch on `args["user_id"]`, and how grader expressions compile predicate names into scores. Worked example from popcorn-world's trace-walking and state-reading predicates. Reach for this page when you are writing a grader, an `until` condition, or a new world's predicate set.
+
 ## [Personas](personas.md)
 
 The persona TOML schema field by field, the hidden-state
