@@ -249,6 +249,25 @@ class Agent:
         return f"<Agent id={self.id!r}>"
 
 
+class _ExternalAgent:
+    """Stand-in for an agent slot whose turns are driven by a
+    connected external client (an MCP-aware tool). Implements the
+    same minimal surface as ``Agent`` (``id``, ``say``) so a scenario
+    function bound against it does not need to special-case the slot.
+    Outbound ``say`` goes through ``world.external_send_as`` so the
+    trace records the message as having come from the slot."""
+
+    def __init__(self, agent_id: str, world: "World") -> None:
+        self.id = agent_id
+        self._world = world
+
+    def say(self, target: str, text: str) -> None:
+        self._world._native.external_send_as(self.id, target, text)
+
+    def __repr__(self) -> str:
+        return f"<ExternalAgent id={self.id!r}>"
+
+
 class World:
     """A scenario-author-facing wrapper around the native World.
 
@@ -264,6 +283,7 @@ class World:
         dotenv: bool | str = True,
         verbose: Optional[bool] = None,
         trace_path: Optional[str] = None,
+        external_agent_id: Optional[str] = None,
     ) -> None:
         if dotenv:
             path = ".env"
@@ -275,10 +295,6 @@ class World:
                     path = dotenv
             load_dotenv(path, override=override)
         definition = get_world(name)
-        # We accept "noop" implicitly so the scaffold and pure-rust
-        # tests do not need to call register_world. Any other name must
-        # have been registered as a plugin (typically by importing the
-        # world's python package, e.g. `import plank`).
         if name != "noop" and definition is None:
             raise ValueError(
                 f"no world named {name!r}; import the world's python package "
@@ -290,6 +306,16 @@ class World:
             self._native.set_trace_path(str(trace_path))
         self.users: List[User] = []
         self.agents: List[Agent] = []
+        # Instance-scoped external-agent state. When set, the
+        # spawn_agent call whose id matches gets converted into an
+        # external proxy (the slot the MCP-connected client drives)
+        # rather than going through native spawn_agent. Lives on the
+        # instance so concurrent scenarios in the same process do not
+        # interfere; the previous design patched the spawn_agent
+        # method at class level.
+        self._external_agent_id: Optional[str] = external_agent_id
+        self._external_agent: Optional[Agent] = None
+        self._external_agent_tools: List[str] = []
         # Apply python-registered tools and predicates for this world.
         if definition is not None:
             for rname, permits in definition.resources.items():
@@ -464,12 +490,27 @@ class World:
         tools: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
     ) -> Agent:
+        if id is not None and id == self._external_agent_id:
+            return self._spawn_external_agent(id, list(tools or []))
         native = self._native.spawn_agent(
             id=id, model=model, tools=tools, system_prompt=system_prompt
         )
         a = Agent(native, self)
         self.agents.append(a)
         return a
+
+    def _spawn_external_agent(self, id: str, tools: List[str]) -> "_ExternalAgent":
+        """Register an externally-driven agent slot at the native
+        level and return a lightweight proxy the scenario function
+        can bind to. The proxy's ``say`` routes through the world's
+        ``external_send_as`` so messages from the connected MCP
+        client land in the trace under the slot's id."""
+        self._native.register_external_agent(id, tools)
+        agent = _ExternalAgent(id, self)
+        self._external_agent = agent
+        self._external_agent_tools = list(tools)
+        self.agents.append(agent)
+        return agent
 
     def until(self, condition: Any) -> Until:
         """Coerce a condition into an `Until`. Accepts an existing
@@ -639,6 +680,8 @@ def scenario(name: str, *, world: Optional[str] = None) -> Callable:
             backend: Optional[str] = None,
             base_url: Optional[str] = None,
             trace_path: Optional[str] = None,
+            external_agent_id: Optional[str] = None,
+            on_world_constructed: Optional[Callable[["World"], None]] = None,
         ) -> RunResult:
             # Caller-supplied world wins; otherwise fall back to the
             # decorator's declared world; otherwise "noop" so the
@@ -649,7 +692,10 @@ def scenario(name: str, *, world: Optional[str] = None) -> Callable:
                 backend=backend,
                 base_url=base_url,
                 trace_path=trace_path,
+                external_agent_id=external_agent_id,
             )
+            if on_world_constructed is not None:
+                on_world_constructed(world_obj)
             if is_gen:
                 gen = func(world_obj)
                 try:

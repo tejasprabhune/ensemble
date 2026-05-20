@@ -92,7 +92,7 @@ def _serve_scenario(args: argparse.Namespace, definition) -> int:
         except ImportError:
             continue
 
-    from .scenario import World, _REGISTRY  # noqa: WPS433
+    from .scenario import _REGISTRY  # noqa: WPS433
 
     wrapper = _REGISTRY.get(args.scenario)
     if wrapper is None:
@@ -102,48 +102,22 @@ def _serve_scenario(args: argparse.Namespace, definition) -> int:
         )
         return 2
 
-    # Patch spawn_agent so the named slot becomes an external proxy.
-    original_spawn_agent = World.spawn_agent
-    captured: dict = {"world": None, "tools": []}
+    captured: dict = {"world": None}
 
-    def patched_spawn_agent(self, id=None, model="claude-sonnet-4-5", tools=None, system_prompt=None):
-        if id == args.as_agent:
-            captured["world"] = self
-            captured["tools"] = list(tools or [])
-            self._native.register_external_agent(id, tools or [])
-            from .scenario import Agent as _Agent  # noqa: WPS433
-
-            # We didn't go through native spawn_agent, but the trace
-            # only needs a python wrapper around the id for the
-            # scenario function to bind to; build a minimal one.
-            class _ExternalAgent:
-                def __init__(self, agent_id):
-                    self.id = agent_id
-
-                def say(self, target, text):
-                    self._world._native.external_send_as(
-                        self.id, target, text
-                    )
-
-                def __repr__(self):
-                    return f"<ExternalAgent id={self.id!r}>"
-
-            agent = _ExternalAgent(id)
-            agent._world = self
-            self.agents.append(agent)
-            return agent
-        return original_spawn_agent(
-            self, id=id, model=model, tools=tools, system_prompt=system_prompt
-        )
-
-    World.spawn_agent = patched_spawn_agent
+    def capture_world(world_obj):
+        captured["world"] = world_obj
 
     scenario_result: dict = {"result": None, "exc": None}
 
     def run_scenario():
         try:
             scenario_result["result"] = asyncio.run(
-                wrapper(definition.name, backend=args.backend)
+                wrapper(
+                    definition.name,
+                    backend=args.backend,
+                    external_agent_id=args.as_agent,
+                    on_world_constructed=capture_world,
+                )
             )
         except Exception as e:  # noqa: BLE001
             scenario_result["exc"] = e
@@ -151,15 +125,27 @@ def _serve_scenario(args: argparse.Namespace, definition) -> int:
     thread = threading.Thread(target=run_scenario, daemon=True)
     thread.start()
 
-    # Give the scenario a beat to construct the world and register
-    # the external agent before we hand the world to the MCP server.
+    # Wait for the scenario to construct its World and spawn the
+    # external agent slot. The on_world_constructed callback fires
+    # the moment the World is built; we then poll briefly for the
+    # spawn that registers the slot itself, since the scenario
+    # function may have setup work between World construction and
+    # spawn_agent.
     import time
 
     deadline = time.monotonic() + 5.0
     while captured["world"] is None and time.monotonic() < deadline:
         time.sleep(0.02)
 
-    if captured["world"] is None:
+    world_obj = captured["world"]
+    if world_obj is not None:
+        while (
+            world_obj._external_agent is None
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.02)
+
+    if world_obj is None or world_obj._external_agent is None:
         scenario_result_exc = scenario_result.get("exc")
         if scenario_result_exc:
             print(
@@ -172,25 +158,20 @@ def _serve_scenario(args: argparse.Namespace, definition) -> int:
                 "within 5s; the server has nothing to drive",
                 file=sys.stderr,
             )
-        World.spawn_agent = original_spawn_agent
         return 2
 
-    world_obj = captured["world"]
     # Filter to the tools this agent is allowed to see; if the slot
     # was declared with `tools=[]`, fall back to the full world set so
     # the external client at least sees something.
     plugin_tools, _preds = definition.build()
-    allowed = set(captured["tools"])
+    allowed = set(world_obj._external_agent_tools)
     if allowed:
         plugin_tools = [t for t in plugin_tools if t.name in allowed]
     server = build_scenario_server(
         definition.name, world_obj, args.as_agent, plugin_tools
     )
 
-    try:
-        asyncio.run(serve_stdio(server))
-    finally:
-        World.spawn_agent = original_spawn_agent
+    asyncio.run(serve_stdio(server))
     thread.join(timeout=30)
     if scenario_result["exc"]:
         print(
