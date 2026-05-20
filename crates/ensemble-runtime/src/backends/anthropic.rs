@@ -68,7 +68,7 @@ impl LLMBackend for AnthropicBackend {
         &self,
         request: CompletionRequest,
     ) -> Result<CompletionResponse, BackendError> {
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": request.model,
             "system": request.system,
             "messages": request.messages,
@@ -77,9 +77,16 @@ impl LLMBackend for AnthropicBackend {
                 "description": t.description,
                 "input_schema": t.parameters,
             })).collect::<Vec<_>>(),
-            "max_tokens": request.max_tokens.unwrap_or(1024),
-            "temperature": request.temperature.unwrap_or(0.7),
+            "max_tokens": request.max_tokens.unwrap_or(4096),
         });
+        if let Some(temp) = request.temperature {
+            body["temperature"] = serde_json::json!(temp);
+        }
+        if let serde_json::Value::Object(map) = &mut body {
+            for (k, v) in &request.extra_params {
+                map.insert(k.clone(), v.clone());
+            }
+        }
 
         let resp = self
             .client

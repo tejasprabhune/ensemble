@@ -138,6 +138,11 @@ pub struct AgentActor {
     pub tools: Arc<ToolRegistry>,
     pub resources: Option<Arc<crate::resources::ResourceManager>>,
     pub system_prompt: Option<String>,
+    /// Per-actor LLM knobs forwarded into every CompletionRequest the
+    /// agent issues. Lets a scenario tune `reasoning_effort`,
+    /// `top_p`, or any other backend-specific extension on a single
+    /// agent without affecting the rest of the world's actors.
+    pub extra_params: std::collections::HashMap<String, serde_json::Value>,
     /// Names of tools this agent is allowed to call. `None` means
     /// every tool registered on the world is in scope; `Some(set)`
     /// restricts both the schemas advertised to the model and the
@@ -160,6 +165,7 @@ impl AgentActor {
             tools,
             resources: None,
             system_prompt: None,
+            extra_params: Default::default(),
             allowed_tools: None,
             history: Mutex::new(Vec::new()),
         }
@@ -167,6 +173,14 @@ impl AgentActor {
 
     pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(prompt.into());
+        self
+    }
+
+    pub fn with_extra_params(
+        mut self,
+        params: std::collections::HashMap<String, serde_json::Value>,
+    ) -> Self {
+        self.extra_params = params;
         self
     }
 
@@ -232,6 +246,7 @@ impl Actor for AgentActor {
                 system: self.system_prompt.clone(),
                 messages,
                 tools: self.allowed_schemas(),
+                extra_params: self.extra_params.clone(),
                 ..Default::default()
             };
             let resp = match self.backend.complete(req).await {
@@ -249,10 +264,29 @@ impl Actor for AgentActor {
             };
             record_completion_cost(bus, &self.id, &resp).await;
 
+            // Mint missing call ids up front so the assistant message
+            // (which the next OpenAI request will replay) carries the
+            // same ids the tool replies below reference.
+            let mut resp = resp;
+            for call in resp.tool_calls.iter_mut() {
+                if call.id.is_none() {
+                    call.id = Some(MessageId::new().to_string());
+                }
+            }
+
+            // Persist the assistant's full turn into history: text +
+            // any tool_calls. OpenAI requires the assistant message
+            // to carry the tool_calls field so the matching tool
+            // replies (below) can reference them via tool_call_id.
+            // Anthropic ignores the extra structure on its
+            // block-shaped messages.
+            if !resp.text.is_empty() || !resp.tool_calls.is_empty() {
+                self.history.lock().push(ChatMessage::assistant_with_calls(
+                    resp.text.clone(),
+                    resp.tool_calls.clone(),
+                ));
+            }
             if !resp.text.is_empty() {
-                self.history
-                    .lock()
-                    .push(ChatMessage::assistant(resp.text.clone()));
                 bus.send(
                     self.id.clone(),
                     Recipient::Actor(from.clone()),
@@ -266,7 +300,7 @@ impl Actor for AgentActor {
             }
 
             for call in resp.tool_calls {
-                let call_id = call.id.unwrap_or_else(|| MessageId::new().to_string());
+                let call_id = call.id.clone().unwrap_or_else(|| MessageId::new().to_string());
                 bus.append_event(
                     Some(self.id.clone()),
                     EventPayload::ToolCall {
@@ -285,10 +319,10 @@ impl Actor for AgentActor {
                             call.name
                         ),
                     });
-                    self.history.lock().push(ChatMessage::tool(format!(
-                        "tool {} blocked: not allowed for this agent",
-                        call.name
-                    )));
+                    self.history.lock().push(ChatMessage::tool_result(
+                        call_id.clone(),
+                        format!("tool {} blocked: not allowed for this agent", call.name),
+                    ));
                     bus.append_event(
                         Some(self.id.clone()),
                         EventPayload::ToolResult {
@@ -334,10 +368,10 @@ impl Actor for AgentActor {
                 }
                 match dispatch.outcome {
                     Ok(outcome) => {
-                        self.history.lock().push(ChatMessage::tool(format!(
-                            "tool {} -> {}",
-                            call.name, outcome.effect
-                        )));
+                        self.history.lock().push(ChatMessage::tool_result(
+                            call_id.clone(),
+                            outcome.effect.to_string(),
+                        ));
                         let costs = outcome.costs.clone();
                         bus.append_event(
                             Some(self.id.clone()),
@@ -366,10 +400,10 @@ impl Actor for AgentActor {
                             "ok": false,
                             "error": e.to_string(),
                         });
-                        self.history.lock().push(ChatMessage::tool(format!(
-                            "tool {} error: {e}",
-                            call.name
-                        )));
+                        self.history.lock().push(ChatMessage::tool_result(
+                            call_id.clone(),
+                            format!("tool {} error: {e}", call.name),
+                        ));
                         bus.append_event(
                             Some(self.id.clone()),
                             EventPayload::ToolResult {
