@@ -254,6 +254,7 @@ impl Actor for AgentActor {
                             "tool {} -> {}",
                             call.name, outcome.effect
                         )));
+                        let costs = outcome.costs.clone();
                         bus.append_event(
                             Some(self.id.clone()),
                             EventPayload::ToolResult {
@@ -270,6 +271,9 @@ impl Actor for AgentActor {
                                 EventPayload::StateDiff { diff },
                             )
                             .await;
+                        }
+                        for (unit, amount) in costs {
+                            bus.record_cost(unit, amount).await;
                         }
                     }
                     Err(e) => {

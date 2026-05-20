@@ -22,6 +22,11 @@ pub enum StopReason {
     /// Exhausted `max_ticks` or `max_events`. The cap that fired is
     /// reported so callers can tell the difference.
     BudgetExhausted { ticks: u64, events: usize, cap: BudgetCap },
+    /// A cost annotation pushed the world's running total past a
+    /// declared budget. The unit, the amount of the offending
+    /// annotation, and the configured budget are reported so
+    /// scenarios can include them in failure messages.
+    BudgetExceeded { unit: String, amount: f64, budget: f64 },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -121,6 +126,13 @@ impl Scheduler {
             // (e.g. emit the trailing tool_result for a tool_call).
             let mut drain_label: Option<String> = None;
             loop {
+                if let Some(halt) = watcher_bus.halt_reason().await {
+                    return Ok::<_, CoreError>(StopReason::BudgetExceeded {
+                        unit: halt.unit,
+                        amount: halt.amount,
+                        budget: halt.budget,
+                    });
+                }
                 let cur = watcher_log.len().await as u64;
                 watcher_bus.set_tick(cur).await;
                 if cur >= budget.max_ticks {
@@ -192,6 +204,9 @@ impl Scheduler {
                     BudgetCap::Ticks => "max_ticks",
                     BudgetCap::Events => "max_events",
                 }
+            ),
+            StopReason::BudgetExceeded { unit, amount, budget } => format!(
+                "budget exceeded: {unit} {amount} > {budget}; halting"
             ),
         };
         let tick = bus.current_tick().await;

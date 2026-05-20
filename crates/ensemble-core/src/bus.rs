@@ -63,6 +63,25 @@ pub struct Bus {
     inner: Arc<Mutex<BusInner>>,
     log: EventLog,
     notify: Arc<Notify>,
+    halt: Arc<Mutex<Option<HaltReason>>>,
+    costs: Arc<Mutex<CostState>>,
+}
+
+#[derive(Default, Clone, Debug)]
+struct CostState {
+    totals: std::collections::HashMap<String, f64>,
+    budgets: std::collections::HashMap<String, f64>,
+}
+
+/// A request to halt the scheduler from outside the watcher's
+/// predicate / budget machinery. Set by world-level checks (the
+/// budget tracker calls `Bus::halt_with` when a unit exceeds its
+/// declared cap).
+#[derive(Clone, Debug)]
+pub struct HaltReason {
+    pub unit: String,
+    pub amount: f64,
+    pub budget: f64,
 }
 
 struct BusInner {
@@ -79,7 +98,72 @@ impl Bus {
             })),
             log,
             notify: Arc::new(Notify::new()),
+            halt: Arc::new(Mutex::new(None)),
+            costs: Arc::new(Mutex::new(CostState::default())),
         }
+    }
+
+    /// Declare a budget cap for `unit`. When [`record_cost`] would
+    /// push the running total past this, the bus halts the scheduler
+    /// (via [`halt_with`]) with `BudgetExceeded`.
+    pub async fn set_budget(&self, unit: impl Into<String>, amount: f64) {
+        self.costs.lock().await.budgets.insert(unit.into(), amount);
+    }
+
+    pub async fn cost_total(&self, unit: &str) -> f64 {
+        *self
+            .costs
+            .lock()
+            .await
+            .totals
+            .get(unit)
+            .unwrap_or(&0.0)
+    }
+
+    /// Record a cost annotation. Updates the running total, appends
+    /// a `Cost` event to the log, and signals the scheduler to halt
+    /// if a budget cap has been crossed.
+    pub async fn record_cost(&self, unit: impl Into<String>, amount: f64) {
+        let unit = unit.into();
+        let (new_total, budget) = {
+            let mut state = self.costs.lock().await;
+            let total = state.totals.entry(unit.clone()).or_insert(0.0);
+            *total += amount;
+            let new_total = *total;
+            let budget = state.budgets.get(&unit).copied();
+            (new_total, budget)
+        };
+        self.append_event(
+            None,
+            EventPayload::Cost {
+                unit: unit.clone(),
+                amount,
+                running_total: new_total,
+            },
+        )
+        .await;
+        if let Some(cap) = budget {
+            if new_total > cap {
+                self.halt_with(HaltReason {
+                    unit,
+                    amount: new_total,
+                    budget: cap,
+                })
+                .await;
+            }
+        }
+    }
+
+    /// Signal the scheduler to halt with the supplied reason. The
+    /// watcher checks the flag on every tick and returns
+    /// `StopReason::BudgetExceeded` when it fires.
+    pub async fn halt_with(&self, reason: HaltReason) {
+        *self.halt.lock().await = Some(reason);
+        self.notify.notify_waiters();
+    }
+
+    pub async fn halt_reason(&self) -> Option<HaltReason> {
+        self.halt.lock().await.clone()
     }
 
     pub fn log(&self) -> &EventLog {

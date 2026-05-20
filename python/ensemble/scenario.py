@@ -379,6 +379,25 @@ class World:
     def had_double_refund(self) -> bool:
         return bool(self.evaluate_predicate("had_double_refund"))
 
+    # Cost / budget API. Tool cost annotations land here through the
+    # bus; the scheduler halts with BudgetExceeded when a recorded
+    # cost would push the running total past a configured cap.
+
+    def set_budget(self, unit: str, amount: float) -> None:
+        """Cap the world's spend for `unit`. Once a recorded cost would
+        push the running total past `amount` the scheduler halts."""
+        self._native.set_budget(unit, float(amount))
+
+    def cost_total(self, unit: str) -> float:
+        """Running total for `unit` (0.0 if nothing has been recorded
+        yet)."""
+        return float(self._native.cost_total(unit))
+
+    def record_cost(self, unit: str, amount: float) -> None:
+        """Manually annotate a cost (tests, external accounting).
+        Most costs come in through tool dispatch automatically."""
+        self._native.record_cost(unit, float(amount))
+
 
 class SimulationRun:
     """The handle yielded by `async with world.simulate() as run`."""

@@ -44,23 +44,36 @@ impl ProgressEmitter {
     }
 }
 
-/// What a tool produced: a JSON `effect` always, plus an optional
-/// `diff` that describes the world-state change. Tools that mutate
-/// state should emit a diff so the trace viewer can render a row in
-/// its state-change panel; pure lookups leave it `None`.
-#[derive(Clone, Debug)]
+/// What a tool produced: a JSON `effect` always, plus optional
+/// `diff` (state change) and `costs` (per-unit cost annotations the
+/// runtime adds to the world's running totals and checks against any
+/// declared budgets). Cost units are open strings: `"usd"`,
+/// `"gpu_seconds"`, `"tokens_in"`, `"tokens_out"`, `"wall_seconds"`.
+#[derive(Clone, Debug, Default)]
 pub struct ToolOutcome {
     pub effect: serde_json::Value,
     pub diff: Option<serde_json::Value>,
+    pub costs: HashMap<String, f64>,
 }
 
 impl ToolOutcome {
     pub fn effect_only(effect: serde_json::Value) -> Self {
-        Self { effect, diff: None }
+        Self { effect, diff: None, costs: HashMap::new() }
     }
 
     pub fn with_diff(effect: serde_json::Value, diff: serde_json::Value) -> Self {
-        Self { effect, diff: Some(diff) }
+        Self {
+            effect,
+            diff: Some(diff),
+            costs: HashMap::new(),
+        }
+    }
+
+    /// Add a per-unit cost annotation. Repeated calls for the same
+    /// unit accumulate.
+    pub fn with_cost(mut self, unit: impl Into<String>, amount: f64) -> Self {
+        *self.costs.entry(unit.into()).or_insert(0.0) += amount;
+        self
     }
 }
 

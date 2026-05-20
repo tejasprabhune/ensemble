@@ -605,6 +605,40 @@ impl World {
         self.inner.lock().tools.names()
     }
 
+    /// Declare a budget cap for `unit`. When a recorded cost would
+    /// push the running total past `amount` the scheduler halts with
+    /// StopReason::BudgetExceeded.
+    fn set_budget(&self, py: Python<'_>, unit: &str, amount: f64) {
+        let bus = self.inner.lock().bus.clone();
+        let unit = unit.to_string();
+        py.allow_threads(|| {
+            global_runtime().block_on(async move { bus.set_budget(unit, amount).await })
+        });
+    }
+
+    /// Read the running total for `unit` (0.0 if nothing has been
+    /// recorded for it yet).
+    fn cost_total(&self, py: Python<'_>, unit: &str) -> f64 {
+        let bus = self.inner.lock().bus.clone();
+        let unit = unit.to_string();
+        py.allow_threads(|| {
+            global_runtime().block_on(async move { bus.cost_total(&unit).await })
+        })
+    }
+
+    /// Record a cost annotation outside of a tool dispatch (tests,
+    /// backend-side reporting from python). Emits a `Cost` event,
+    /// bumps the running total, and halts the scheduler if a budget
+    /// is now exceeded.
+    fn record_cost(&self, py: Python<'_>, unit: &str, amount: f64) -> PyResult<()> {
+        let bus = self.inner.lock().bus.clone();
+        let unit = unit.to_string();
+        py.allow_threads(|| {
+            global_runtime().block_on(async move { bus.record_cost(unit, amount).await })
+        });
+        Ok(())
+    }
+
     /// Register an externally-driven agent slot. The scheduler-spawned
     /// actor for this id will forward incoming messages into a queue
     /// the python layer drains via `external_recv`. Used by the MCP
@@ -717,6 +751,7 @@ impl World {
         let call_id = MessageId::new().to_string();
         let tool_owned = tool_name.to_string();
         let runtime = global_runtime();
+        
         let outcome_json = py.allow_threads(move || {
             runtime.block_on(async move {
                 bus.append_event(
@@ -761,6 +796,7 @@ impl World {
                         if let Some(diff) = outcome.diff.clone() {
                             body.insert("diff".into(), diff);
                         }
+                        let costs = outcome.costs.clone();
                         bus.append_event(
                             Some(actor.clone()),
                             EventPayload::ToolResult {
@@ -773,10 +809,13 @@ impl World {
                         .await;
                         if let Some(diff) = outcome.diff {
                             bus.append_event(
-                                Some(actor),
+                                Some(actor.clone()),
                                 EventPayload::StateDiff { diff },
                             )
                             .await;
+                        }
+                        for (unit, amount) in costs {
+                            bus.record_cost(unit, amount).await;
                         }
                     }
                     Err(e) => {
@@ -840,7 +879,15 @@ impl World {
                     .cloned()
                     .unwrap_or(serde_json::Value::Null);
                 let diff = parsed.get("diff").cloned();
-                Ok(ToolOutcome { effect, diff })
+                let mut costs: std::collections::HashMap<String, f64> = Default::default();
+                if let Some(serde_json::Value::Object(map)) = parsed.get("costs") {
+                    for (k, v) in map {
+                        if let Some(n) = v.as_f64() {
+                            costs.insert(k.clone(), n);
+                        }
+                    }
+                }
+                Ok(ToolOutcome { effect, diff, costs })
             })
         };
         tools.register(Tool {
@@ -977,6 +1024,7 @@ impl User {
         let actor = ActorId::from_label(&self.id);
         let tool_owned = tool.to_string();
         let runtime = global_runtime();
+        
         // Plugin tools call back into Python under the GIL; the
         // spawn_blocking path inside dispatch_async will deadlock if
         // we hold the GIL through block_on. Release it for the
@@ -1017,6 +1065,7 @@ impl User {
             }
             match dispatch.outcome {
                 Ok(outcome) => {
+                    let costs = outcome.costs.clone();
                     bus.append_event(
                         Some(actor.clone()),
                         EventPayload::ToolResult {
@@ -1029,10 +1078,13 @@ impl User {
                     .await;
                     if let Some(diff) = outcome.diff {
                         bus.append_event(
-                            Some(actor),
+                            Some(actor.clone()),
                             EventPayload::StateDiff { diff },
                         )
                         .await;
+                    }
+                    for (unit, amount) in costs {
+                        bus.record_cost(unit, amount).await;
                     }
                 }
                 Err(e) => {
