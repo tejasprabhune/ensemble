@@ -444,6 +444,48 @@ tools.register(Tool::new(
         and the trailing system note records why.
       </p>
 
+      <h3>Emitting progress from python tools</h3>
+      <p>
+        A python tool that declares an <code>emit_progress</code>
+        parameter receives a callable: each invocation records one
+        entry that the runtime flushes to the trace as a
+        <code>progress</code> event right before the trailing
+        <code>tool_result</code>. The helper inspects the function's
+        signature, so a tool that does not need progress reporting
+        simply omits the parameter and the call shape stays the
+        same.
+      </p>
+<pre><code class="language-python">from ensemble import tool
+
+
+def reconcile(user_id: str, months: int, emit_progress):
+    for i in range(1, months + 1):
+        emit_progress(i / months, f"scanned month {i}/{months}")
+        ...  # do the actual reconciliation
+    return {"ok": True, "months_reconciled": months}
+
+
+reconcile_tool = tool(
+    name="reconcile_billing",
+    description="Walk a user's billing history and emit progress.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string"},
+            "months": {"type": "integer"},
+        },
+        "required": ["user_id", "months"],
+    },
+    fn=reconcile,
+)</code></pre>
+      <p>
+        The runtime buffers the entries until the tool returns, then
+        flushes them in order; the trace viewer renders each
+        <code>progress</code> event with its fraction and message.
+        Pair this with <code>Tool::with_timeout(...)</code> to make
+        long-running work observable while still bounded.
+      </p>
+
       <h3>Sandboxed tools</h3>
       <p>
         A tool that runs untrusted or fragile code (a generated GPU

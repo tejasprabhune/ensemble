@@ -23,6 +23,7 @@ unpacking similarly.
 
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -189,16 +190,53 @@ def tool(
     Either ``fn(**args)`` or ``fn(args)`` is tried, in that order. The
     return is JSON-serialized for the native side; cost and progress
     are forwarded into the runtime's cost/progress streams.
+
+    A function that takes an ``emit_progress`` parameter receives a
+    callable ``emit_progress(fraction: float, message: str = "")``;
+    each call records one entry that the runtime flushes to the trace
+    as a ``progress`` event right before the trailing tool result.
+    Tools that don't need progress reporting simply omit the
+    parameter and the helper threads through the args dict
+    unchanged.
     """
 
     _META_KEYS = {"effect", "diff", "costs", "progress"}
+    sig: Optional[inspect.Signature]
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        sig = None
+    wants_emitter = (
+        sig is not None
+        and any(
+            p.name == "emit_progress"
+            and p.kind
+            in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+            for p in sig.parameters.values()
+        )
+    )
 
     def wrapped(args_json: str) -> str:
         args = json.loads(args_json) if args_json else {}
+        progress_entries: List[Dict[str, Any]] = []
+
+        def emit_progress(fraction: float, message: str = "") -> None:
+            progress_entries.append(
+                {"fraction": float(fraction), "message": str(message)}
+            )
+
         try:
-            out = fn(**args) if isinstance(args, dict) else fn(args)
+            if isinstance(args, dict):
+                kwargs = dict(args)
+                if wants_emitter:
+                    kwargs["emit_progress"] = emit_progress
+                out = fn(**kwargs)
+            else:
+                out = fn(args, emit_progress) if wants_emitter else fn(args)
         except TypeError:
-            # Fallback: function wants the args dict as a single arg.
             out = fn(args)
 
         body: Dict[str, Any] = {}
@@ -208,9 +246,6 @@ def tool(
             if diff is not None:
                 body["diff"] = diff
         elif isinstance(out, dict) and _META_KEYS & set(out.keys()):
-            # Tool returned the structured envelope. Pass through any
-            # of the four known keys; reject unknown ones to keep the
-            # contract honest.
             if "effect" in out:
                 body["effect"] = out["effect"]
             else:
@@ -220,6 +255,10 @@ def tool(
                     body[key] = out[key]
         else:
             body["effect"] = out
+
+        if progress_entries:
+            existing = body.get("progress") or []
+            body["progress"] = list(existing) + progress_entries
         return json.dumps(body)
 
     return PluginTool(name=name, description=description, parameters=parameters, fn=wrapped)
