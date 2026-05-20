@@ -693,10 +693,7 @@ impl World {
         let actor = actor.map(ActorId::from_label);
         py.allow_threads(|| {
             global_runtime().block_on(async move {
-                match actor {
-                    Some(a) => bus.set_actor_budget(a, unit, amount).await,
-                    None => bus.set_budget(unit, amount).await,
-                }
+                bus.set_budget(unit, amount, actor).await;
             })
         });
     }
