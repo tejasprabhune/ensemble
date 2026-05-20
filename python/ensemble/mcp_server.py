@@ -10,9 +10,8 @@ on its behalf.
 
 We use the official Python MCP SDK (``mcp.server.lowlevel.Server``)
 rather than the Rust ``rmcp`` crate: ensemble's plugin tools are
-python callables and round-tripping every call through pyo3 only to
-land in a python callable adds latency without gain. See
-:doc:`CHOICES` for the longer-form note.
+python callables, so round-tripping every call through pyo3 only to
+land in a python callable adds latency without gain.
 """
 
 from __future__ import annotations
