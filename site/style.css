@@ -565,6 +565,17 @@ footer.site a:hover { color: var(--accent); }
   word-break: break-word;
 }
 
+.reference-link {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 12px 0;
+  font-style: italic;
+}
+
+.reference-link a {
+  color: var(--muted);
+}
+
 .tool-line.seeded {
   background: rgba(120, 120, 120, 0.06);
   border-left: 2px solid var(--rule);
