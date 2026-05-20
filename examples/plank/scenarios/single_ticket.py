@@ -1,5 +1,6 @@
 """Sanity-check scenario: one user opens one ticket, one agent helps."""
 
+import plank  # noqa: F401  registers plank personas with ensemble
 from ensemble import scenario
 
 

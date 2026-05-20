@@ -1,6 +1,7 @@
 """The hero demo: three users, two agents, shared world, contested
 refund policy. Uses the yield flavor."""
 
+import plank  # noqa: F401  registers plank personas with ensemble
 from ensemble import scenario
 
 

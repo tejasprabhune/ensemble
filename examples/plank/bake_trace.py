@@ -16,6 +16,7 @@ import asyncio
 import json
 from pathlib import Path
 
+import plank  # noqa: F401  registers plank personas with ensemble
 from ensemble import RunResult, scenario
 from ensemble.scenario import _REGISTRY
 

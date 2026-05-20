@@ -9,11 +9,24 @@ use std::sync::Arc;
 use crate::event::Event;
 
 /// Read-only view passed to a predicate. The trace is the full event
-/// log at the moment of evaluation. We pass a context struct (rather
-/// than a bare slice) so future fields, such as a world snapshot or
-/// per-user hidden state, can be added without breaking signatures.
+/// log at the moment of evaluation. `args` lets callers parameterise a
+/// predicate (e.g. `{"user_id": "alice"}` for a per-user question);
+/// most predicates ignore it. We pass a context struct (rather than a
+/// bare slice) so future fields can be added without breaking
+/// signatures.
 pub struct PredicateCtx<'a> {
     pub trace: &'a [Event],
+    pub args: serde_json::Value,
+}
+
+impl<'a> PredicateCtx<'a> {
+    pub fn new(trace: &'a [Event]) -> Self {
+        Self { trace, args: serde_json::Value::Null }
+    }
+
+    pub fn with_args(trace: &'a [Event], args: serde_json::Value) -> Self {
+        Self { trace, args }
+    }
 }
 
 pub type Predicate = Arc<dyn Fn(&PredicateCtx<'_>) -> bool + Send + Sync>;
@@ -74,7 +87,7 @@ mod tests {
             name: "issue_refund".into(),
             args: serde_json::json!({}),
         })];
-        assert_eq!(reg.evaluate("any_refund", &PredicateCtx { trace: &trace }), Some(true));
-        assert_eq!(reg.evaluate("missing", &PredicateCtx { trace: &trace }), None);
+        assert_eq!(reg.evaluate("any_refund", &PredicateCtx::new(&trace)), Some(true));
+        assert_eq!(reg.evaluate("missing", &PredicateCtx::new(&trace)), None);
     }
 }

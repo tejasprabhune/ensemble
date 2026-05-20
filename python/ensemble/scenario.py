@@ -8,10 +8,12 @@ import json
 import os
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from ._native import World as _NativeWorld
 from .env import load_dotenv
+from .persona import PersonaResolver, load_persona, register_personas_dir
 
 
 @dataclass
@@ -57,20 +59,53 @@ class RunResult:
 
 
 class User:
-    def __init__(self, native_user, world: "World") -> None:
+    def __init__(
+        self,
+        native_user,
+        world: "World",
+        persona_spec: Optional["PersonaSpec"] = None,
+    ) -> None:
         self._native = native_user
         self._world = world
-        self.hidden_state: Dict[str, Any] = {}
+        self._persona = persona_spec
 
     @property
     def id(self) -> str:
         return self._native.id
+
+    @property
+    def hidden_state(self) -> Dict[str, Any]:
+        """Snapshot of the user's hidden state. For a persona-backed
+        user, this reflects whatever the persona has mutated to;
+        otherwise it is empty."""
+        raw = self._native.hidden_state_json()
+        loaded = json.loads(raw)
+        return loaded if isinstance(loaded, dict) else {}
+
+    @property
+    def persona(self) -> Optional["PersonaSpec"]:
+        return self._persona
 
     def say(self, target: str, text: str) -> None:
         self._native.say(target, text)
 
     def act(self, tool: str, **kwargs: Any) -> None:
         self._native.act_json(tool, json.dumps(kwargs))
+
+    # The convenience predicates a scenario might want at grader time.
+    # All resolve to world.evaluate_predicate(name, {"user_id": self.id}),
+    # so worlds publish them by registering same-named predicates that
+    # read args["user_id"]. Returning False when the world did not
+    # register the predicate keeps graders robust to optional worlds.
+
+    def predicate(self, name: str) -> bool:
+        return bool(self._world.evaluate_predicate(name, {"user_id": self.id}))
+
+    def hidden_goal_resolved(self) -> bool:
+        return self.predicate("hidden_goal_resolved")
+
+    def was_redirected_to_upgrade(self) -> bool:
+        return self.predicate("was_redirected_to_upgrade")
 
     def __repr__(self) -> str:
         return f"<User id={self.id!r}>"
@@ -181,15 +216,46 @@ class World:
         hidden_goal: Optional[str] = None,
         model: str = "user-model",
         system_prompt: Optional[str] = None,
+        hidden_state: Optional[Dict[str, Any]] = None,
     ) -> User:
+        """Spawn a user. If `persona` names a TOML registered on this
+        world (see `ensemble.persona.register_personas_dir`), the
+        loader pulls the system prompt template and default hidden
+        state from the file. `hidden_goal` and `hidden_state` overrides
+        win on top of the file defaults."""
+
+        overrides: Dict[str, Any] = {}
+        if hidden_goal is not None:
+            overrides["hidden_goal"] = hidden_goal
+        if hidden_state:
+            overrides.update(hidden_state)
+
+        spec = None
+        resolved_prompt = system_prompt
+        resolved_hidden: Optional[Dict[str, Any]] = None
+        if persona:
+            resolver = PersonaResolver(self.name)
+            spec = resolver.resolve(persona, hidden_overrides=overrides)
+            if spec is not None:
+                if resolved_prompt is None:
+                    resolved_prompt = spec.system_prompt
+                resolved_hidden = spec.hidden_state
+        if spec is None and overrides:
+            # No persona file matched; still carry the overrides as the
+            # initial hidden state so graders can read them post-run.
+            resolved_hidden = overrides
+
         native = self._native.spawn_user(
             id=id,
             persona=persona,
             hidden_goal=hidden_goal,
             model=model,
-            system_prompt=system_prompt,
+            system_prompt=resolved_prompt,
+            hidden_state_json=(
+                json.dumps(resolved_hidden) if resolved_hidden is not None else None
+            ),
         )
-        u = User(native, self)
+        u = User(native, self, persona_spec=spec)
         self.users.append(u)
         return u
 
@@ -238,6 +304,27 @@ class World:
 
     def trace(self) -> List[Dict[str, Any]]:
         return [json.loads(e) for e in self._native.trace_events()]
+
+    # Predicate evaluation against the current trace. Worlds publish
+    # named predicates (see ensemble-core's PredicateRegistry); both
+    # the `User` convenience methods and TOML grader expressions
+    # delegate here.
+
+    def evaluate_predicate(
+        self, name: str, args: Optional[Dict[str, Any]] = None
+    ) -> Optional[bool]:
+        args_json = json.dumps(args) if args else None
+        return self._native.evaluate_predicate(name, args_json)
+
+    def predicate_names(self) -> List[str]:
+        return list(self._native.predicate_names())
+
+    # World-level convenience predicates. Scenarios call these from
+    # graders; they return False when the world has not registered the
+    # named predicate, so graders stay robust to plug-in worlds.
+
+    def had_double_refund(self) -> bool:
+        return bool(self.evaluate_predicate("had_double_refund"))
 
 
 class SimulationRun:

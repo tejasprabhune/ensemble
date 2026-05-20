@@ -1,6 +1,7 @@
 """Power-user scenario: enterprise admin pushes for an audit log export.
 Mid-run intervention demonstrates the `async with world.simulate()` path."""
 
+import plank  # noqa: F401  registers plank personas with ensemble
 from ensemble import scenario
 
 

@@ -14,8 +14,8 @@ use ensemble_core::predicate::{PredicateCtx, PredicateRegistry};
 use ensemble_core::scheduler::{Scheduler, StopReason, TickBudget};
 use ensemble_core::until::{turn_count_exceeds, Until, UntilCtx};
 use ensemble_runtime::{
-    AgentActor, AnthropicBackend, LocalAdapterBackend, MockBackend, MockScript, MockTurn,
-    OpenAIBackend, SharedBackend, ToolRegistry, UserActor,
+    AgentActor, AnthropicBackend, HiddenState, LocalAdapterBackend, MockBackend, MockScript,
+    MockTurn, OpenAIBackend, PromptedPersona, SharedBackend, ToolRegistry, UserActor,
 };
 
 mod world_registry;
@@ -67,11 +67,23 @@ pub(crate) enum BackendKind {
 pub(crate) struct ActorSpec {
     pub(crate) id: ActorId,
     pub(crate) kind: SpecKind,
+    #[allow(dead_code)]
     pub(crate) persona: Option<String>,
+    #[allow(dead_code)]
     pub(crate) hidden_goal: Option<String>,
     pub(crate) model: Option<String>,
+    // TODO: filter the world's ToolRegistry by this list before
+    // handing it to the AgentActor. Today every agent sees every
+    // registered tool, which is fine for the worked example but not
+    // for adversarial scenarios with restricted-capability agents.
+    #[allow(dead_code)]
     pub(crate) tools: Vec<String>,
     pub(crate) system_prompt: Option<String>,
+    /// Shared HiddenState handle. Populated when the python layer
+    /// resolved a persona TOML and computed initial hidden state. The
+    /// same Arc is given to the spawned `User` pyclass so post-run
+    /// reads see whatever the persona mutated to.
+    pub(crate) hidden: Option<HiddenState>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -160,7 +172,7 @@ impl World {
         self.inner.lock().actors.len()
     }
 
-    #[pyo3(signature = (id=None, persona=None, hidden_goal=None, model="user-model", system_prompt=None))]
+    #[pyo3(signature = (id=None, persona=None, hidden_goal=None, model="user-model", system_prompt=None, hidden_state_json=None))]
     fn spawn_user(
         &self,
         id: Option<&str>,
@@ -168,8 +180,18 @@ impl World {
         hidden_goal: Option<&str>,
         model: &str,
         system_prompt: Option<&str>,
-    ) -> User {
+        hidden_state_json: Option<&str>,
+    ) -> PyResult<User> {
         let actor_id = ActorId::from_label(id.unwrap_or_else(|| persona.unwrap_or("user")));
+        let hidden = match hidden_state_json {
+            Some(s) => {
+                let v: serde_json::Value = serde_json::from_str(s).map_err(|e| {
+                    PyValueError::new_err(format!("hidden_state_json: bad json: {e}"))
+                })?;
+                Some(HiddenState::new(v))
+            }
+            None => None,
+        };
         let spec = ActorSpec {
             id: actor_id.clone(),
             kind: SpecKind::User,
@@ -178,12 +200,14 @@ impl World {
             model: Some(model.into()),
             tools: vec![],
             system_prompt: system_prompt.map(str::to_string),
+            hidden: hidden.clone(),
         };
         self.inner.lock().actors.push(spec);
-        User {
+        Ok(User {
             id: actor_id.to_string(),
             world: self.inner.clone(),
-        }
+            hidden,
+        })
     }
 
     #[pyo3(signature = (id=None, model="claude-sonnet-4-5", tools=None, system_prompt=None))]
@@ -210,6 +234,7 @@ impl World {
             model: Some(model.into()),
             tools: tool_names,
             system_prompt: system_prompt.map(str::to_string),
+            hidden: None,
         };
         self.inner.lock().actors.push(spec);
         Ok(Agent {
@@ -265,32 +290,8 @@ impl World {
             let budget = inner.budget;
             let mut handles: Vec<(ActorId, Arc<dyn ensemble_core::actor::Actor>)> = Vec::new();
             for spec in inner.actors.drain(..) {
-                let actor: Arc<dyn ensemble_core::actor::Actor> = match spec.kind {
-                    SpecKind::User => {
-                        let mut a = UserActor::new(
-                            spec.id.clone(),
-                            spec.model.clone().unwrap_or_else(|| "user-model".into()),
-                            backend.clone(),
-                        );
-                        if let Some(sp) = spec.system_prompt.clone() {
-                            a = a.with_system_prompt(sp);
-                        }
-                        Arc::new(a)
-                    }
-                    SpecKind::Agent => {
-                        let mut a = AgentActor::new(
-                            spec.id.clone(),
-                            spec.model.clone().unwrap_or_else(|| "agent-model".into()),
-                            backend.clone(),
-                            tools.clone(),
-                        );
-                        if let Some(sp) = spec.system_prompt.clone() {
-                            a = a.with_system_prompt(sp);
-                        }
-                        Arc::new(a)
-                    }
-                };
-                handles.push((spec.id, actor));
+                let actor = build_actor(spec, backend.clone(), tools.clone());
+                handles.push(actor);
             }
             let seed = inner.seed_messages.drain(..).collect::<Vec<_>>();
             (bus, handles, seed, budget)
@@ -370,32 +371,8 @@ impl World {
             let bus = inner.bus.clone();
             let mut handles: Vec<(ActorId, Arc<dyn ensemble_core::actor::Actor>)> = Vec::new();
             for spec in inner.actors.drain(..) {
-                let actor: Arc<dyn ensemble_core::actor::Actor> = match spec.kind {
-                    SpecKind::User => {
-                        let mut a = UserActor::new(
-                            spec.id.clone(),
-                            spec.model.clone().unwrap_or_else(|| "user-model".into()),
-                            backend.clone(),
-                        );
-                        if let Some(sp) = spec.system_prompt.clone() {
-                            a = a.with_system_prompt(sp);
-                        }
-                        Arc::new(a)
-                    }
-                    SpecKind::Agent => {
-                        let mut a = AgentActor::new(
-                            spec.id.clone(),
-                            spec.model.clone().unwrap_or_else(|| "agent-model".into()),
-                            backend.clone(),
-                            tools.clone(),
-                        );
-                        if let Some(sp) = spec.system_prompt.clone() {
-                            a = a.with_system_prompt(sp);
-                        }
-                        Arc::new(a)
-                    }
-                };
-                handles.push((spec.id, actor));
+                let actor = build_actor(spec, backend.clone(), tools.clone());
+                handles.push(actor);
             }
             let seed = inner.seed_messages.drain(..).collect::<Vec<_>>();
             (bus, handles, seed, inner.budget)
@@ -528,14 +505,24 @@ impl World {
     /// `None` if the predicate is not registered. Predicates are
     /// world-supplied: a Plank world exposes things like
     /// `had_double_refund` and `agent_recommended_upgrade`.
-    fn evaluate_predicate(&self, name: &str) -> PyResult<Option<bool>> {
+    #[pyo3(signature = (name, args_json=None))]
+    fn evaluate_predicate(
+        &self,
+        name: &str,
+        args_json: Option<&str>,
+    ) -> PyResult<Option<bool>> {
+        let args = match args_json {
+            Some(s) => serde_json::from_str(s)
+                .map_err(|e| PyValueError::new_err(format!("bad args json: {e}")))?,
+            None => serde_json::Value::Null,
+        };
         let (log, preds) = {
             let inner = self.inner.lock();
             (inner.log.clone(), inner.predicates.clone())
         };
         let runtime = global_runtime();
         let events = runtime.block_on(log.snapshot());
-        Ok(preds.evaluate(name, &PredicateCtx { trace: &events }))
+        Ok(preds.evaluate(name, &PredicateCtx::with_args(&events, args)))
     }
 
     /// Return the trace events as a list of JSON-encoded strings, one
@@ -559,10 +546,22 @@ pub struct User {
     #[pyo3(get)]
     id: String,
     world: Arc<Mutex<WorldInner>>,
+    hidden: Option<HiddenState>,
 }
 
 #[pymethods]
 impl User {
+    /// Current hidden-state JSON snapshot. Returns `null` if this user
+    /// has no persona (i.e. no hidden state was attached at spawn).
+    /// Used by post-run graders that inspect what the persona did
+    /// internally during the run.
+    fn hidden_state_json(&self) -> String {
+        match &self.hidden {
+            Some(h) => h.snapshot().to_string(),
+            None => "null".into(),
+        }
+    }
+
     /// Queue a seed message from this user to the named actor. The
     /// message is delivered when the scenario calls `run()`.
     fn say(&self, target: &str, text: &str) {
@@ -617,6 +616,49 @@ impl Agent {
     fn __repr__(&self) -> String {
         format!("<Agent id={:?}>", self.id)
     }
+}
+
+/// Materialize an `ActorSpec` into a concrete user or agent actor.
+/// When a user has both a system_prompt template and an attached
+/// HiddenState, the world-shared backend is wrapped in a
+/// PromptedPersona so the model sees the persona's hidden state on
+/// every turn.
+fn build_actor(
+    spec: ActorSpec,
+    backend: SharedBackend,
+    tools: Arc<ToolRegistry>,
+) -> (ActorId, Arc<dyn ensemble_core::actor::Actor>) {
+    let id = spec.id.clone();
+    let model = spec.model.clone().unwrap_or_else(|| match spec.kind {
+        SpecKind::User => "user-model".into(),
+        SpecKind::Agent => "agent-model".into(),
+    });
+    let backend_for_actor: SharedBackend = match (&spec.system_prompt, &spec.hidden) {
+        (Some(template), Some(hidden)) => Arc::new(PromptedPersona::new(
+            backend,
+            model.clone(),
+            template.clone(),
+            hidden.clone(),
+        )),
+        _ => backend,
+    };
+    let actor: Arc<dyn ensemble_core::actor::Actor> = match spec.kind {
+        SpecKind::User => {
+            let mut a = UserActor::new(spec.id, model, backend_for_actor);
+            if let (Some(sp), None) = (&spec.system_prompt, &spec.hidden) {
+                a = a.with_system_prompt(sp.clone());
+            }
+            Arc::new(a)
+        }
+        SpecKind::Agent => {
+            let mut a = AgentActor::new(spec.id, model, backend_for_actor, tools);
+            if let Some(sp) = spec.system_prompt {
+                a = a.with_system_prompt(sp);
+            }
+            Arc::new(a)
+        }
+    };
+    (id, actor)
 }
 
 fn build_backend(
