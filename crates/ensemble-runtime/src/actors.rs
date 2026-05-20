@@ -207,21 +207,28 @@ impl Actor for AgentActor {
                 )
                 .await;
                 match self.tools.dispatch(&call.name, &call.args) {
-                    Ok(effect) => {
+                    Ok(outcome) => {
                         self.history.lock().push(ChatMessage::tool(format!(
                             "tool {} -> {}",
-                            call.name, effect
+                            call.name, outcome.effect
                         )));
                         bus.append_event(
                             Some(self.id.clone()),
                             EventPayload::ToolResult {
-                                id: call_id,
-                                name: call.name,
-                                result: effect,
+                                id: call_id.clone(),
+                                name: call.name.clone(),
+                                result: outcome.effect,
                                 is_error: false,
                             },
                         )
                         .await;
+                        if let Some(diff) = outcome.diff {
+                            bus.append_event(
+                                Some(self.id.clone()),
+                                EventPayload::StateDiff { diff },
+                            )
+                            .await;
+                        }
                     }
                     Err(e) => {
                         // Surface the error to the model so it can recover

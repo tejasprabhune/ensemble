@@ -44,7 +44,7 @@ fn ok<T: Serialize>(data: T) -> serde_json::Value {
 
 pub fn open_ticket(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
     let state = state.clone();
-    tools.register(Tool::new(
+    tools.register(Tool::new_with_diff(
         "open_ticket",
         "Open a support ticket on behalf of a user. Required for any \
          follow-up tool that takes a ticket_id.",
@@ -69,7 +69,14 @@ pub fn open_ticket(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
                 &json!({"ticket_id": ticket_id, "user_id": user_id, "subject": subject}),
                 now_ms(),
             )?;
-            Ok(ok(rec))
+            let diff = json!([{
+                "table": "tickets",
+                "row_id": ticket_id,
+                "field": "row",
+                "old": null,
+                "new": {"user_id": user_id, "subject": subject, "status": "open"}
+            }]);
+            Ok((ok(rec), diff))
         },
     ));
 }
@@ -116,7 +123,7 @@ pub fn lookup_ticket(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
 
 pub fn issue_refund(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
     let state = state.clone();
-    tools.register(Tool::new(
+    tools.register(Tool::new_with_diff(
         "issue_refund",
         "Issue a refund to a user. Amounts are in whole cents.",
         json!({
@@ -147,18 +154,26 @@ pub fn issue_refund(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
                 &json!({"user_id": user_id, "amount_cents": amount, "reason": reason}),
                 now_ms(),
             )?;
-            Ok(ok(json!({
+            let effect = ok(json!({
                 "refund_id": refund_id,
                 "user_id": user_id,
                 "amount_cents": amount,
-            })))
+            }));
+            let diff = json!([{
+                "table": "refunds",
+                "row_id": refund_id,
+                "field": "row",
+                "old": null,
+                "new": {"user_id": user_id, "amount_cents": amount, "reason": reason}
+            }]);
+            Ok((effect, diff))
         },
     ));
 }
 
 pub fn escalate(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
     let state = state.clone();
-    tools.register(Tool::new(
+    tools.register(Tool::new_with_diff(
         "escalate",
         "Escalate a ticket to another team. Sets ticket status to 'escalated'.",
         json!({
@@ -173,6 +188,10 @@ pub fn escalate(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
             let ticket_id = arg_str(args, "ticket_id")?;
             let to_team = arg_str(args, "to_team")?;
             let s = state.lock();
+            let prior_status = s
+                .lookup_ticket(ticket_id)?
+                .map(|t| t.status)
+                .unwrap_or_else(|| "missing".into());
             s.set_ticket_status(ticket_id, "escalated")?;
             s.audit(
                 "agent",
@@ -180,11 +199,19 @@ pub fn escalate(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
                 &json!({"ticket_id": ticket_id, "to_team": to_team}),
                 now_ms(),
             )?;
-            Ok(ok(json!({
+            let effect = ok(json!({
                 "ticket_id": ticket_id,
                 "to_team": to_team,
                 "status": "escalated"
-            })))
+            }));
+            let diff = json!([{
+                "table": "tickets",
+                "row_id": ticket_id,
+                "field": "status",
+                "old": prior_status,
+                "new": "escalated"
+            }]);
+            Ok((effect, diff))
         },
     ));
 }
@@ -211,9 +238,10 @@ pub fn search_kb(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
 
 pub fn update_subscription(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegistry) {
     let state = state.clone();
-    tools.register(Tool::new(
+    tools.register(Tool::new_with_diff(
         "update_subscription",
-        "Move a user to a different plan.",
+        "Move a user to a different plan. Upserts: if the user has no \
+         subscription row yet, the call inserts one.",
         json!({
             "type": "object",
             "properties": {
@@ -226,14 +254,22 @@ pub fn update_subscription(state: &Arc<Mutex<PlankState>>, tools: &mut ToolRegis
             let user_id = arg_str(args, "user_id")?;
             let plan = arg_str(args, "plan")?;
             let s = state.lock();
-            s.set_subscription(user_id, plan)?;
+            let prior = s.set_subscription(user_id, plan)?;
             s.audit(
                 "agent",
                 "update_subscription",
                 &json!({"user_id": user_id, "plan": plan}),
                 now_ms(),
             )?;
-            Ok(ok(json!({"user_id": user_id, "plan": plan})))
+            let effect = ok(json!({"user_id": user_id, "plan": plan}));
+            let diff = json!([{
+                "table": "subscriptions",
+                "row_id": user_id,
+                "field": "plan",
+                "old": prior,
+                "new": plan,
+            }]);
+            Ok((effect, diff))
         },
     ));
 }
@@ -266,8 +302,8 @@ mod tests {
         let res = tools
             .dispatch("lookup_user", &json!({"user_id": "u-alice"}))
             .unwrap();
-        assert_eq!(res["ok"], true);
-        assert_eq!(res["data"]["name"], "Alice Chen");
+        assert_eq!(res.effect["ok"], true);
+        assert_eq!(res.effect["data"]["name"], "Alice Chen");
     }
 
     #[test]

@@ -585,17 +585,24 @@ impl User {
             )
             .await;
             match tools.dispatch(tool, &args) {
-                Ok(effect) => {
+                Ok(outcome) => {
                     bus.append_event(
-                        Some(actor),
+                        Some(actor.clone()),
                         EventPayload::ToolResult {
                             id: call_id,
                             name: tool.into(),
-                            result: effect,
+                            result: outcome.effect,
                             is_error: false,
                         },
                     )
                     .await;
+                    if let Some(diff) = outcome.diff {
+                        bus.append_event(
+                            Some(actor),
+                            EventPayload::StateDiff { diff },
+                        )
+                        .await;
+                    }
                 }
                 Err(e) => {
                     let err_json = serde_json::json!({"ok": false, "error": e.to_string()});

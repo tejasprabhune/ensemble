@@ -18,4 +18,4 @@ pub use backends::openai::OpenAIBackend;
 pub use backends::vllm::LocalAdapterBackend;
 pub use actors::{AgentActor, UserActor};
 pub use persona::{HiddenState, PromptedPersona};
-pub use tools::{Tool, ToolRegistry};
+pub use tools::{Tool, ToolOutcome, ToolRegistry};

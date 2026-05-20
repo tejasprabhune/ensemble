@@ -243,14 +243,31 @@ impl PlankState {
         Ok(out)
     }
 
-    pub fn set_subscription(&self, user_id: &str, plan: &str) -> Result<(), ToolError> {
+    /// Replace (or insert) the subscription row for `user_id`. Returns
+    /// the prior plan (or None if there was no row before) so callers
+    /// can emit a meaningful diff.
+    pub fn set_subscription(
+        &self,
+        user_id: &str,
+        plan: &str,
+    ) -> Result<Option<String>, ToolError> {
+        let prior: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT plan FROM subscriptions WHERE user_id = ?",
+                params![user_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| ToolError::Execution(e.to_string()))?;
         self.conn
             .execute(
-                "UPDATE subscriptions SET plan = ? WHERE user_id = ?",
-                params![plan, user_id],
+                "INSERT INTO subscriptions (user_id, plan) VALUES (?, ?) \
+                 ON CONFLICT(user_id) DO UPDATE SET plan = excluded.plan",
+                params![user_id, plan],
             )
             .map_err(|e| ToolError::Execution(e.to_string()))?;
-        Ok(())
+        Ok(prior)
     }
 
     pub fn audit(
