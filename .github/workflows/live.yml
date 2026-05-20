@@ -1,0 +1,32 @@
+name: live-api
+
+on:
+  workflow_dispatch:
+
+# Run the suite that hits real provider endpoints. Manual trigger
+# only; we don't want every push to spend tokens. The repo secrets
+# ANTHROPIC_API_KEY and OPENAI_API_KEY drive the fixtures.
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.80"
+      - name: cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.x"
+      - name: uv sync (builds the ensemble + plank extensions)
+        run: uv sync
+      - name: pytest live (anthropic + openai + mcp)
+        env:
+          LIVE_API_TESTS: "1"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: uv run pytest tests/integration_live/ -v --tb=short
