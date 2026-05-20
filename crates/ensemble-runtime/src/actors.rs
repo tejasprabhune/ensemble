@@ -48,6 +48,15 @@ pub struct UserActor {
     pub model: String,
     pub backend: SharedBackend,
     pub system_prompt: Option<String>,
+    /// When false, the actor's `step` records the inbound message
+    /// to history and returns without calling the backend. Useful
+    /// for scripted personas whose only job is to deliver one or
+    /// more seed messages via `.say()` and then stay silent. The
+    /// alternative is calling the backend on every agent reply,
+    /// which burns tokens and frequently 404s when the user's
+    /// `model` is a sentinel like `"user-model"` rather than a real
+    /// deployment.
+    pub interactive: bool,
     history: Mutex<Vec<ChatMessage>>,
 }
 
@@ -58,12 +67,18 @@ impl UserActor {
             model: model.into(),
             backend,
             system_prompt: None,
+            interactive: true,
             history: Mutex::new(Vec::new()),
         }
     }
 
     pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(prompt.into());
+        self
+    }
+
+    pub fn with_interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
         self
     }
 }
@@ -91,6 +106,9 @@ impl Actor for UserActor {
         {
             let mut h = self.history.lock();
             h.push(ChatMessage::user(incoming));
+        }
+        if !self.interactive {
+            return Ok(());
         }
         let messages = self.history.lock().clone();
         let req = CompletionRequest {

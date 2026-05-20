@@ -100,6 +100,14 @@ pub(crate) struct ActorSpec {
     /// backend, so a trained persona and a frontier-served agent can
     /// coexist in the same scenario.
     pub(crate) backend_override: Option<BackendChoice>,
+    /// User-only: when false, the UserActor records incoming messages
+    /// into its history and returns without calling the backend. The
+    /// actor can still drive the conversation via `.say()` from the
+    /// scenario. Used for scripted personas whose only job is to
+    /// deliver one or more seed messages and then stay silent.
+    /// Defaults to true (the LLM-driven simulated user that responds
+    /// to every agent reply).
+    pub(crate) interactive: bool,
 }
 
 /// A resolved per-actor backend chosen by the python layer. Built into
@@ -284,7 +292,7 @@ impl World {
         self.inner.lock().actors.len()
     }
 
-    #[pyo3(signature = (id=None, persona=None, hidden_goal=None, model="user-model", system_prompt=None, hidden_state_json=None, vllm_base_url=None, vllm_adapter=None))]
+    #[pyo3(signature = (id=None, persona=None, hidden_goal=None, model="user-model", system_prompt=None, hidden_state_json=None, vllm_base_url=None, vllm_adapter=None, interactive=true))]
     fn spawn_user(
         &self,
         id: Option<&str>,
@@ -295,6 +303,7 @@ impl World {
         hidden_state_json: Option<&str>,
         vllm_base_url: Option<&str>,
         vllm_adapter: Option<&str>,
+        interactive: bool,
     ) -> PyResult<User> {
         let actor_id = ActorId::from_label(id.unwrap_or_else(|| persona.unwrap_or("user")));
         let hidden = match hidden_state_json {
@@ -322,6 +331,7 @@ impl World {
             hidden: hidden.clone(),
             external_inbox: None,
             backend_override: backend_override.clone(),
+            interactive,
         };
         self.inner.lock().actors.push(spec);
         Ok(User {
@@ -374,6 +384,7 @@ impl World {
             hidden: None,
             external_inbox: None,
             backend_override: None,
+            interactive: true,
         };
         self.inner.lock().actors.push(spec);
         Ok(Agent {
@@ -849,6 +860,7 @@ impl World {
                 hidden: None,
                 external_inbox: Some(inbox),
                 backend_override: None,
+                interactive: true,
             });
         }
         Ok(())
@@ -1512,7 +1524,8 @@ fn build_actor(
     };
     let actor: Arc<dyn ensemble_core::actor::Actor> = match spec.kind {
         SpecKind::User => {
-            let mut a = UserActor::new(spec.id, model, backend_for_actor);
+            let mut a = UserActor::new(spec.id, model, backend_for_actor)
+                .with_interactive(spec.interactive);
             if let (Some(sp), None) = (&spec.system_prompt, &spec.hidden) {
                 a = a.with_system_prompt(sp.clone());
             }

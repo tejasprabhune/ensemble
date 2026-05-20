@@ -585,11 +585,21 @@ class World:
         model: str = "user-model",
         system_prompt: Optional[str] = None,
         hidden_state: Optional[Dict[str, Any]] = None,
+        interactive: bool = True,
     ) -> User:
         """Spawn a user. ``persona`` looks up a TOML registered on this
         world; ``hidden_state`` and ``hidden_goal`` override file
         defaults. Trained personas (with an ``adapter_name``) route
-        through a per-user vLLM backend."""
+        through a per-user vLLM backend.
+
+        ``interactive=False`` makes the user silent on inbound messages:
+        the scheduler still records what the agent said into the user's
+        history, but the user does not call the backend to produce a
+        reply. The scenario can still drive the conversation through
+        ``user.say(...)``. Use this for scripted personas whose only
+        job is to deliver one or more seed messages and then stay
+        silent, so the run does not waste backend calls (and 404 against
+        sentinel model names like ``"user-model"``)."""
 
         overrides: Dict[str, Any] = {}
         if hidden_goal is not None:
@@ -641,6 +651,7 @@ class World:
             ),
             vllm_base_url=vllm_base_url,
             vllm_adapter=vllm_adapter,
+            interactive=interactive,
         )
         u = User(native, self, persona_spec=spec)
         self.users.append(u)
