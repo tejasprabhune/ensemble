@@ -17,7 +17,7 @@ pub mod prelude {
     pub use crate::actor::{Actor, ActorHandle, ActorKind};
     pub use crate::bus::{Bus, Envelope, Message, Recipient};
     pub use crate::error::{CoreError, RestoreError, ToolError};
-    pub use crate::event::{Event, EventLog, EventPayload, Tick};
+    pub use crate::event::{Event, EventLog, EventPayload, Tick, TraceFile};
     pub use crate::ids::{ActorId, MessageId, RunId};
     pub use crate::predicate::{Predicate, PredicateCtx, PredicateRegistry};
     pub use crate::scenario::{RunResult, Scenario, Scores};
