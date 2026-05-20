@@ -306,22 +306,7 @@ impl World {
             }
             scheduler.set_until(until).await;
             for (from, to, msg) in seed_messages {
-                if to.as_str() == "__world__" {
-                    let payload = match msg {
-                        Message::ToolCall { id, name, args } => {
-                            EventPayload::ToolCall { id, name, args }
-                        }
-                        Message::UserMessage { text } => EventPayload::UserMessage { text },
-                        Message::AgentMessage { text } => EventPayload::AgentMessage { text },
-                        Message::ToolResult { id, name, result, is_error } => {
-                            EventPayload::ToolResult { id, name, result, is_error }
-                        }
-                        Message::System { note } => EventPayload::System { note },
-                    };
-                    bus.append_event(Some(from), payload).await;
-                } else {
-                    bus.send(from, Recipient::Actor(to), msg).await.ok();
-                }
+                bus.send(from, Recipient::Actor(to), msg).await.ok();
             }
             scheduler.run().await.map(|_stop| ())
         })
@@ -396,22 +381,7 @@ impl World {
         // to react to.
         runtime.block_on(async {
             for (from, to, msg) in seed_messages {
-                if to.as_str() == "__world__" {
-                    let payload = match msg {
-                        Message::ToolCall { id, name, args } => {
-                            EventPayload::ToolCall { id, name, args }
-                        }
-                        Message::UserMessage { text } => EventPayload::UserMessage { text },
-                        Message::AgentMessage { text } => EventPayload::AgentMessage { text },
-                        Message::ToolResult { id, name, result, is_error } => {
-                            EventPayload::ToolResult { id, name, result, is_error }
-                        }
-                        Message::System { note } => EventPayload::System { note },
-                    };
-                    bus.append_event(Some(from), payload).await;
-                } else {
-                    bus.send(from, Recipient::Actor(to), msg).await.ok();
-                }
+                bus.send(from, Recipient::Actor(to), msg).await.ok();
             }
         });
         let task = runtime.spawn(async move { scheduler.run().await });
@@ -576,22 +546,60 @@ impl User {
         format!("<User id={:?}>", self.id)
     }
 
-    /// Seed an action as a tool call from this user. Logged as a
-    /// ToolCall event at run() time so the trace shows the user's
-    /// intent. Args is a JSON string; the python wrapper builds it.
+    /// Run a tool from this user immediately and record the call and
+    /// result in the trace. The user is asserting that the action
+    /// happened (it is part of the scenario's setup, not something a
+    /// model decided), so the dispatch goes straight through the
+    /// world's ToolRegistry rather than waiting for an LLM round trip.
+    /// State mutations land in the world before the scheduler starts.
     fn act_json(&self, tool: &str, args_json: &str) -> PyResult<()> {
         let args: serde_json::Value = serde_json::from_str(args_json)
             .map_err(|e| PyValueError::new_err(format!("bad json: {e}")))?;
         let call_id = MessageId::new().to_string();
-        self.world.lock().seed_messages.push((
-            ActorId::from_label(&self.id),
-            ActorId::from_label("__world__"),
-            Message::ToolCall {
-                id: call_id,
-                name: tool.into(),
-                args,
-            },
-        ));
+        let (bus, tools) = {
+            let inner = self.world.lock();
+            (inner.bus.clone(), inner.tools.clone())
+        };
+        let actor = ActorId::from_label(&self.id);
+        let runtime = global_runtime();
+        runtime.block_on(async {
+            bus.append_event(
+                Some(actor.clone()),
+                EventPayload::ToolCall {
+                    id: call_id.clone(),
+                    name: tool.into(),
+                    args: args.clone(),
+                },
+            )
+            .await;
+            match tools.dispatch(tool, &args) {
+                Ok(effect) => {
+                    bus.append_event(
+                        Some(actor),
+                        EventPayload::ToolResult {
+                            id: call_id,
+                            name: tool.into(),
+                            result: effect,
+                            is_error: false,
+                        },
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    let err_json = serde_json::json!({"ok": false, "error": e.to_string()});
+                    bus.append_event(
+                        Some(actor),
+                        EventPayload::ToolResult {
+                            id: call_id,
+                            name: tool.into(),
+                            result: err_json,
+                            is_error: true,
+                        },
+                    )
+                    .await;
+                }
+            }
+        });
         Ok(())
     }
 }
