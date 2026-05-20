@@ -59,6 +59,11 @@ enum Cmd {
         #[command(subcommand)]
         sub: WorldsCmd,
     },
+    /// Run an MCP server that exposes a world's tools to external agents.
+    Mcp {
+        #[command(subcommand)]
+        sub: McpCmd,
+    },
     /// Hand off persona training to the python pipeline.
     Train {
         /// Path to the persona TOML.
@@ -66,6 +71,22 @@ enum Cmd {
         /// Compute backend.
         #[arg(long, value_parser = ["modal", "skypilot", "local"], default_value = "modal")]
         backend: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpCmd {
+    /// Serve a world's tools over MCP stdio.
+    Serve {
+        /// World to expose (must be registered via `ensemble worlds add`).
+        #[arg(long)]
+        world: String,
+        /// Scenario to run while the server is up. Optional.
+        #[arg(long)]
+        scenario: Option<String>,
+        /// Agent slot the connected client takes over. Optional.
+        #[arg(long = "as-agent")]
+        as_agent: Option<String>,
     },
 }
 
@@ -122,6 +143,7 @@ fn main() -> Result<()> {
             }
         },
         Cmd::Worlds { sub } => worlds_subcommand(sub),
+        Cmd::Mcp { sub } => mcp_subcommand(sub),
         Cmd::Train { persona, backend } => train(&persona, &backend),
     }
 }
@@ -183,6 +205,32 @@ fn run_scenario(
         .context("invoking uv run python -m ensemble.cli_run; is uv on PATH?")?;
     if !status.success() {
         return Err(anyhow!("scenario run failed (exit {status})"));
+    }
+    Ok(())
+}
+
+fn mcp_subcommand(sub: McpCmd) -> Result<()> {
+    let mut cmd = Command::new("uv");
+    cmd.args(["run", "python", "-m", "ensemble.cli_mcp"]);
+    match sub {
+        McpCmd::Serve { world, scenario, as_agent } => {
+            cmd.args(["serve", "--world", &world]);
+            if let Some(s) = scenario {
+                cmd.args(["--scenario", &s]);
+            }
+            if let Some(a) = as_agent {
+                cmd.args(["--as-agent", &a]);
+            }
+        }
+    }
+    // MCP servers speak stdio with the connected client; let the
+    // subprocess inherit our stdio so external MCP clients can drive
+    // the server directly through `ensemble mcp serve`.
+    let status = cmd
+        .status()
+        .context("invoking uv run python -m ensemble.cli_mcp; is uv on PATH?")?;
+    if !status.success() {
+        return Err(anyhow!("mcp subcommand failed (exit {status})"));
     }
     Ok(())
 }
