@@ -292,6 +292,8 @@ class World:
         self.agents: List[Agent] = []
         # Apply python-registered tools and predicates for this world.
         if definition is not None:
+            for rname, permits in definition.resources.items():
+                self._native.declare_resource(rname, permits)
             tools, predicates = definition.build()
             for t in tools:
                 fn = t.fn

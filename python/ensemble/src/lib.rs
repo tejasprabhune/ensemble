@@ -666,6 +666,34 @@ impl World {
         self.inner.lock().tools.names()
     }
 
+    /// Declare a named resource on this world's `ResourceManager`.
+    /// `permits = 1` is an exclusive lock (the lazy default); values
+    /// greater than one declare a shared resource with that many
+    /// simultaneous holders. Idempotent: a second declaration with
+    /// the same name keeps the existing permit count, since changing
+    /// capacity mid-run would break callers already holding permits.
+    /// The python `World` constructor calls this for each entry in
+    /// the manifest's resources table so a `world.toml`-declared
+    /// `Shared{permits: 2}` actually serves two concurrent tool
+    /// dispatches rather than silently downgrading to exclusive.
+    fn declare_resource(&self, name: &str, permits: u32) {
+        let resources = self.inner.lock().resources.clone();
+        let kind = if permits <= 1 {
+            ensemble_runtime::ResourceKind::Exclusive
+        } else {
+            ensemble_runtime::ResourceKind::Shared { permits }
+        };
+        resources.declare(name.to_string(), kind);
+    }
+
+    /// Resource names known to this world's manager: anything
+    /// declared via :meth:`declare_resource` plus anything tools
+    /// have acquired so far (those are lazily declared as
+    /// exclusive).
+    fn resource_names(&self) -> Vec<String> {
+        self.inner.lock().resources.names()
+    }
+
     /// Declare a budget cap for `unit`. When a recorded cost would
     /// push the running total past `amount` the scheduler halts with
     /// StopReason::BudgetExceeded. When `actor` is supplied the cap

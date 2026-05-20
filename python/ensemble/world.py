@@ -74,6 +74,12 @@ class WorldDefinition:
     # without invoking the factory.
     static_tools: List[PluginTool] = field(default_factory=list)
     static_predicates: List[PluginPredicate] = field(default_factory=list)
+    # Resources the world declares. Keys are resource names; values
+    # are integer permit counts (1 = exclusive, N = shared with N
+    # permits). Lazy declarations from ``Tool.with_resources`` still
+    # fall back to exclusive semantics; this dict lets the manifest
+    # author declare richer shapes ahead of time.
+    resources: Dict[str, int] = field(default_factory=dict)
 
     def build(self) -> "tuple[List[PluginTool], List[PluginPredicate]]":
         """Materialize tools and predicates for one World instance.
@@ -96,6 +102,7 @@ def register_world(
     tools: Optional[Sequence[PluginTool]] = None,
     predicates: Optional[Sequence[PluginPredicate]] = None,
     personas_dir: Optional[Path | str] = None,
+    resources: Optional[Dict[str, Any]] = None,
 ) -> WorldDefinition:
     """Register a world plugin under ``name``. Idempotent: calling
     twice for the same name overwrites the prior definition (so a
@@ -105,16 +112,42 @@ def register_world(
     returning ``(tools, predicates)`` invoked once per ``World(name)``
     construction. Worlds whose tools are stateless can pass ``tools``
     and ``predicates`` directly.
+
+    ``resources`` declares named permit counts the world wants the
+    runtime to enforce. Each value is either an int (the permit count,
+    1 for an exclusive lock) or a dict ``{"permits": N}`` matching
+    the world.toml schema. Tools that name a resource via
+    :meth:`Tool.with_resources` acquire one permit at dispatch time;
+    a lazy declaration still falls back to exclusive semantics, so
+    populating this dict is only needed for shared resources or for
+    making the schema explicit ahead of any tool reference.
     """
     if setup is not None and (tools is not None or predicates is not None):
         raise ValueError("pass either setup= or tools=/predicates=, not both")
     pd = Path(personas_dir).expanduser().resolve() if personas_dir else None
+    resolved_resources: Dict[str, int] = {}
+    for rname, raw in (resources or {}).items():
+        if isinstance(raw, int):
+            permits = raw
+        elif isinstance(raw, dict) and "permits" in raw:
+            permits = int(raw["permits"])
+        else:
+            raise ValueError(
+                f"resource {rname!r}: expected an int permit count or a "
+                f"{{permits: N}} dict, got {raw!r}"
+            )
+        if permits < 1:
+            raise ValueError(
+                f"resource {rname!r}: permits must be >= 1, got {permits}"
+            )
+        resolved_resources[rname] = permits
     defn = WorldDefinition(
         name=name,
         setup=setup,
         personas_dir=pd,
         static_tools=list(tools or []),
         static_predicates=list(predicates or []),
+        resources=resolved_resources,
     )
     _WORLDS[name] = defn
     if pd is not None:
