@@ -101,37 +101,26 @@ fn run_scenario(
     manifest: Option<&std::path::Path>,
     package_dir: Option<&std::path::Path>,
 ) -> Result<()> {
-    let mut script = String::new();
-    script.push_str("import asyncio, json, os, sys\n");
-    if let Some(pd) = package_dir {
-        script.push_str(&format!("sys.path.insert(0, {:?})\n", pd.display().to_string()));
-    } else {
-        script.push_str("sys.path.insert(0, 'examples/plank')\n");
-    }
-    script.push_str("try:\n    import scenarios  # noqa: F401\nexcept ImportError:\n    pass\n");
-    if let Some(m) = manifest {
-        script.push_str(&format!(
-            "from ensemble import load_manifest\nload_manifest({:?})\n",
-            m.display().to_string()
-        ));
-    }
-    let world_arg = world.unwrap_or("plank");
-    script.push_str("from ensemble.scenario import _REGISTRY\n");
-    script.push_str(&format!("name = {scenario:?}\n"));
-    script.push_str(&format!("world = {world_arg:?}\n"));
-    script.push_str("assert name in _REGISTRY, f'unknown scenario {name!r}'\n");
-    script.push_str("result = asyncio.run(_REGISTRY[name](world))\n");
-    script.push_str("os.makedirs('traces', exist_ok=True)\n");
-    script.push_str("safe = name.replace('/', '_').replace('.', '_')\n");
-    script.push_str("out = f'traces/{safe}.jsonl'\n");
-    script.push_str("with open(out, 'w') as f:\n    for e in result.trace:\n        f.write(json.dumps(e) + '\\n')\n");
-    script.push_str("print(json.dumps({'scenario': name, 'scores': result.scores, 'trace_path': out}))\n");
+    // Default to the bundled plank scenarios when the caller did not
+    // specify a package dir, so the README's quick-start works
+    // out-of-the-box from a fresh clone.
+    let pd: PathBuf = package_dir
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("examples/plank"));
 
-    let status = Command::new("uv")
-        .args(["run", "python", "-c"])
-        .arg(&script)
+    let mut cmd = Command::new("uv");
+    cmd.args(["run", "python", "-m", "ensemble.cli_run"])
+        .args(["--scenario", scenario])
+        .args(["--world", world.unwrap_or("plank")])
+        .args(["--package-dir"])
+        .arg(&pd);
+    if let Some(m) = manifest {
+        cmd.args(["--manifest"]).arg(m);
+    }
+
+    let status = cmd
         .status()
-        .context("invoking uv run python; is uv on PATH?")?;
+        .context("invoking uv run python -m ensemble.cli_run; is uv on PATH?")?;
     if !status.success() {
         return Err(anyhow!("scenario run failed (exit {status})"));
     }
