@@ -8,6 +8,7 @@ use crate::bus::Bus;
 use crate::error::CoreError;
 use crate::event::{now_ms, Event, EventPayload};
 use crate::ids::ActorId;
+use crate::predicate::PredicateRegistry;
 use crate::until::{Until, UntilCtx};
 
 /// Why the scheduler stopped. All four are normal terminations; real
@@ -69,6 +70,7 @@ pub struct Scheduler {
     actors: HashMap<ActorId, Arc<ActorHandle>>,
     budget: TickBudget,
     until: Arc<Mutex<Option<Until>>>,
+    predicates: Option<Arc<PredicateRegistry>>,
 }
 
 impl Scheduler {
@@ -78,6 +80,7 @@ impl Scheduler {
             actors: HashMap::new(),
             budget,
             until: Arc::new(Mutex::new(None)),
+            predicates: None,
         }
     }
 
@@ -93,6 +96,15 @@ impl Scheduler {
         *self.until.lock().await = Some(until);
     }
 
+    /// Make the world's named predicates visible to until-predicates
+    /// the scheduler evaluates each tick. Wiring is opt-in so the
+    /// existing turn-count-only path keeps working without a
+    /// registry.
+    pub fn with_predicates(mut self, predicates: Arc<PredicateRegistry>) -> Self {
+        self.predicates = Some(predicates);
+        self
+    }
+
     /// Runs the scheduler until the `until` predicate fires, the
     /// budget is exhausted, or no new events arrive for the quiescence
     /// window. Each actor runs in its own tokio task draining its
@@ -104,6 +116,7 @@ impl Scheduler {
             actors,
             budget,
             until,
+            predicates,
         } = self;
 
         let log = bus.log().clone();
@@ -150,12 +163,19 @@ impl Scheduler {
                     });
                 }
                 if drain_label.is_none() {
+                    // Snapshot the trace here so until-predicates that
+                    // ask the predicate registry can walk events
+                    // synchronously inside their `check` closure
+                    // without re-locking the live log.
+                    let snapshot = watcher_log.snapshot().await;
                     let label = {
                         let guard = watcher_until.lock().await;
                         let ctx = UntilCtx {
                             tick: cur,
                             log: &watcher_log,
                             events_seen: cur as usize,
+                            trace: Some(snapshot.as_slice()),
+                            predicates: predicates.as_ref(),
                         };
                         match guard.as_ref() {
                             Some(u) if u.check(&ctx) => Some(u.label.clone()),

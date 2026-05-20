@@ -216,6 +216,8 @@ async fn until_combinators_compose() {
         tick: 1,
         log: &log,
         events_seen: 1,
+        trace: None,
+        predicates: None,
     };
     assert!(u.check(&ctx));
 
