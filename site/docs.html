@@ -443,6 +443,44 @@ tools.register(Tool::new(
         scheduler halts with <code>StopReason::BudgetExceeded</code>
         and the trailing system note records why.
       </p>
+
+      <h3>Budgets, world-wide and per-actor</h3>
+      <p>
+        Two cost ledgers run side by side. The world-wide ledger
+        tracks every cost recorded under a given unit; the per-actor
+        ledger tracks each actor's own running total. A cost recorded
+        against an actor counts against both. Either ledger can carry
+        a cap, and either cap firing halts the scheduler.
+      </p>
+<pre><code class="language-python">world.set_budget("usd", 0.50)                     # world-wide
+world.set_budget("usd", 0.10, actor="alice")      # alice may spend at most $0.10
+world.set_budget("tokens_out", 50_000)            # cap on output tokens across the run
+
+world.cost_total("usd")                           # world-wide running total
+world.cost_total("usd", actor="alice")            # alice's own running total</code></pre>
+      <p>
+        Use the per-actor variant when one slot's budget should not
+        affect another's. A scenario that wants to make sure the
+        trained-persona user never spends more than $0.05 per run
+        while leaving the agent free to use its full budget caps
+        alice and leaves the world-wide ledger alone:
+      </p>
+<pre><code class="language-python">world.set_budget("usd", 0.05, actor="alice")</code></pre>
+      <p>
+        The cap is checked after each <code>record_cost</code>, so a
+        single tool dispatch that pushes the running total past the
+        cap halts as soon as the dispatch returns. The trailing
+        <code>system</code> event names the unit, the offending
+        amount, and the cap, so the trace is enough to reconstruct
+        what went over. Tools annotate cost by returning a
+        <code>costs</code> dict from their plugin envelope; LLM
+        backends record <code>tokens_in</code>,
+        <code>tokens_out</code>, and (when the model is in
+        <code>crates/ensemble-runtime/pricing.toml</code>)
+        <code>usd</code> automatically against the actor that issued
+        the call.
+      </p>
+
       <p>
         [copy: a short paragraph or two with a concrete plank
         example. Suggested: walk through
