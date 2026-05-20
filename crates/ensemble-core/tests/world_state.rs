@@ -155,6 +155,47 @@ async fn snapshot_and_restore_round_trip() {
 }
 
 #[tokio::test]
+async fn scheduler_halts_gracefully_on_budget_exhaustion() {
+    use ensemble_core::bus::{Bus, Message, Recipient};
+    use ensemble_core::scheduler::{BudgetCap, Scheduler, StopReason, TickBudget};
+
+    // A bare bus with no actors. We seed enough events directly to
+    // exceed max_ticks; the scheduler should halt with
+    // StopReason::BudgetExhausted, not error.
+    let log = EventLog::new();
+    let bus = Bus::new(log.clone());
+    for i in 0..6 {
+        bus.append_event(
+            Some(ActorId::from_label("seed")),
+            EventPayload::System {
+                note: format!("evt {i}"),
+            },
+        )
+        .await;
+    }
+    let _ = Message::AgentMessage { text: "n/a".into() };
+    let _ = Recipient::Broadcast;
+
+    let scheduler = Scheduler::new(
+        bus.clone(),
+        TickBudget { max_ticks: 4, max_events: 1000, quiescence_ms: 50 },
+    );
+    let stop = scheduler.run().await.unwrap();
+    match stop {
+        StopReason::BudgetExhausted { cap: BudgetCap::Ticks, ticks, .. } => {
+            assert!(ticks >= 4);
+        }
+        other => panic!("expected BudgetExhausted(Ticks), got {other:?}"),
+    }
+    let trailing = log.snapshot().await;
+    let last = trailing.last().expect("at least one event");
+    match &last.payload {
+        EventPayload::System { note } => assert!(note.contains("tick budget exhausted")),
+        other => panic!("expected system note, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn until_combinators_compose() {
     let log = EventLog::new();
     let bus = Bus::new(log.clone());
