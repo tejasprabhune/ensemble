@@ -76,17 +76,26 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum McpCmd {
-    /// Serve a world's tools over MCP stdio.
+    /// Serve a world's tools over MCP stdio. With --scenario and
+    /// --as-agent, runs the scenario in the background and lets the
+    /// connected MCP client drive the named agent slot.
     Serve {
         /// World to expose (must be registered via `ensemble worlds add`).
         #[arg(long)]
         world: String,
-        /// Scenario to run while the server is up. Optional.
+        /// Scenario to run while the server is up. Requires --as-agent.
         #[arg(long)]
         scenario: Option<String>,
-        /// Agent slot the connected client takes over. Optional.
+        /// Agent slot the connected client takes over.
         #[arg(long = "as-agent")]
         as_agent: Option<String>,
+        /// Directory holding the scenarios package to import (defaults
+        /// to the world's directory).
+        #[arg(long = "package-dir")]
+        package_dir: Option<PathBuf>,
+        /// LLM backend for the non-external actors in the scenario.
+        #[arg(long, default_value = "mock")]
+        backend: String,
     },
 }
 
@@ -213,7 +222,13 @@ fn mcp_subcommand(sub: McpCmd) -> Result<()> {
     let mut cmd = Command::new("uv");
     cmd.args(["run", "python", "-m", "ensemble.cli_mcp"]);
     match sub {
-        McpCmd::Serve { world, scenario, as_agent } => {
+        McpCmd::Serve {
+            world,
+            scenario,
+            as_agent,
+            package_dir,
+            backend,
+        } => {
             cmd.args(["serve", "--world", &world]);
             if let Some(s) = scenario {
                 cmd.args(["--scenario", &s]);
@@ -221,6 +236,10 @@ fn mcp_subcommand(sub: McpCmd) -> Result<()> {
             if let Some(a) = as_agent {
                 cmd.args(["--as-agent", &a]);
             }
+            if let Some(p) = package_dir {
+                cmd.arg("--package-dir").arg(p);
+            }
+            cmd.args(["--backend", &backend]);
         }
     }
     // MCP servers speak stdio with the connected client; let the

@@ -1,5 +1,7 @@
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -59,6 +61,9 @@ pub(crate) struct WorldInner {
     pub(crate) bg_task:
         Option<tokio::task::JoinHandle<Result<StopReason, ensemble_core::error::CoreError>>>,
     pub(crate) registered_inboxes: Vec<ActorId>,
+    /// Per-agent message queues for externally driven slots, keyed by
+    /// agent id. Populated when `register_external_agent` is called.
+    pub(crate) external_inboxes: HashMap<ActorId, ExternalAgentInbox>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -90,12 +95,92 @@ pub(crate) struct ActorSpec {
     /// same Arc is given to the spawned `User` pyclass so post-run
     /// reads see whatever the persona mutated to.
     pub(crate) hidden: Option<HiddenState>,
+    /// Inbox shared with the python layer when this spec is an
+    /// external agent slot. The scheduler-spawned actor pushes
+    /// incoming messages here; the MCP entry point pops them.
+    pub(crate) external_inbox: Option<ExternalAgentInbox>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub(crate) enum SpecKind {
     User,
     Agent,
+    /// An agent slot driven from outside the process (e.g. via MCP).
+    /// The actor's `step` forwards incoming messages into a shared
+    /// queue the python layer drains; outbound messages and tool
+    /// dispatches come back through `external_send_as` and
+    /// `dispatch_as`.
+    External,
+}
+
+/// A queue of messages addressed to an externally-driven agent slot.
+/// `step` pushes; the python layer drains via `external_recv`.
+#[derive(Clone, Default)]
+pub(crate) struct ExternalAgentInbox {
+    queue: Arc<Mutex<VecDeque<ExternalInboxItem>>>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ExternalInboxItem {
+    pub from: String,
+    pub kind: &'static str,
+    pub text: String,
+}
+
+impl ExternalAgentInbox {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn push(&self, item: ExternalInboxItem) {
+        self.queue.lock().push_back(item);
+    }
+
+    fn pop(&self) -> Option<ExternalInboxItem> {
+        self.queue.lock().pop_front()
+    }
+}
+
+/// An actor that owns no LLM. Its only job is to forward inbound
+/// messages into an [`ExternalAgentInbox`] so a process outside the
+/// scheduler (the MCP-connected client) can react.
+pub(crate) struct ExternalForwardActor {
+    pub id: ActorId,
+    pub inbox: ExternalAgentInbox,
+}
+
+#[async_trait]
+impl ensemble_core::actor::Actor for ExternalForwardActor {
+    fn id(&self) -> ActorId {
+        self.id.clone()
+    }
+    fn kind(&self) -> ensemble_core::actor::ActorKind {
+        ensemble_core::actor::ActorKind::Agent
+    }
+    async fn step(
+        &self,
+        _bus: &Bus,
+        envelope: ensemble_core::bus::Envelope,
+    ) -> Result<(), ensemble_core::error::CoreError> {
+        let (kind, text) = match envelope.message {
+            Message::UserMessage { text } => ("user", text),
+            Message::AgentMessage { text } => ("agent", text),
+            Message::ToolResult { name, result, is_error, .. } => {
+                let prefix = if is_error { "tool_error" } else { "tool_result" };
+                (
+                    prefix,
+                    format!("{} {}: {}", prefix, name, result),
+                )
+            }
+            _ => return Ok(()),
+        };
+        self.inbox.push(ExternalInboxItem {
+            from: envelope.from.to_string(),
+            kind,
+            text,
+        });
+        Ok(())
+    }
 }
 
 #[pyclass]
@@ -153,6 +238,7 @@ impl World {
                 budget,
                 bg_task: None,
                 registered_inboxes: vec![],
+                external_inboxes: HashMap::new(),
             })),
         })
     }
@@ -208,6 +294,7 @@ impl World {
             tools: vec![],
             system_prompt: system_prompt.map(str::to_string),
             hidden: hidden.clone(),
+            external_inbox: None,
         };
         self.inner.lock().actors.push(spec);
         Ok(User {
@@ -242,6 +329,7 @@ impl World {
             tools: tool_names,
             system_prompt: system_prompt.map(str::to_string),
             hidden: None,
+            external_inbox: None,
         };
         self.inner.lock().actors.push(spec);
         Ok(Agent {
@@ -508,6 +596,173 @@ impl World {
         self.inner.lock().tools.names()
     }
 
+    /// Register an externally-driven agent slot. The scheduler-spawned
+    /// actor for this id will forward incoming messages into a queue
+    /// the python layer drains via `external_recv`. Used by the MCP
+    /// entry point to plumb scenario messages to a connected client.
+    #[pyo3(signature = (id, tools=None))]
+    fn register_external_agent(
+        &self,
+        id: &str,
+        tools: Option<&Bound<'_, PyList>>,
+    ) -> PyResult<()> {
+        let actor_id = ActorId::from_label(id);
+        let tool_names: Vec<String> = match tools {
+            Some(list) => list
+                .iter()
+                .map(|item| item.extract::<String>())
+                .collect::<PyResult<_>>()?,
+            None => vec![],
+        };
+        let inbox = ExternalAgentInbox::new();
+        {
+            let mut inner = self.inner.lock();
+            inner
+                .external_inboxes
+                .insert(actor_id.clone(), inbox.clone());
+            inner.actors.push(ActorSpec {
+                id: actor_id,
+                kind: SpecKind::External,
+                persona: None,
+                hidden_goal: None,
+                model: None,
+                tools: tool_names,
+                system_prompt: None,
+                hidden: None,
+                external_inbox: Some(inbox),
+            });
+        }
+        Ok(())
+    }
+
+    /// Pop the next message addressed to an external agent. Returns a
+    /// dict with `from`, `kind`, and `text` or `None` when nothing is
+    /// pending. Polling-based; callers add their own sleep loop.
+    fn external_recv(&self, py: Python<'_>, agent_id: &str) -> PyResult<PyObject> {
+        let key = ActorId::from_label(agent_id);
+        let item = {
+            let inner = self.inner.lock();
+            let Some(inbox) = inner.external_inboxes.get(&key) else {
+                return Err(PyValueError::new_err(format!(
+                    "no external agent registered as {agent_id:?}"
+                )));
+            };
+            inbox.pop()
+        };
+        match item {
+            None => Ok(py.None()),
+            Some(item) => {
+                let d = pyo3::types::PyDict::new_bound(py);
+                d.set_item("from", item.from)?;
+                d.set_item("kind", item.kind)?;
+                d.set_item("text", item.text)?;
+                Ok(d.into())
+            }
+        }
+    }
+
+    /// Send a message from an external agent slot to a target actor.
+    /// Goes through the bus and ends up in the trace as the agent
+    /// having spoken.
+    fn external_send_as(
+        &self,
+        py: Python<'_>,
+        agent_id: &str,
+        target: &str,
+        text: &str,
+    ) -> PyResult<()> {
+        let bus = self.inner.lock().bus.clone();
+        let msg = Message::AgentMessage { text: text.into() };
+        py.allow_threads(|| {
+            global_runtime().block_on(bus.send(
+                ActorId::from_label(agent_id),
+                Recipient::Actor(ActorId::from_label(target)),
+                msg,
+            ))
+        })
+        .map_err(|e| PyRuntimeError::new_err(format!("send: {e}")))
+    }
+
+    /// Dispatch a tool as if `agent_id` had issued it: emits paired
+    /// ToolCall + ToolResult events (and a StateDiff if any) attributed
+    /// to that actor. Returns the JSON body the MCP server hands back
+    /// to the client.
+    fn dispatch_as(
+        &self,
+        py: Python<'_>,
+        agent_id: &str,
+        tool_name: &str,
+        args_json: &str,
+    ) -> PyResult<String> {
+        let args: serde_json::Value = serde_json::from_str(args_json)
+            .map_err(|e| PyValueError::new_err(format!("bad args json: {e}")))?;
+        let (bus, tools) = {
+            let inner = self.inner.lock();
+            (inner.bus.clone(), inner.tools.clone())
+        };
+        let actor = ActorId::from_label(agent_id);
+        let call_id = MessageId::new().to_string();
+        let runtime = global_runtime();
+        let outcome_json = py.allow_threads(move || {
+            runtime.block_on(async move {
+                bus.append_event(
+                    Some(actor.clone()),
+                    EventPayload::ToolCall {
+                        id: call_id.clone(),
+                        name: tool_name.into(),
+                        args: args.clone(),
+                    },
+                )
+                .await;
+                let result = tools.dispatch(tool_name, &args);
+                let mut body = serde_json::Map::new();
+                match result {
+                    Ok(outcome) => {
+                        body.insert("effect".into(), outcome.effect.clone());
+                        if let Some(diff) = outcome.diff.clone() {
+                            body.insert("diff".into(), diff);
+                        }
+                        bus.append_event(
+                            Some(actor.clone()),
+                            EventPayload::ToolResult {
+                                id: call_id.clone(),
+                                name: tool_name.into(),
+                                result: outcome.effect,
+                                is_error: false,
+                            },
+                        )
+                        .await;
+                        if let Some(diff) = outcome.diff {
+                            bus.append_event(
+                                Some(actor),
+                                EventPayload::StateDiff { diff },
+                            )
+                            .await;
+                        }
+                    }
+                    Err(e) => {
+                        let err_json =
+                            serde_json::json!({"ok": false, "error": e.to_string()});
+                        body.insert("effect".into(), err_json.clone());
+                        body.insert("is_error".into(), serde_json::Value::Bool(true));
+                        bus.append_event(
+                            Some(actor),
+                            EventPayload::ToolResult {
+                                id: call_id,
+                                name: tool_name.into(),
+                                result: err_json,
+                                is_error: true,
+                            },
+                        )
+                        .await;
+                    }
+                }
+                serde_json::Value::Object(body).to_string()
+            })
+        });
+        Ok(outcome_json)
+    }
+
     /// Register a python-callable tool. The callable receives the
     /// args JSON as a string and must return a JSON string of either
     /// `{"effect": ...}` or `{"effect": ..., "diff": ...}`. The diff,
@@ -760,6 +1015,7 @@ fn build_actor(
     let model = spec.model.clone().unwrap_or_else(|| match spec.kind {
         SpecKind::User => "user-model".into(),
         SpecKind::Agent => "agent-model".into(),
+        SpecKind::External => "external-agent".into(),
     });
     let backend_for_actor: SharedBackend = match (&spec.system_prompt, &spec.hidden) {
         (Some(template), Some(hidden)) => Arc::new(PromptedPersona::new(
@@ -784,6 +1040,14 @@ fn build_actor(
                 a = a.with_system_prompt(sp);
             }
             Arc::new(a)
+        }
+        SpecKind::External => {
+            // The inbox is populated by register_external_agent; if it
+            // ever isn't, fall back to a fresh inbox (the python layer
+            // will never see those messages but the scheduler keeps
+            // running).
+            let inbox = spec.external_inbox.unwrap_or_default();
+            Arc::new(ExternalForwardActor { id: spec.id, inbox })
         }
     };
     (id, actor)

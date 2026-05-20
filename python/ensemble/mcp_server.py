@@ -156,6 +156,123 @@ def _predicates_as_tools(predicates: Sequence[PluginPredicate]) -> List[PluginTo
     return out
 
 
+def build_scenario_server(
+    name: str,
+    world: Any,
+    as_agent: str,
+    tools: Sequence[PluginTool],
+) -> Server:
+    """Build an MCP server that drives a scenario's agent slot.
+
+    Every world tool the slot can call is exposed as an MCP tool; the
+    dispatch routes through ``world._native.dispatch_as(as_agent, ...)``
+    so calls land in the trace under the named agent. Two meta tools
+    plumb scenario messages back and forth:
+
+    * ``inbox_recv`` returns the next message routed to the slot
+      (``{"from", "kind", "text"}``) or ``{"empty": true}``.
+    * ``agent_say`` sends an outbound message from the slot to a
+      target actor in the world.
+    """
+    server: Server = Server(name)
+    by_name = {t.name: t for t in tools}
+
+    @server.list_tools()
+    async def _list_tools() -> List[types.Tool]:
+        out = [
+            types.Tool(
+                name=t.name,
+                description=t.description,
+                inputSchema=t.parameters,
+            )
+            for t in tools
+        ]
+        out.append(
+            types.Tool(
+                name="inbox_recv",
+                description=(
+                    "Return the next message addressed to the agent slot "
+                    f"({as_agent!r}). Returns {{empty: true}} if nothing "
+                    "is pending; the client is expected to retry."
+                ),
+                inputSchema={"type": "object", "properties": {}, "required": []},
+            )
+        )
+        out.append(
+            types.Tool(
+                name="agent_say",
+                description=(
+                    f"Send a message from the agent slot ({as_agent!r}) to "
+                    "another actor in the scenario. Used when the client "
+                    "wants to reply to a user message."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "target": {"type": "string"},
+                        "text": {"type": "string"},
+                    },
+                    "required": ["target", "text"],
+                },
+            )
+        )
+        return out
+
+    @server.call_tool()
+    async def _call_tool(
+        tool_name: str, arguments: Dict[str, Any]
+    ) -> List[types.TextContent]:
+        if tool_name == "inbox_recv":
+            item = world._native.external_recv(as_agent)
+            body = item if item is not None else {"empty": True}
+            return [types.TextContent(type="text", text=json.dumps(body))]
+        if tool_name == "agent_say":
+            target = arguments.get("target")
+            text = arguments.get("text", "")
+            if not target:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=json.dumps({"error": "agent_say requires target"}),
+                    )
+                ]
+            world._native.external_send_as(as_agent, str(target), str(text))
+            return [types.TextContent(type="text", text=json.dumps({"ok": True}))]
+
+        if tool_name not in by_name:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=json.dumps({"error": f"unknown tool {tool_name!r}"}),
+                )
+            ]
+        # Route the dispatch through the world so the call lands in
+        # the trace attributed to the as-agent slot. The plugin tool's
+        # python callable is still what actually runs (via the world's
+        # ToolRegistry), so the world-side state mutates as it would
+        # under a normal agent.
+        loop = asyncio.get_running_loop()
+        args_json = json.dumps(arguments or {})
+        try:
+            raw = await loop.run_in_executor(
+                None,
+                world._native.dispatch_as,
+                as_agent,
+                tool_name,
+                args_json,
+            )
+        except Exception as e:  # noqa: BLE001
+            return [
+                types.TextContent(
+                    type="text",
+                    text=json.dumps({"effect": {"error": str(e)}, "is_error": True}),
+                )
+            ]
+        return [types.TextContent(type="text", text=raw)]
+
+    return server
+
+
 async def serve_stdio(server: Server) -> None:
     """Run ``server`` on stdio until the connected client disconnects."""
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
