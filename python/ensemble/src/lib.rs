@@ -25,18 +25,12 @@ use ensemble_core::error::ToolError;
 mod world_registry;
 use world_registry::{WorldBundle, WorldRegistry};
 
-fn noop_world_builder() -> WorldBundle {
-    WorldBundle {
-        tools: ToolRegistry::new(),
-        predicates: PredicateRegistry::with_defaults(),
-    }
-}
-
-/// Any world name we have not seen before still gets a usable bundle
-/// (default predicates, empty tool registry); the python plugin layer
-/// then fills in the per-world tools and predicates via
-/// register_tool / register_predicate.
-fn default_world_builder() -> WorldBundle {
+/// Build a world bundle with an empty tool registry and the
+/// inherited default predicates. Used both for the built-in `noop`
+/// world and as the fallback when a python plugin registers a name
+/// we have not seen native-side; the plugin then fills in per-world
+/// tools and predicates via `register_tool` / `register_predicate`.
+fn empty_world_bundle() -> WorldBundle {
     WorldBundle {
         tools: ToolRegistry::new(),
         predicates: PredicateRegistry::with_defaults(),
@@ -225,7 +219,7 @@ impl World {
         // register_predicate to populate this world after construction.
         // We still take a bundle so the default predicates are in place
         // before any plugin code runs.
-        let bundle = WorldRegistry::build(&name).unwrap_or_else(default_world_builder);
+        let bundle = WorldRegistry::build(&name).unwrap_or_else(empty_world_bundle);
         let script = MockScript::new();
         let (backend, kind) = build_backend(backend, base_url, &script)?;
         let log = EventLog::new();
@@ -1616,7 +1610,7 @@ fn build_until(spec: &serde_json::Value) -> PyResult<Until> {
 #[pymodule]
 fn _native(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Always-available no-op world for tests and the scaffold flow.
-    WorldRegistry::register("noop", noop_world_builder);
+    WorldRegistry::register("noop", empty_world_bundle);
 
     m.add_class::<World>()?;
     m.add_class::<User>()?;
