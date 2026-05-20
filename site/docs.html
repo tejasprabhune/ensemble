@@ -444,6 +444,41 @@ tools.register(Tool::new(
         and the trailing system note records why.
       </p>
 
+      <h3>Sandboxed tools</h3>
+      <p>
+        A tool that runs untrusted or fragile code (a generated GPU
+        kernel, a binary that occasionally segfaults, an inference
+        call that leaves the CUDA context in a bad state) should not
+        run in the scheduler's process, because a crash takes the
+        whole run with it. Plugin tools declared with
+        <code>PluginTool(..., sandbox=True)</code> get a subprocess
+        wrapper: each dispatch runs in a fresh
+        <code>python -m ensemble.tool_worker</code> process that
+        re-imports the world's python package, looks up the tool by
+        name, runs it once with the supplied JSON args, prints the
+        result envelope on stdout, and exits.
+      </p>
+<pre><code class="language-python">PluginTool(
+    name="run_kernel",
+    description="Compile and time a CUDA kernel.",
+    parameters=KERNEL_SCHEMA,
+    fn=run_kernel_inline,
+    sandbox=True,
+)</code></pre>
+      <p>
+        The subprocess starts clean: any state the parent's closures
+        captured is not shared with the worker. Tools that fit this
+        path encode their entire input in the JSON args and produce
+        their entire output in the JSON return; anything that needs
+        to consult parent-process state stays in-process. A crash in
+        the worker surfaces as a structured error envelope, not as a
+        scheduler exit; the calling agent sees a tool error and the
+        scenario continues. The cost is process startup per dispatch
+        (tens to hundreds of milliseconds), so reach for
+        <code>sandbox=True</code> when the safety property is worth
+        more than the latency.
+      </p>
+
       <h3>Budgets, world-wide and per-actor</h3>
       <p>
         Two cost ledgers run side by side. The world-wide ledger
