@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble — mcp</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Site</div>
+        <a href="index.html">Overview</a>
+        <a href="docs.html">Docs</a>
+        <a href="scenarios.html">Scenarios</a>
+        <a href="plank.html">Plank</a>
+        <a href="personas.html">Personas</a>
+        <a href="mcp.html" class="active">MCP</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">On this page</div>
+        <a href="#why">Why MCP</a>
+        <a href="#shape">The shape of an MCP-driven slot</a>
+        <a href="#serve">Running mcp serve</a>
+        <a href="#client">Driving the slot</a>
+        <a href="#trace">What lands in the trace</a>
+        <a href="#caveats">Caveats</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+    <h1>MCP</h1>
+    <p class="lead">
+      Ensemble exposes a scenario's tools over the Model Context
+      Protocol so external MCP-aware clients (Claude Code, Codex,
+      Claude Desktop) can take over one named agent slot inside a
+      running scenario. The trace records the slot's activity exactly
+      as it would record a local agent's.
+    </p>
+
+    <section id="why">
+      <h2>Why MCP</h2>
+      <p>
+        [copy: a paragraph on why making the framework MCP-driveable
+        matters. Suggested points: it lets you point a real
+        production agent (Claude Code, your own MCP server's tool
+        catalogue, etc.) at a controlled, replayable world; it
+        means the scenario, not the agent, owns the trace; it lets
+        the same tool catalogue serve both training rollouts and
+        a human-driven debugging session.]
+      </p>
+    </section>
+
+    <section id="shape">
+      <h2>The shape of an MCP-driven slot</h2>
+      <p>
+        A scenario spawns agents with <code>world.spawn_agent</code>;
+        normally each agent has a backend that decides what to say and
+        which tool to call. <code>ensemble mcp serve</code> replaces
+        one of those agents with an external proxy: the scheduler
+        keeps routing messages to its inbox, but the responses come
+        from a connected MCP client instead of an LLM the scenario
+        configured. The client sees three kinds of tools:
+      </p>
+      <ul>
+        <li>The world's tools (filtered to the slot's allowed list).</li>
+        <li><code>inbox_recv</code>, a meta tool that returns the next
+          message routed to the slot (or <code>{empty: true}</code>).</li>
+        <li><code>agent_say</code>, a meta tool that sends a message
+          from the slot to another actor.</li>
+      </ul>
+      <p>
+        Tool calls dispatched by the client land in the trace with
+        the slot's id as the acting actor, so a grader written
+        against a normal rollout still works against an MCP-driven
+        rollout.
+      </p>
+    </section>
+
+    <section id="serve">
+      <h2>Running mcp serve</h2>
+      <p>
+        Run the CLI from the repo root after the plank world is
+        registered:
+      </p>
+<pre><code class="language-bash">ensemble worlds add plank examples/plank
+ensemble mcp serve --world plank --scenario plank.refund_storm --as-agent rep1</code></pre>
+      <p>
+        The process serves MCP on stdio. The scenario runs in a
+        background thread; when the until predicate fires the
+        scheduler halts and the server exits. With
+        <code>--backend mock</code> (the default) the other actors
+        use scripted responses; pass <code>--backend anthropic</code>
+        to give the non-MCP actors a real model.
+      </p>
+    </section>
+
+    <section id="client">
+      <h2>Driving the slot</h2>
+      <p>
+        Any MCP client that speaks stdio can drive the slot. The
+        snippet below uses the official Python MCP SDK directly; in
+        practice you would point Claude Code, Claude Desktop, or
+        Codex at the same command.
+      </p>
+<pre><code class="language-python"># client.py — drive a slot through ensemble's MCP server.
+import asyncio
+from mcp import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
+
+params = StdioServerParameters(
+    command="ensemble",
+    args=["mcp", "serve",
+          "--world", "plank",
+          "--scenario", "plank.refund_storm",
+          "--as-agent", "rep1"],
+)
+
+async def main():
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            print([t.name for t in tools.tools])
+            msg = await session.call_tool("inbox_recv", arguments={})
+            print(msg.content[0].text)
+
+asyncio.run(main())</code></pre>
+    </section>
+
+    <section id="trace">
+      <h2>What lands in the trace</h2>
+      <p>
+        [copy: a paragraph describing exactly which event payloads
+        the trace gains under MCP mode. The pieces to mention:
+        ToolCall + ToolResult under the slot's actor id, StateDiff
+        if the tool mutated state, AgentMessage events when the
+        client used agent_say, and System notes when the scheduler
+        halts. A short concrete example with three or four event
+        lines would help.]
+      </p>
+    </section>
+
+    <section id="caveats">
+      <h2>Caveats</h2>
+      <ul>
+        <li>
+          The server uses the official Python MCP SDK
+          (<code>mcp.server.lowlevel.Server</code>). The rust
+          <code>rmcp</code> crate is mature enough to host the server
+          itself; ensemble chose the Python path because plugin tools
+          are already Python callables and an rmcp host would
+          re-acquire the GIL on every dispatch. See the inline note
+          at <code>python/ensemble/mcp_server.py</code> for the
+          upgrade path.
+        </li>
+        <li>
+          Only stdio is supported today. SSE / streamable HTTP land
+          in a follow-up; the protocol shape is identical.
+        </li>
+        <li>
+          Per-tool timeouts and resource locks still apply to
+          MCP-dispatched calls (they go through the same
+          <code>ResourceManager</code> the agent loop uses).
+        </li>
+      </ul>
+    </section>
+
+    <footer class="site">
+      <a href="index.html">Overview</a>
+      &middot;
+      <a href="docs.html">Docs</a>
+      &middot;
+      <a href="scenarios.html">Scenarios</a>
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>

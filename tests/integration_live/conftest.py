@@ -22,8 +22,17 @@ def pytest_collection_modifyitems(config, items):
     skip = pytest.mark.skip(
         reason="set LIVE_API_TESTS=1 to run the live-API suite",
     )
+    # Only mark items in this conftest's directory; otherwise this
+    # hook would also skip the unit / mock-integration suite when
+    # pytest collects tests/ as a whole.
+    here = str(__import__("pathlib").Path(__file__).parent.resolve())
     for item in items:
-        item.add_marker(skip)
+        try:
+            path = str(item.path.resolve())
+        except AttributeError:
+            path = str(item.fspath)
+        if path.startswith(here):
+            item.add_marker(skip)
 
 
 @pytest.fixture

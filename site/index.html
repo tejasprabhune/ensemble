@@ -19,6 +19,7 @@
         <a href="scenarios.html">Scenarios</a>
         <a href="plank.html">Plank</a>
         <a href="personas.html">Personas</a>
+        <a href="mcp.html">MCP</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Docs sections</div>
@@ -67,12 +68,24 @@
 
     <section>
       <h2>Install</h2>
+      <p>
+        From a clone of the repo, two commands set up both the Python
+        package (with the ensemble extension built via maturin) and
+        the <code>ensemble</code> binary:
+      </p>
 <pre><code class="language-bash">uv sync
 cargo build -p ensemble-cli</code></pre>
       <p>
-        The <a href="docs.html">docs page</a> has the full quickstart, with a
-        walkthrough of how to write a world, a scenario, and a grader, and how
-        to use the framework as an RL environment.
+        Worlds are plugins now: each world ships its own Python
+        package, and you tell ensemble where to find it.
+      </p>
+<pre><code class="language-bash">./target/debug/ensemble worlds add plank examples/plank
+./target/debug/ensemble run plank.refund_storm --world plank</code></pre>
+      <p>
+        The <a href="docs.html">docs page</a> walks through writing a
+        new world from scratch. The <a href="mcp.html">MCP page</a>
+        covers running scenarios driven by an external MCP-aware
+        client.
       </p>
     </section>
 
@@ -116,7 +129,7 @@ cargo build -p ensemble-cli</code></pre>
     </section>
 
     <footer class="site">
-      Source on <a href="https://github.com/tejasprabhune">tejasprabhune</a>. Built in Rust and Python.
+      [copy: source link once the repo is public]. Built in Rust and Python.
     </footer>
   </main>
 

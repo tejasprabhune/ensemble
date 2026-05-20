@@ -19,6 +19,7 @@
         <a href="scenarios.html">Scenarios</a>
         <a href="plank.html" class="active">Plank</a>
         <a href="personas.html">Personas</a>
+        <a href="mcp.html">MCP</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Docs sections</div>
@@ -113,20 +114,31 @@ refunds       (id, user_id, amount_cents, reason, ts)</code></pre>
 
     <section>
       <h2>Run it</h2>
+      <p>
+        Plank is a plugin, so register it the first time you run
+        ensemble against it. After that, scenarios reach it via
+        <code>--world plank</code>:
+      </p>
 <pre><code class="language-bash">cargo build -p ensemble-cli
+./target/debug/ensemble worlds add plank examples/plank
 export ANTHROPIC_API_KEY=sk-ant-...
 ./target/debug/ensemble run plank.refund_storm --world plank
 ./target/debug/ensemble trace view traces/plank_refund_storm.jsonl \
   --site site --port 8765</code></pre>
       <p>
-        The Rust world lives at <code>examples/plank/world/src/</code>,
-        the scenarios at <code>examples/plank/scenarios/</code>, and the
-        persona TOML files at <code>examples/plank/personas/</code>.
+        The Rust world (state + tool implementations) lives at
+        <code>examples/plank/world/src/</code>, the plank python
+        extension at <code>examples/plank/python_ext/</code>, the
+        Python package and <code>register_world</code> call at
+        <code>examples/plank/plank/</code>, the scenarios at
+        <code>examples/plank/scenarios/</code>, the personas at
+        <code>examples/plank/personas/</code>, and the manifest at
+        <code>examples/plank/world.toml</code>.
       </p>
     </section>
 
     <footer class="site">
-      Source on <a href="https://github.com/tejasprabhune">tejasprabhune</a>. Built in Rust and Python.
+      [copy: source link once the repo is public]. Built in Rust and Python.
     </footer>
   </main>
 

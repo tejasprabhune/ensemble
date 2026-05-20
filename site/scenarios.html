@@ -19,6 +19,7 @@
         <a href="scenarios.html" class="active">Scenarios</a>
         <a href="plank.html">Plank</a>
         <a href="personas.html">Personas</a>
+        <a href="mcp.html">MCP</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Docs sections</div>
@@ -45,11 +46,25 @@
   <main>
     <h1>Scenarios</h1>
     <p class="lead">
-      A scenario assembles a set of actors, runs them in a shared world,
-      and grades the outcome. The same simulation can be expressed three
-      ways: the yield flavor for the common case, the
-      <code>async with</code> flavor for mid-simulation intervention, and
-      a TOML manifest for declarative matrices.
+      A scenario assembles a set of actors, runs them in a shared
+      world, and grades the outcome.
+    </p>
+    <p>
+      The same simulation can be expressed three ways. The yield
+      flavor is the common case: it reads top-to-bottom as set-up,
+      run, grade. The <code>async with</code> flavor exposes the
+      running scheduler so a scenario can change the world mid-run,
+      which matters for tests that want to simulate a sudden mood
+      shift or inject a perturbation after the agent commits to a
+      plan. The TOML manifest is the declarative form: it covers the
+      cases where the scenario is essentially data (a sweep, a
+      regression suite) and you would rather not write Python.
+    </p>
+    <p>
+      All three compile to the same Rust scheduler; the choice is
+      stylistic. Most scenarios start as the yield flavor and only
+      grow into <code>async with</code> when they need intervention,
+      or into TOML when they become a matrix.
     </p>
 
     <section>
@@ -65,7 +80,7 @@
 from ensemble import Until, World, scenario
 
 
-@scenario("refund_storm")
+@scenario("refund_storm", world="plank")
 async def refund_storm(world: World) -> AsyncIterator[Until | dict[str, float]]:
     alice = world.spawn_user(
         id="alice",
@@ -109,7 +124,7 @@ async def refund_storm(world: World) -> AsyncIterator[Until | dict[str, float]]:
 <pre><code class="language-python">from ensemble import World, scenario
 
 
-@scenario("enterprise_audit")
+@scenario("enterprise_audit", world="plank")
 async def enterprise_audit(world: World) -> dict[str, float]:
     carol = world.spawn_user(
         id="carol",

@@ -19,6 +19,7 @@
         <a href="scenarios.html">Scenarios</a>
         <a href="plank.html">Plank</a>
         <a href="personas.html">Personas</a>
+        <a href="mcp.html">MCP</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Docs sections</div>
@@ -116,17 +117,22 @@
         You need Rust 1.80 or later, Python 3.10 or later, and
         <a href="https://docs.astral.sh/uv/">uv</a>. Clone the repo and run:
       </p>
-<pre><code class="language-bash">uv sync                       # build the python extension, install the workspace
+<pre><code class="language-bash">uv sync                       # build the ensemble + plank extensions, install the workspace
 cargo build -p ensemble-cli   # produces ./target/debug/ensemble
 cargo test --workspace        # rust tests
 uv run pytest tests/          # python tests</code></pre>
       <p>
-        <code>uv sync</code> uses maturin to build the native extension that
-        backs the <code>ensemble</code> Python package. It also installs the
-        <code>plank</code> example and the <code>ensemble-train</code>
-        training pipeline as workspace members. Torch and the rest of the
-        training stack are gated behind an extra so the base install stays
-        small:
+        <code>uv sync</code> uses maturin to build two extensions: the
+        <code>ensemble._native</code> module that backs the Python
+        package, and a separate <code>plank._native</code> for the
+        example world. Plank is a plugin: nothing in the core
+        framework references it. Register it on first install so the
+        scenarios know how to find it:
+      </p>
+<pre><code class="language-bash">./target/debug/ensemble worlds add plank examples/plank</code></pre>
+      <p>
+        Torch and the rest of the training stack are gated behind an
+        extra so the base install stays small:
       </p>
 <pre><code class="language-bash">uv pip install 'ensemble-train[torch]'</code></pre>
       <p>
@@ -151,12 +157,13 @@ export OPENAI_API_KEY=sk-...</code></pre>
         <code>@scenario</code> decorator. The smallest interesting one looks
         like this:
       </p>
-<pre><code class="language-python">from collections.abc import AsyncIterator
+<pre><code class="language-python"># scenarios/hello.py
+from collections.abc import AsyncIterator
 
 from ensemble import Until, World, scenario
 
 
-@scenario("hello")
+@scenario("hello", world="noop")
 async def hello(world: World) -> AsyncIterator[Until | dict[str, float]]:
     alice = world.spawn_user(id="alice", model="claude-haiku-4-5")
     rep = world.spawn_agent(id="rep", model="claude-sonnet-4-5")
@@ -164,6 +171,13 @@ async def hello(world: World) -> AsyncIterator[Until | dict[str, float]]:
 
     yield world.until(world.turn_count &gt; 4)
     yield {"saw_reply": 1.0}</code></pre>
+      <p>
+        The <code>world="noop"</code> kwarg names which world this
+        scenario expects. The runner uses it as the default when
+        <code>--world</code> isn't supplied on the CLI; passing an
+        explicit world to the runner overrides the decorator's
+        choice, which is useful for cross-world testing.
+      </p>
       <p>
         Three things happen here. The scenario sets up the actors and seeds
         a message. It yields an until condition, which tells the scheduler
@@ -197,16 +211,34 @@ print(len(result.trace), "events")</code></pre>
       <p>Same thing from the command line:</p>
 <pre><code class="language-bash">./target/debug/ensemble run hello --world noop
 # writes ./traces/hello.jsonl</code></pre>
+      <p>
+        [copy: a paragraph that explains the &quot;async generator&quot;
+        flavor vs the regular &quot;async def&quot; flavor and when each
+        is appropriate. The yield-flavor is sugar for the common
+        case (seed actors, yield an until, yield a grader dict);
+        the async-with flavor exposes the running scheduler for
+        mid-run intervention. Forward-link to
+        <a href=&quot;scenarios.html&quot;>scenarios.html</a> for the long
+        form.]
+      </p>
     </section>
 
     <section id="first-world">
       <h2>Your first world</h2>
       <p>
-        Worlds are written in Rust because they own mutable state and need
-        to be fast enough to run hundreds of rollouts in parallel. Run
-        <code>ensemble init my_world</code> to get a working skeleton, then
-        open <code>my_world/world/src/lib.rs</code>. A world implements the
-        <code>WorldState</code> trait:
+        Worlds are plugins. Each world is a directory with three
+        things: a rust crate that owns the state and tool
+        implementations, a python package that ensemble imports to
+        register the world, and a <code>world.toml</code> manifest
+        that ties them together and declares default personas and
+        resources. The framework discovers a world by name through
+        <code>~/.ensemble/worlds.toml</code>; that registry is
+        managed with <code>ensemble worlds add &lt;name&gt; &lt;path&gt;</code>.
+      </p>
+      <p>
+        Run <code>ensemble init my_world</code> to get a working
+        skeleton, then open <code>my_world/world/src/lib.rs</code>. A
+        world implements the <code>WorldState</code> trait:
       </p>
 <pre><code class="language-rust">pub trait WorldState: Send + Sync + 'static {
     type ToolCall:   DeserializeOwned + Send;
@@ -292,6 +324,42 @@ impl WorldState for Counter {
         needed. They are also what let you run counterfactual rollouts from
         the same starting state during training.
       </p>
+      <p>
+        The world's python package wires the rust crate into the
+        plugin registry. A minimal one looks like:
+      </p>
+<pre><code class="language-python"># my_world/my_world/__init__.py
+from pathlib import Path
+from ensemble import PluginTool, register_world
+from . import _native   # built by maturin alongside ensemble._native
+
+def _setup():
+    db = _native.MyState()  # fresh per World instance
+    tools = [
+        PluginTool(
+            name="inc",
+            description="Increment the counter by `by`.",
+            parameters={
+                "type": "object",
+                "properties": {"by": {"type": "integer"}},
+                "required": ["by"],
+            },
+            fn=lambda args_json: db.dispatch("inc", args_json),
+        ),
+    ]
+    return tools, []
+
+register_world(
+    "my_world",
+    setup=_setup,
+    personas_dir=Path(__file__).parent.parent / "personas",
+)</code></pre>
+      <p>
+        [copy: a short paragraph explaining the setup factory
+        pattern, why it returns fresh tools per World instance, and
+        how the JSON-string ABI between python and the rust dispatch
+        keeps cross-extension calls cheap.]
+      </p>
     </section>
 
     <section id="tools">
@@ -344,6 +412,43 @@ tools.register(Tool::new(
         trace, and feeds the result back into the model on the next turn
         as a synthetic message. You do not write any of that glue
         yourself.
+      </p>
+
+      <h3>Progress, timeouts, resources, costs</h3>
+      <p>
+        Tools have four optional capabilities the runtime applies
+        without changing the closure's signature.
+      </p>
+      <p>
+        A long-running tool can report progress through a
+        <code>ProgressEmitter</code> parameter; the runtime buffers
+        the entries and flushes them to the trace as
+        <code>progress</code> events right before the trailing
+        <code>tool_result</code>. <code>Tool::with_timeout(Duration)</code>
+        caps a single dispatch; when it fires the trace gains a
+        <code>tool_timeout</code> event and the calling agent sees a
+        tool error (the scenario continues).
+        <code>Tool::with_resources(["billing_db"])</code> declares
+        named locks the runtime acquires before invoking the tool;
+        concurrent dispatches sharing a name serialize through the
+        world's <code>ResourceManager</code>.
+      </p>
+      <p>
+        A tool can also annotate its outcome with costs in any
+        open-string unit (<code>"usd"</code>, <code>"tokens_in"</code>,
+        <code>"gpu_seconds"</code>). After each dispatch the runtime
+        bumps the world's running total and emits a <code>cost</code>
+        event. Scenarios cap spend with <code>world.set_budget(unit, amount)</code>;
+        when a recorded cost would push the total past the cap the
+        scheduler halts with <code>StopReason::BudgetExceeded</code>
+        and the trailing system note records why.
+      </p>
+      <p>
+        [copy: a short paragraph or two with a concrete plank
+        example. Suggested: walk through
+        <code>slow_billing_check</code> (rust progress emitter +
+        python plugin glue), and the concurrent-refund test that
+        proves the billing_db lock serializes two refunds.]
       </p>
     </section>
 
@@ -412,7 +517,7 @@ adapter_name = "ensemble-plank-frustrated-power-user"</code></pre>
 from ensemble import Until, World, scenario
 
 
-@scenario("refund_storm")
+@scenario("refund_storm", world="plank")
 async def refund_storm(world: World) -> AsyncIterator[Until | dict[str, float]]:
     alice = world.spawn_user(
         id="alice",
@@ -540,7 +645,7 @@ for r in batch:
 <pre><code class="language-python">from ensemble import World, scenario
 
 
-@scenario("enterprise_audit")
+@scenario("enterprise_audit", world="plank")
 async def enterprise_audit(world: World) -> dict[str, float]:
     carol = world.spawn_user(
         id="carol",
@@ -613,7 +718,7 @@ no_double_refund = "not had_double_refund"</code></pre>
       <h2>The ensemble CLI</h2>
       <p>
         The <code>ensemble</code> binary is a thin wrapper around the
-        rest of the framework. Four subcommands cover the common
+        rest of the framework. The subcommands cover the common
         workflows.
       </p>
       <table>
@@ -622,12 +727,20 @@ no_double_refund = "not had_double_refund"</code></pre>
         </thead>
         <tbody>
           <tr>
-            <td><code>ensemble init &lt;name&gt;</code></td>
-            <td>Scaffolds a new world project. Creates a Rust crate with a <code>WorldState</code> stub, a Python scenario file, a persona TOML, and a <code>scenarios.toml</code> manifest.</td>
+            <td><code>ensemble worlds add &lt;name&gt; &lt;path&gt;</code></td>
+            <td>Registers a world (a directory with a <code>world.toml</code> manifest) under a short name. Stored at <code>~/.ensemble/worlds.toml</code>. Pair with <code>worlds list</code>, <code>worlds show &lt;name&gt;</code>, <code>worlds remove &lt;name&gt;</code>.</td>
           </tr>
           <tr>
-            <td><code>ensemble run &lt;scenario&gt;</code></td>
-            <td>Looks up the scenario in the registry, runs it against the named world, and writes the trace to <code>./traces/</code>.</td>
+            <td><code>ensemble init &lt;name&gt;</code></td>
+            <td>Scaffolds a new world project: rust crate skeleton, python package skeleton, a <code>world.toml</code>, a sample scenario, and a placeholder persona. Pass <code>--world &lt;existing&gt;</code> to scaffold just a scenarios directory bound to an already-registered world.</td>
+          </tr>
+          <tr>
+            <td><code>ensemble run &lt;scenario&gt; --world &lt;name&gt;</code></td>
+            <td>Resolves <code>&lt;name&gt;</code> through the worlds registry, imports the world's python package (which fires its <code>register_world</code> call), runs the scenario, and writes the trace to <code>./traces/</code>.</td>
+          </tr>
+          <tr>
+            <td><code>ensemble mcp serve --world &lt;name&gt; --scenario &lt;id&gt; --as-agent &lt;slot&gt;</code></td>
+            <td>Runs the named scenario with the named agent slot driven by an external MCP-aware client (Claude Code, Claude Desktop, etc.). See the <a href="mcp.html">MCP page</a>.</td>
           </tr>
           <tr>
             <td><code>ensemble trace view &lt;path&gt;</code></td>
