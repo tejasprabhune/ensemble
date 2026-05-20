@@ -17,6 +17,87 @@ from .persona import PersonaResolver, load_persona, register_personas_dir
 from .world import get_world
 
 
+def _log_grader_scores(world_obj: "World", scenario_name: str, scores: Dict[str, Any]) -> None:
+    """Append a structured note to the trace summarising the grader
+    output. Lets the trace stand on its own (the viewer and any
+    downstream consumer can read the final scores without consulting
+    a separate RunResult object) and gives the live trace writer a
+    final event to flush."""
+    try:
+        payload = {
+            "kind": "grader",
+            "scenario": scenario_name,
+            "scores": {str(k): float(v) for k, v in dict(scores).items()},
+        }
+    except (TypeError, ValueError):
+        payload = {"kind": "grader", "scenario": scenario_name, "scores": dict(scores)}
+    try:
+        world_obj._native.log_note("grader: " + json.dumps(payload))
+    except AttributeError:
+        pass
+
+
+def _make_sandbox_dispatcher(world_name: str, tool_name: str) -> Callable[[str], str]:
+    """Build a wrapper that dispatches a tool call to a fresh
+    subprocess. The subprocess imports the world's python package
+    (which re-registers tools), invokes the named tool with the
+    supplied JSON args, and writes the JSON response on stdout.
+
+    A failure to spawn or a non-zero exit is surfaced as a structured
+    error effect so the calling agent gets a normal tool-result rather
+    than the scheduler crashing.
+    """
+
+    import subprocess
+
+    def dispatcher(args_json: str) -> str:
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "ensemble.tool_worker",
+                 "--world", world_name, "--tool", tool_name],
+                input=args_json,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError as e:
+            return json.dumps({
+                "effect": {
+                    "ok": False,
+                    "tool": tool_name,
+                    "summary": f"sandbox worker not found: {e}",
+                }
+            })
+        if proc.returncode != 0:
+            stderr_tail = (proc.stderr or "").strip()[-1000:]
+            return json.dumps({
+                "effect": {
+                    "ok": False,
+                    "tool": tool_name,
+                    "summary": (
+                        f"sandbox worker exited {proc.returncode}.\n"
+                        f"{stderr_tail}"
+                    ),
+                }
+            })
+        # The worker's last stdout line is the JSON envelope; earlier
+        # lines (if any) are diagnostic. Splitting on the last
+        # newline lets a worker print progress as it runs.
+        stdout = (proc.stdout or "").strip()
+        if not stdout:
+            return json.dumps({
+                "effect": {
+                    "ok": False,
+                    "tool": tool_name,
+                    "summary": "sandbox worker produced no output",
+                }
+            })
+        last_line = stdout.splitlines()[-1]
+        return last_line
+
+    return dispatcher
+
+
 @dataclass
 class Until:
     """A halting condition. Holds a JSON-serializable spec the Rust
@@ -171,6 +252,7 @@ class World:
         base_url: Optional[str] = None,
         dotenv: bool | str = True,
         verbose: Optional[bool] = None,
+        trace_path: Optional[str] = None,
     ) -> None:
         if dotenv:
             path = ".env"
@@ -193,17 +275,23 @@ class World:
                 "World(\"noop\") for a bare world"
             )
         self._native = _NativeWorld(name, backend=backend, base_url=base_url)
+        if trace_path:
+            self._native.set_trace_path(str(trace_path))
         self.users: List[User] = []
         self.agents: List[Agent] = []
         # Apply python-registered tools and predicates for this world.
         if definition is not None:
             tools, predicates = definition.build()
             for t in tools:
+                fn = t.fn
+                if getattr(t, "sandbox", False):
+                    sandbox_world = t.sandbox_world or name
+                    fn = _make_sandbox_dispatcher(sandbox_world, t.name)
                 self._native.register_tool(
                     t.name,
                     t.description,
                     json.dumps(t.parameters),
-                    t.fn,
+                    fn,
                     t.timeout_ms,
                     t.resources,
                 )
@@ -263,6 +351,18 @@ class World:
     @property
     def turn_count(self) -> TurnCount:
         return TurnCount(self)
+
+    @property
+    def trace_path(self) -> Optional[str]:
+        """Path of the current live-trace sink, if any."""
+        return self._native.trace_path()
+
+    def set_trace_path(self, path: Optional[str]) -> None:
+        """Mirror every event to a JSONL file as it is appended.
+
+        Passing ``None`` detaches the sink. Attaching mid-run picks up
+        future events; previously-buffered ones are not replayed."""
+        self._native.set_trace_path(str(path) if path else None)
 
     def spawn_user(
         self,
@@ -385,20 +485,36 @@ class World:
     # bus; the scheduler halts with BudgetExceeded when a recorded
     # cost would push the running total past a configured cap.
 
-    def set_budget(self, unit: str, amount: float) -> None:
-        """Cap the world's spend for `unit`. Once a recorded cost would
-        push the running total past `amount` the scheduler halts."""
-        self._native.set_budget(unit, float(amount))
+    def set_budget(
+        self,
+        unit: str,
+        amount: float,
+        actor: Optional[str] = None,
+    ) -> None:
+        """Cap spend for ``unit``. Once a recorded cost would push the
+        running total past ``amount`` the scheduler halts.
 
-    def cost_total(self, unit: str) -> float:
-        """Running total for `unit` (0.0 if nothing has been recorded
-        yet)."""
-        return float(self._native.cost_total(unit))
+        When ``actor`` is supplied the cap is scoped to that actor's
+        own running total; a different actor's costs do not consume
+        the cap. Per-actor and world-wide caps coexist; each is
+        checked independently."""
+        self._native.set_budget(unit, float(amount), actor)
 
-    def record_cost(self, unit: str, amount: float) -> None:
-        """Manually annotate a cost (tests, external accounting).
-        Most costs come in through tool dispatch automatically."""
-        self._native.record_cost(unit, float(amount))
+    def cost_total(self, unit: str, actor: Optional[str] = None) -> float:
+        """Running total for ``unit``. World-wide unless ``actor`` is
+        supplied, in which case the actor's own total is returned."""
+        return float(self._native.cost_total(unit, actor))
+
+    def record_cost(
+        self,
+        unit: str,
+        amount: float,
+        actor: Optional[str] = None,
+    ) -> None:
+        """Manually annotate a cost (tests, external accounting). Tool
+        dispatch records costs against the calling actor automatically;
+        this helper is for manual or test paths."""
+        self._native.record_cost(unit, float(amount), actor)
 
 
 class SimulationRun:
@@ -458,12 +574,18 @@ def scenario(name: str, *, world: Optional[str] = None) -> Callable:
             world_name: Optional[str] = None,
             backend: Optional[str] = None,
             base_url: Optional[str] = None,
+            trace_path: Optional[str] = None,
         ) -> RunResult:
             # Caller-supplied world wins; otherwise fall back to the
             # decorator's declared world; otherwise "noop" so the
             # scaffold flow still works without a world plugin.
             resolved_world = world_name or world or "noop"
-            world_obj = World(resolved_world, backend=backend, base_url=base_url)
+            world_obj = World(
+                resolved_world,
+                backend=backend,
+                base_url=base_url,
+                trace_path=trace_path,
+            )
             if is_gen:
                 gen = func(world_obj)
                 try:
@@ -481,11 +603,16 @@ def scenario(name: str, *, world: Optional[str] = None) -> Callable:
                     scores = {}
                 if scores is None:
                     scores = {}
+                _log_grader_scores(world_obj, name, scores)
+                # Re-pull the trace so the grader note lands in the
+                # returned trace too; the live sink already wrote it.
+                trace = [json.loads(e) for e in world_obj._native.trace_events()]
                 return RunResult(name=name, scores=dict(scores), trace=trace)
             else:
                 # Regular async function: scenario author calls
                 # world.run(until) themselves and returns the grader dict.
                 scores = await func(world_obj)
+                _log_grader_scores(world_obj, name, scores or {})
                 trace = [json.loads(e) for e in world_obj._native.trace_events()]
                 return RunResult(
                     name=name, scores=dict(scores or {}), trace=trace
@@ -509,6 +636,7 @@ def run_scenario(
     world_name: Optional[str] = None,
     backend: Optional[str] = None,
     base_url: Optional[str] = None,
+    trace_path: Optional[str] = None,
 ) -> RunResult:
     """Synchronous helper: look up a scenario by name and run it.
     ``world_name`` overrides the world declared on the @scenario;
@@ -516,5 +644,10 @@ def run_scenario(
     if name not in _REGISTRY:
         raise KeyError(f"no scenario registered as {name!r}")
     return asyncio.run(
-        _REGISTRY[name](world_name, backend=backend, base_url=base_url)
+        _REGISTRY[name](
+            world_name,
+            backend=backend,
+            base_url=base_url,
+            trace_path=trace_path,
+        )
     )

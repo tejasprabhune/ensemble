@@ -144,16 +144,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 2
 
-    result = asyncio.run(
-        _REGISTRY[args.scenario](args.world, backend=args.backend)
-    )
-
     args.traces_dir.mkdir(parents=True, exist_ok=True)
     safe = args.scenario.replace("/", "_").replace(".", "_")
     trace_path = args.traces_dir / f"{safe}.jsonl"
-    with trace_path.open("w") as f:
-        for event in result.trace:
-            f.write(json.dumps(event) + "\n")
+
+    # Attach the live sink before the scenario runs so a watcher
+    # tailing the file sees events as they are appended. The final
+    # write_text below is a no-op idempotent rewrite; we keep it for
+    # callers that load the trace from RunResult.trace and assume the
+    # file matches exactly.
+    result = asyncio.run(
+        _REGISTRY[args.scenario](
+            args.world,
+            backend=args.backend,
+            trace_path=str(trace_path),
+        )
+    )
 
     print(
         json.dumps(

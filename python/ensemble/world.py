@@ -39,6 +39,20 @@ class PluginTool:
     fn: Callable[[str], str]
     timeout_ms: Optional[int] = None
     resources: Optional[List[str]] = None
+    # When True, the World wraps `fn` so each call runs in a fresh
+    # python subprocess. This is the sandbox path: a tool that
+    # imports torch and runs a user-supplied kernel cannot poison the
+    # scheduler if it segfaults or leaves the CUDA context in a bad
+    # state. The worker reimports the world's python package so the
+    # tool is rebuilt from scratch; any state the closure captured in
+    # the parent is *not* shared with the worker. Use sandbox=True
+    # only for tools whose work is fully encoded in their args.
+    sandbox: bool = False
+    # When sandbox=True, the world name the worker should import to
+    # re-register the tool. Required so the worker knows which
+    # plugin package to load. Filled in by `World.__init__` if left
+    # blank.
+    sandbox_world: Optional[str] = None
 
 
 @dataclass

@@ -10,7 +10,7 @@ use pyo3::types::PyList;
 
 use ensemble_core::actor::ActorHandle;
 use ensemble_core::bus::{Bus, Message, Recipient};
-use ensemble_core::event::{EventLog, EventPayload};
+use ensemble_core::event::{EventLog, EventPayload, TraceFile};
 use ensemble_core::ids::{ActorId, MessageId};
 use ensemble_core::predicate::{PredicateCtx, PredicateRegistry};
 use ensemble_core::scheduler::{Scheduler, StopReason, TickBudget};
@@ -464,6 +464,43 @@ impl World {
             .map_err(|e| PyRuntimeError::new_err(format!("trace serialize: {e}")))
     }
 
+    /// Mirror every event to a JSONL file as it is appended. Pass
+    /// `None` to detach an existing sink. Useful for watching a long
+    /// run in real time (`tail -f traces/foo.jsonl | jq`) and for
+    /// publishing intermediate state to a viewer that polls the file.
+    #[pyo3(signature = (path=None))]
+    fn set_trace_path(&self, path: Option<&str>) -> PyResult<()> {
+        let log = self.inner.lock().log.clone();
+        let runtime = global_runtime();
+        match path {
+            Some(p) => {
+                let p = p.to_string();
+                runtime
+                    .block_on(async move {
+                        let sink = TraceFile::create(&p).await?;
+                        log.set_sink(Some(sink)).await;
+                        Ok::<_, std::io::Error>(())
+                    })
+                    .map_err(|e| PyRuntimeError::new_err(format!("trace sink: {e}")))?;
+            }
+            None => {
+                runtime.block_on(async move {
+                    log.set_sink(None).await;
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Current trace sink path, if any.
+    fn trace_path(&self) -> PyResult<Option<String>> {
+        let log = self.inner.lock().log.clone();
+        let runtime = global_runtime();
+        Ok(runtime
+            .block_on(log.sink_path())
+            .map(|p| p.to_string_lossy().into_owned()))
+    }
+
     /// Start the scheduler in the background on the global tokio
     /// runtime. Returns immediately. The caller is expected to drive
     /// it via `wait_for_until` and stop it via `stop_scheduler`.
@@ -607,22 +644,45 @@ impl World {
 
     /// Declare a budget cap for `unit`. When a recorded cost would
     /// push the running total past `amount` the scheduler halts with
-    /// StopReason::BudgetExceeded.
-    fn set_budget(&self, py: Python<'_>, unit: &str, amount: f64) {
+    /// StopReason::BudgetExceeded. When `actor` is supplied the cap
+    /// is scoped to that actor's own running total; otherwise it is
+    /// a world-wide cap.
+    #[pyo3(signature = (unit, amount, actor=None))]
+    fn set_budget(
+        &self,
+        py: Python<'_>,
+        unit: &str,
+        amount: f64,
+        actor: Option<&str>,
+    ) {
         let bus = self.inner.lock().bus.clone();
         let unit = unit.to_string();
+        let actor = actor.map(ActorId::from_label);
         py.allow_threads(|| {
-            global_runtime().block_on(async move { bus.set_budget(unit, amount).await })
+            global_runtime().block_on(async move {
+                match actor {
+                    Some(a) => bus.set_actor_budget(a, unit, amount).await,
+                    None => bus.set_budget(unit, amount).await,
+                }
+            })
         });
     }
 
-    /// Read the running total for `unit` (0.0 if nothing has been
-    /// recorded for it yet).
-    fn cost_total(&self, py: Python<'_>, unit: &str) -> f64 {
+    /// Read the running total for `unit`. When `actor` is supplied,
+    /// returns the actor's own running total; otherwise the
+    /// world-wide total. 0.0 if nothing has been recorded yet.
+    #[pyo3(signature = (unit, actor=None))]
+    fn cost_total(&self, py: Python<'_>, unit: &str, actor: Option<&str>) -> f64 {
         let bus = self.inner.lock().bus.clone();
         let unit = unit.to_string();
+        let actor = actor.map(ActorId::from_label);
         py.allow_threads(|| {
-            global_runtime().block_on(async move { bus.cost_total(&unit).await })
+            global_runtime().block_on(async move {
+                match actor {
+                    Some(a) => bus.actor_cost_total(&a, &unit).await,
+                    None => bus.cost_total(&unit).await,
+                }
+            })
         })
     }
 
@@ -630,11 +690,20 @@ impl World {
     /// backend-side reporting from python). Emits a `Cost` event,
     /// bumps the running total, and halts the scheduler if a budget
     /// is now exceeded.
-    fn record_cost(&self, py: Python<'_>, unit: &str, amount: f64) -> PyResult<()> {
+    #[pyo3(signature = (unit, amount, actor=None))]
+    fn record_cost(
+        &self,
+        py: Python<'_>,
+        unit: &str,
+        amount: f64,
+        actor: Option<&str>,
+    ) -> PyResult<()> {
         let bus = self.inner.lock().bus.clone();
         let unit = unit.to_string();
+        let actor = actor.map(ActorId::from_label);
         py.allow_threads(|| {
-            global_runtime().block_on(async move { bus.record_cost(unit, amount).await })
+            global_runtime()
+                .block_on(async move { bus.record_cost(unit, amount, actor).await })
         });
         Ok(())
     }
@@ -815,7 +884,7 @@ impl World {
                             .await;
                         }
                         for (unit, amount) in costs {
-                            bus.record_cost(unit, amount).await;
+                            bus.record_cost(unit, amount, Some(actor.clone())).await;
                         }
                     }
                     Err(e) => {
@@ -1105,7 +1174,7 @@ impl User {
                         .await;
                     }
                     for (unit, amount) in costs {
-                        bus.record_cost(unit, amount).await;
+                        bus.record_cost(unit, amount, Some(actor.clone())).await;
                     }
                 }
                 Err(e) => {
