@@ -40,6 +40,33 @@ pub enum EventPayload {
     StateDiff {
         diff: serde_json::Value,
     },
+    /// Progress signal emitted by a long-running tool. `fraction` is a
+    /// 0.0..=1.0 estimate of completion; `message` is short
+    /// human-readable text. Flushed to the log after the tool dispatch
+    /// returns (or after a timeout fires) in the MVP; a later revision
+    /// can stream them live.
+    Progress {
+        id: String,
+        tool: String,
+        fraction: f32,
+        message: String,
+    },
+    /// Emitted when a tool's run exceeded its declared timeout. The
+    /// scenario continues; the calling agent sees a tool error.
+    ToolTimeout {
+        id: String,
+        name: String,
+        after_ms: u64,
+    },
+    /// A cost annotation flushed to the trace after the tool that
+    /// produced it (or by an LLM backend wrapping a completion call).
+    /// `running_total` is the world's running total for this unit
+    /// after this annotation was applied.
+    Cost {
+        unit: String,
+        amount: f64,
+        running_total: f64,
+    },
     System {
         note: String,
     },

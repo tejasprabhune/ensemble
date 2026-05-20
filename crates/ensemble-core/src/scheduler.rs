@@ -40,6 +40,12 @@ pub struct TickBudget {
     pub max_ticks: u64,
     pub max_events: usize,
     pub quiescence_ms: u64,
+    /// How long to keep running after the until predicate first
+    /// fires, so in-flight actor steps can emit their follow-up
+    /// events (a tool_call's matching tool_result, etc.). The
+    /// scheduler halts as soon as the bus goes quiet for this long
+    /// once it has entered the draining state.
+    pub drain_grace_ms: u64,
 }
 
 impl Default for TickBudget {
@@ -48,6 +54,7 @@ impl Default for TickBudget {
             max_ticks: 200,
             max_events: 4000,
             quiescence_ms: 500,
+            drain_grace_ms: 300,
         }
     }
 }
@@ -109,9 +116,11 @@ impl Scheduler {
         let watcher_log = log.clone();
         let watcher_until = until.clone();
         let watcher = tokio::spawn(async move {
+            // Track when the until predicate first fired so we can
+            // give in-flight steps a small grace window to finish
+            // (e.g. emit the trailing tool_result for a tool_call).
+            let mut drain_label: Option<String> = None;
             loop {
-                // Check once before blocking so any messages already in
-                // the log are considered before we wait for new ones.
                 let cur = watcher_log.len().await as u64;
                 watcher_bus.set_tick(cur).await;
                 if cur >= budget.max_ticks {
@@ -128,30 +137,38 @@ impl Scheduler {
                         cap: BudgetCap::Events,
                     });
                 }
-                let label = {
-                    let guard = watcher_until.lock().await;
-                    let ctx = UntilCtx {
-                        tick: cur,
-                        log: &watcher_log,
-                        events_seen: cur as usize,
+                if drain_label.is_none() {
+                    let label = {
+                        let guard = watcher_until.lock().await;
+                        let ctx = UntilCtx {
+                            tick: cur,
+                            log: &watcher_log,
+                            events_seen: cur as usize,
+                        };
+                        match guard.as_ref() {
+                            Some(u) if u.check(&ctx) => Some(u.label.clone()),
+                            _ => None,
+                        }
                     };
-                    match guard.as_ref() {
-                        Some(u) if u.check(&ctx) => Some(u.label.clone()),
-                        _ => None,
+                    if let Some(label) = label {
+                        drain_label = Some(label);
                     }
-                };
-                if let Some(label) = label {
-                    return Ok(StopReason::UntilFired { label });
                 }
                 let wait = notifier.notified();
                 tokio::pin!(wait);
-                let timeout = tokio::time::sleep(std::time::Duration::from_millis(
-                    budget.quiescence_ms,
-                ));
+                let sleep_ms = if drain_label.is_some() {
+                    budget.drain_grace_ms
+                } else {
+                    budget.quiescence_ms
+                };
+                let timeout = tokio::time::sleep(std::time::Duration::from_millis(sleep_ms));
                 tokio::pin!(timeout);
                 tokio::select! {
                     _ = &mut wait => continue,
                     _ = &mut timeout => {
+                        if let Some(label) = drain_label {
+                            return Ok(StopReason::UntilFired { label });
+                        }
                         return Ok(StopReason::Quiescent);
                     }
                 }

@@ -16,9 +16,9 @@ use ensemble_core::predicate::{PredicateCtx, PredicateRegistry};
 use ensemble_core::scheduler::{Scheduler, StopReason, TickBudget};
 use ensemble_core::until::{turn_count_exceeds, Until, UntilCtx};
 use ensemble_runtime::{
-    AgentActor, AnthropicBackend, HiddenState, LocalAdapterBackend, MockBackend, MockScript,
-    MockTurn, OpenAIBackend, PromptedPersona, SharedBackend, Tool, ToolOutcome, ToolRegistry,
-    UserActor,
+    resources::ResourceManager, AgentActor, AnthropicBackend, HiddenState, LocalAdapterBackend,
+    MockBackend, MockScript, MockTurn, OpenAIBackend, PromptedPersona, SharedBackend, Tool,
+    ToolOutcome, ToolRegistry, UserActor,
 };
 use ensemble_core::error::ToolError;
 
@@ -55,6 +55,7 @@ pub(crate) struct WorldInner {
     pub(crate) script: MockScript,
     pub(crate) tools: Arc<ToolRegistry>,
     pub(crate) predicates: Arc<PredicateRegistry>,
+    pub(crate) resources: Arc<ResourceManager>,
     pub(crate) actors: Vec<ActorSpec>,
     pub(crate) seed_messages: Vec<(ActorId, ActorId, Message)>,
     pub(crate) budget: TickBudget,
@@ -220,9 +221,16 @@ impl World {
         // other than mock so the watcher does not abort an in-flight
         // HTTP call.
         let mut budget = TickBudget::default();
+        // dispatch_async spawns the (sync) tool closure on the tokio
+        // blocking pool and calls back into python under the GIL. The
+        // round trip easily exceeds the 500ms default quiescence
+        // window even with the mock backend, so bump it to 2s for
+        // mock and to 60s for any real-network backend.
+        budget.quiescence_ms = 2_000;
         if !matches!(kind, BackendKind::Mock) {
             budget.quiescence_ms = 60_000;
         }
+        let resources = Arc::new(ensemble_runtime::resources::shared(&name));
         Ok(Self {
             inner: Arc::new(Mutex::new(WorldInner {
                 name,
@@ -233,6 +241,7 @@ impl World {
                 script,
                 tools: Arc::new(bundle.tools),
                 predicates: Arc::new(bundle.predicates),
+                resources,
                 actors: vec![],
                 seed_messages: vec![],
                 budget,
@@ -696,12 +705,17 @@ impl World {
     ) -> PyResult<String> {
         let args: serde_json::Value = serde_json::from_str(args_json)
             .map_err(|e| PyValueError::new_err(format!("bad args json: {e}")))?;
-        let (bus, tools) = {
+        let (bus, tools, resources) = {
             let inner = self.inner.lock();
-            (inner.bus.clone(), inner.tools.clone())
+            (
+                inner.bus.clone(),
+                inner.tools.clone(),
+                inner.resources.clone(),
+            )
         };
         let actor = ActorId::from_label(agent_id);
         let call_id = MessageId::new().to_string();
+        let tool_owned = tool_name.to_string();
         let runtime = global_runtime();
         let outcome_json = py.allow_threads(move || {
             runtime.block_on(async move {
@@ -709,14 +723,39 @@ impl World {
                     Some(actor.clone()),
                     EventPayload::ToolCall {
                         id: call_id.clone(),
-                        name: tool_name.into(),
+                        name: tool_owned.clone(),
                         args: args.clone(),
                     },
                 )
                 .await;
-                let result = tools.dispatch(tool_name, &args);
+                let dispatch = tools
+                    .dispatch_async(&tool_owned, &args, Some(&resources))
+                    .await;
+                for entry in dispatch.progress {
+                    bus.append_event(
+                        Some(actor.clone()),
+                        EventPayload::Progress {
+                            id: call_id.clone(),
+                            tool: tool_owned.clone(),
+                            fraction: entry.fraction,
+                            message: entry.message,
+                        },
+                    )
+                    .await;
+                }
+                if let Some(after) = dispatch.timed_out_after {
+                    bus.append_event(
+                        Some(actor.clone()),
+                        EventPayload::ToolTimeout {
+                            id: call_id.clone(),
+                            name: tool_owned.clone(),
+                            after_ms: after.as_millis() as u64,
+                        },
+                    )
+                    .await;
+                }
                 let mut body = serde_json::Map::new();
-                match result {
+                match dispatch.outcome {
                     Ok(outcome) => {
                         body.insert("effect".into(), outcome.effect.clone());
                         if let Some(diff) = outcome.diff.clone() {
@@ -726,7 +765,7 @@ impl World {
                             Some(actor.clone()),
                             EventPayload::ToolResult {
                                 id: call_id.clone(),
-                                name: tool_name.into(),
+                                name: tool_owned.clone(),
                                 result: outcome.effect,
                                 is_error: false,
                             },
@@ -749,7 +788,7 @@ impl World {
                             Some(actor),
                             EventPayload::ToolResult {
                                 id: call_id,
-                                name: tool_name.into(),
+                                name: tool_owned,
                                 result: err_json,
                                 is_error: true,
                             },
@@ -779,7 +818,8 @@ impl World {
             .map_err(|e| PyValueError::new_err(format!("bad parameters json: {e}")))?;
         let tools = self.inner.lock().tools.clone();
         let tool_name = name.to_string();
-        let wrapper = move |args: &serde_json::Value| -> Result<ToolOutcome, ToolError> {
+        let wrapper = move |args: &serde_json::Value, _emitter: &ensemble_runtime::ProgressEmitter|
+            -> Result<ToolOutcome, ToolError> {
             let args_str = serde_json::to_string(args)
                 .map_err(|e| ToolError::Execution(format!("serialize args: {e}")))?;
             Python::with_gil(|py| {
@@ -809,6 +849,8 @@ impl World {
                 description: description.to_string(),
                 parameters,
             },
+            timeout: None,
+            resources: Vec::new(),
             run: Arc::new(wrapper),
         });
         Ok(())
@@ -920,33 +962,66 @@ impl User {
     /// model decided), so the dispatch goes straight through the
     /// world's ToolRegistry rather than waiting for an LLM round trip.
     /// State mutations land in the world before the scheduler starts.
-    fn act_json(&self, tool: &str, args_json: &str) -> PyResult<()> {
+    fn act_json(&self, py: Python<'_>, tool: &str, args_json: &str) -> PyResult<()> {
         let args: serde_json::Value = serde_json::from_str(args_json)
             .map_err(|e| PyValueError::new_err(format!("bad json: {e}")))?;
         let call_id = MessageId::new().to_string();
-        let (bus, tools) = {
+        let (bus, tools, resources) = {
             let inner = self.world.lock();
-            (inner.bus.clone(), inner.tools.clone())
+            (
+                inner.bus.clone(),
+                inner.tools.clone(),
+                inner.resources.clone(),
+            )
         };
         let actor = ActorId::from_label(&self.id);
+        let tool_owned = tool.to_string();
         let runtime = global_runtime();
-        runtime.block_on(async {
+        // Plugin tools call back into Python under the GIL; the
+        // spawn_blocking path inside dispatch_async will deadlock if
+        // we hold the GIL through block_on. Release it for the
+        // duration of the dispatch.
+        py.allow_threads(|| runtime.block_on(async move {
             bus.append_event(
                 Some(actor.clone()),
                 EventPayload::ToolCall {
                     id: call_id.clone(),
-                    name: tool.into(),
+                    name: tool_owned.clone(),
                     args: args.clone(),
                 },
             )
             .await;
-            match tools.dispatch(tool, &args) {
+            let dispatch = tools.dispatch_async(&tool_owned, &args, Some(&resources)).await;
+            for entry in dispatch.progress {
+                bus.append_event(
+                    Some(actor.clone()),
+                    EventPayload::Progress {
+                        id: call_id.clone(),
+                        tool: tool_owned.clone(),
+                        fraction: entry.fraction,
+                        message: entry.message,
+                    },
+                )
+                .await;
+            }
+            if let Some(after) = dispatch.timed_out_after {
+                bus.append_event(
+                    Some(actor.clone()),
+                    EventPayload::ToolTimeout {
+                        id: call_id.clone(),
+                        name: tool_owned.clone(),
+                        after_ms: after.as_millis() as u64,
+                    },
+                )
+                .await;
+            }
+            match dispatch.outcome {
                 Ok(outcome) => {
                     bus.append_event(
                         Some(actor.clone()),
                         EventPayload::ToolResult {
                             id: call_id,
-                            name: tool.into(),
+                            name: tool_owned,
                             result: outcome.effect,
                             is_error: false,
                         },
@@ -966,7 +1041,7 @@ impl User {
                         Some(actor),
                         EventPayload::ToolResult {
                             id: call_id,
-                            name: tool.into(),
+                            name: tool_owned,
                             result: err_json,
                             is_error: true,
                         },
@@ -974,7 +1049,7 @@ impl User {
                     .await;
                 }
             }
-        });
+        }));
         Ok(())
     }
 }

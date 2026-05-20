@@ -100,12 +100,15 @@ impl Actor for UserActor {
 
 /// An LLM-driven agent that can issue tool calls. Tool calls are
 /// dispatched through the registry; the resulting JSON effect is fed
-/// back to the model on the next turn.
+/// back to the model on the next turn. Dispatches go through the
+/// async path so the tool's declared timeout and resource locks
+/// apply.
 pub struct AgentActor {
     pub id: ActorId,
     pub model: String,
     pub backend: SharedBackend,
     pub tools: Arc<ToolRegistry>,
+    pub resources: Option<Arc<crate::resources::ResourceManager>>,
     pub system_prompt: Option<String>,
     history: Mutex<Vec<ChatMessage>>,
 }
@@ -122,6 +125,7 @@ impl AgentActor {
             model: model.into(),
             backend,
             tools,
+            resources: None,
             system_prompt: None,
             history: Mutex::new(Vec::new()),
         }
@@ -129,6 +133,14 @@ impl AgentActor {
 
     pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(prompt.into());
+        self
+    }
+
+    pub fn with_resources(
+        mut self,
+        resources: Arc<crate::resources::ResourceManager>,
+    ) -> Self {
+        self.resources = Some(resources);
         self
     }
 }
@@ -206,7 +218,37 @@ impl Actor for AgentActor {
                     },
                 )
                 .await;
-                match self.tools.dispatch(&call.name, &call.args) {
+                let dispatch = self
+                    .tools
+                    .dispatch_async(&call.name, &call.args, self.resources.as_deref())
+                    .await;
+                // Flush any progress entries the tool emitted before
+                // the outcome (so the trace renders progress, then
+                // result).
+                for entry in dispatch.progress {
+                    bus.append_event(
+                        Some(self.id.clone()),
+                        EventPayload::Progress {
+                            id: call_id.clone(),
+                            tool: call.name.clone(),
+                            fraction: entry.fraction,
+                            message: entry.message,
+                        },
+                    )
+                    .await;
+                }
+                if let Some(after) = dispatch.timed_out_after {
+                    bus.append_event(
+                        Some(self.id.clone()),
+                        EventPayload::ToolTimeout {
+                            id: call_id.clone(),
+                            name: call.name.clone(),
+                            after_ms: after.as_millis() as u64,
+                        },
+                    )
+                    .await;
+                }
+                match dispatch.outcome {
                     Ok(outcome) => {
                         self.history.lock().push(ChatMessage::tool(format!(
                             "tool {} -> {}",

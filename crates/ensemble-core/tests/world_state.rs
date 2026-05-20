@@ -178,7 +178,7 @@ async fn scheduler_halts_gracefully_on_budget_exhaustion() {
 
     let scheduler = Scheduler::new(
         bus.clone(),
-        TickBudget { max_ticks: 4, max_events: 1000, quiescence_ms: 50 },
+        TickBudget { max_ticks: 4, max_events: 1000, quiescence_ms: 50, drain_grace_ms: 50 },
     );
     let stop = scheduler.run().await.unwrap();
     match stop {

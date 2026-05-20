@@ -52,7 +52,7 @@ async fn agent_uses_tool_via_mock_backend() {
 
     let mut scheduler = Scheduler::new(
         bus.clone(),
-        TickBudget { max_ticks: 40, max_events: 80, quiescence_ms: 200 },
+        TickBudget { max_ticks: 40, max_events: 80, quiescence_ms: 200, drain_grace_ms: 100 },
     );
     scheduler.register(Arc::new(ensemble_core::actor::ActorHandle::new(user, user_inbox)));
     scheduler.register(Arc::new(ensemble_core::actor::ActorHandle::new(agent, agent_inbox)));

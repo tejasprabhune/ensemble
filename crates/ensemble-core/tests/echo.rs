@@ -61,7 +61,7 @@ async fn ping_pong_runs_until_budget_or_predicate() {
 
     let mut scheduler = Scheduler::new(
         bus.clone(),
-        TickBudget { max_ticks: 20, max_events: 200, quiescence_ms: 500 },
+        TickBudget { max_ticks: 20, max_events: 200, quiescence_ms: 500, drain_grace_ms: 200 },
     );
     scheduler.register(register(&bus, ping.clone(), pong.clone()).await);
     scheduler.register(register(&bus, pong.clone(), ping.clone()).await);

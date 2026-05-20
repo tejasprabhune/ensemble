@@ -5,6 +5,7 @@ pub mod actors;
 pub mod backend;
 pub mod backends;
 pub mod persona;
+pub mod resources;
 pub mod tools;
 
 pub use backend::{
@@ -18,4 +19,7 @@ pub use backends::openai::OpenAIBackend;
 pub use backends::vllm::LocalAdapterBackend;
 pub use actors::{AgentActor, UserActor};
 pub use persona::{HiddenState, PromptedPersona};
-pub use tools::{Tool, ToolOutcome, ToolRegistry};
+pub use resources::{ResourceKind, ResourceManager};
+pub use tools::{
+    DispatchResult, ProgressEmitter, ProgressEntry, Tool, ToolOutcome, ToolRegistry,
+};
