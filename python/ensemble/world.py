@@ -129,14 +129,22 @@ def tool(
 ) -> PluginTool:
     """Wrap a python function as a PluginTool.
 
-    The wrapped function may either:
+    The wrapped function may return:
 
-    * accept a single ``args`` dict and return a dict or a
-      ``(effect, diff)`` tuple;
-    * accept keyword arguments and return the same.
+    * a dict, which is sent as the tool effect;
+    * a ``(effect, diff)`` tuple, which records a world state diff
+      alongside the effect; or
+    * a ``ToolReturn`` dict-like with optional ``effect``, ``diff``,
+      ``costs``, and ``progress`` keys. The last form is what tools
+      need when they want to annotate cost (gpu_seconds, usd, tokens)
+      or emit progress entries for long-running work.
 
-    Effects and diffs are passed through json.dumps.
+    Either ``fn(**args)`` or ``fn(args)`` is tried, in that order. The
+    return is JSON-serialized for the native side; cost and progress
+    are forwarded into the runtime's cost/progress streams.
     """
+
+    _META_KEYS = {"effect", "diff", "costs", "progress"}
 
     def wrapped(args_json: str) -> str:
         args = json.loads(args_json) if args_json else {}
@@ -145,10 +153,27 @@ def tool(
         except TypeError:
             # Fallback: function wants the args dict as a single arg.
             out = fn(args)
+
+        body: Dict[str, Any] = {}
         if isinstance(out, tuple) and len(out) == 2:
             effect, diff = out
-            return json.dumps({"effect": effect, "diff": diff})
-        return json.dumps({"effect": out})
+            body["effect"] = effect
+            if diff is not None:
+                body["diff"] = diff
+        elif isinstance(out, dict) and _META_KEYS & set(out.keys()):
+            # Tool returned the structured envelope. Pass through any
+            # of the four known keys; reject unknown ones to keep the
+            # contract honest.
+            if "effect" in out:
+                body["effect"] = out["effect"]
+            else:
+                body["effect"] = {k: v for k, v in out.items() if k not in _META_KEYS} or None
+            for key in ("diff", "costs", "progress"):
+                if key in out and out[key] is not None:
+                    body[key] = out[key]
+        else:
+            body["effect"] = out
+        return json.dumps(body)
 
     return PluginTool(name=name, description=description, parameters=parameters, fn=wrapped)
 
