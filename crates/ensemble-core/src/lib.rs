@@ -19,7 +19,7 @@ pub mod prelude {
     pub use crate::event::{Event, EventLog, EventPayload, Tick};
     pub use crate::ids::{ActorId, MessageId, RunId};
     pub use crate::scenario::{RunResult, Scenario, Scores};
-    pub use crate::scheduler::{Scheduler, TickBudget};
+    pub use crate::scheduler::{BudgetCap, Scheduler, StopReason, TickBudget};
     pub use crate::until::{all_of, any_of, turn_count_exceeds, Until};
     pub use crate::world::{World, WorldHandle, WorldState};
 }

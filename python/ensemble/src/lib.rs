@@ -10,7 +10,7 @@ use ensemble_core::actor::ActorHandle;
 use ensemble_core::bus::{Bus, Message, Recipient};
 use ensemble_core::event::{EventLog, EventPayload};
 use ensemble_core::ids::ActorId;
-use ensemble_core::scheduler::{Scheduler, TickBudget};
+use ensemble_core::scheduler::{Scheduler, StopReason, TickBudget};
 use ensemble_core::until::{turn_count_exceeds, Until, UntilCtx};
 use ensemble_runtime::{
     AgentActor, AnthropicBackend, LocalAdapterBackend, MockBackend, MockScript, MockTurn,
@@ -46,7 +46,8 @@ pub(crate) struct WorldInner {
     pub(crate) actors: Vec<ActorSpec>,
     pub(crate) seed_messages: Vec<(ActorId, ActorId, Message)>,
     pub(crate) budget: TickBudget,
-    pub(crate) bg_task: Option<tokio::task::JoinHandle<Result<(), ensemble_core::error::CoreError>>>,
+    pub(crate) bg_task:
+        Option<tokio::task::JoinHandle<Result<StopReason, ensemble_core::error::CoreError>>>,
     pub(crate) registered_inboxes: Vec<ActorId>,
 }
 
@@ -312,7 +313,7 @@ impl World {
                     bus.send(from, Recipient::Actor(to), msg).await.ok();
                 }
             }
-            scheduler.run().await
+            scheduler.run().await.map(|_stop| ())
         })
         .map_err(|e| PyRuntimeError::new_err(format!("scheduler error: {e}")))
     }

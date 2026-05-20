@@ -10,10 +10,31 @@ use crate::event::{now_ms, Event, EventPayload};
 use crate::ids::ActorId;
 use crate::until::{Until, UntilCtx};
 
+/// Why the scheduler stopped. All four are normal terminations; real
+/// failures (bus closed, actor crashed) come back as `Err(CoreError)`
+/// from `run`.
+#[derive(Clone, Debug)]
+pub enum StopReason {
+    /// The until predicate returned true.
+    UntilFired { label: String },
+    /// No new events for `quiescence_ms`.
+    Quiescent,
+    /// Exhausted `max_ticks` or `max_events`. The cap that fired is
+    /// reported so callers can tell the difference.
+    BudgetExhausted { ticks: u64, events: usize, cap: BudgetCap },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BudgetCap {
+    Ticks,
+    Events,
+}
+
 /// Limits scheduler work to prevent runaway loops. Counts ticks (one
 /// per bus event), total events processed, and a quiescence timeout
-/// for when no new events arrive. Hitting `max_ticks` or `max_events`
-/// halts with `TickBudgetExhausted`; quiescence halts cleanly.
+/// for when no new events arrive. Hitting any cap halts gracefully:
+/// the scheduler appends a `System` event explaining which cap fired
+/// and returns `Ok(StopReason::BudgetExhausted)`.
 #[derive(Clone, Copy, Debug)]
 pub struct TickBudget {
     pub max_ticks: u64,
@@ -60,11 +81,12 @@ impl Scheduler {
         *self.until.lock().await = Some(until);
     }
 
-    /// Runs the scheduler until the `until` predicate fires or the
-    /// tick budget is exhausted. Each actor runs in its own tokio
-    /// task draining its inbox; a watcher task wakes on each new bus
-    /// event and re-checks the `until` predicate.
-    pub async fn run(self) -> Result<(), CoreError> {
+    /// Runs the scheduler until the `until` predicate fires, the
+    /// budget is exhausted, or no new events arrive for the quiescence
+    /// window. Each actor runs in its own tokio task draining its
+    /// inbox; a watcher task wakes on each new bus event and re-checks
+    /// the predicate and budget.
+    pub async fn run(self) -> Result<StopReason, CoreError> {
         let Scheduler {
             bus,
             actors,
@@ -92,20 +114,34 @@ impl Scheduler {
                 // the log are considered before we wait for new ones.
                 let cur = watcher_log.len().await as u64;
                 watcher_bus.set_tick(cur).await;
-                if cur >= budget.max_ticks || cur as usize >= budget.max_events {
-                    return Err(CoreError::TickBudgetExhausted);
+                if cur >= budget.max_ticks {
+                    return Ok::<_, CoreError>(StopReason::BudgetExhausted {
+                        ticks: cur,
+                        events: cur as usize,
+                        cap: BudgetCap::Ticks,
+                    });
                 }
-                let ctx = UntilCtx {
-                    tick: cur,
-                    log: &watcher_log,
-                    events_seen: cur as usize,
-                };
-                let stop = {
+                if cur as usize >= budget.max_events {
+                    return Ok(StopReason::BudgetExhausted {
+                        ticks: cur,
+                        events: cur as usize,
+                        cap: BudgetCap::Events,
+                    });
+                }
+                let label = {
                     let guard = watcher_until.lock().await;
-                    guard.as_ref().map(|u| u.check(&ctx)).unwrap_or(false)
+                    let ctx = UntilCtx {
+                        tick: cur,
+                        log: &watcher_log,
+                        events_seen: cur as usize,
+                    };
+                    match guard.as_ref() {
+                        Some(u) if u.check(&ctx) => Some(u.label.clone()),
+                        _ => None,
+                    }
                 };
-                if stop {
-                    return Ok::<_, CoreError>(StopReason::UntilFired);
+                if let Some(label) = label {
+                    return Ok(StopReason::UntilFired { label });
                 }
                 let wait = notifier.notified();
                 tokio::pin!(wait);
@@ -128,9 +164,18 @@ impl Scheduler {
 
         tasks.shutdown().await;
 
-        let note = match outcome {
-            StopReason::UntilFired => "until predicate fired; halting",
-            StopReason::Quiescent => "scheduler quiescent; halting",
+        let note = match &outcome {
+            StopReason::UntilFired { label } => {
+                format!("until predicate fired ({label}); halting")
+            }
+            StopReason::Quiescent => "scheduler quiescent; halting".into(),
+            StopReason::BudgetExhausted { ticks, events, cap } => format!(
+                "tick budget exhausted at {ticks} ticks / {events} events (cap: {}); halting",
+                match cap {
+                    BudgetCap::Ticks => "max_ticks",
+                    BudgetCap::Events => "max_events",
+                }
+            ),
         };
         let tick = bus.current_tick().await;
         log.append(Event {
@@ -138,17 +183,12 @@ impl Scheduler {
             ts_ms: now_ms(),
             actor: None,
             message_id: None,
-            payload: EventPayload::System { note: note.into() },
+            payload: EventPayload::System { note },
         })
         .await;
 
-        Ok(())
+        Ok(outcome)
     }
-}
-
-enum StopReason {
-    UntilFired,
-    Quiescent,
 }
 
 async fn actor_loop(

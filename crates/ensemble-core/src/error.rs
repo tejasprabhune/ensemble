@@ -4,8 +4,6 @@ use thiserror::Error;
 pub enum CoreError {
     #[error("scheduler exited: {0}")]
     SchedulerExit(String),
-    #[error("tick budget exhausted")]
-    TickBudgetExhausted,
     #[error("actor not found: {0}")]
     ActorNotFound(String),
     #[error("bus closed")]
