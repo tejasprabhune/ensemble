@@ -167,6 +167,7 @@
       html.push(`</div>`);
     }
     els.messages.innerHTML = html.join('');
+    applySyntaxHighlight(els.messages);
   }
 
   function renderTools(slice) {
@@ -184,6 +185,7 @@
     }
     if (html.length === 1) html.push(`<div class="who">no tool activity yet</div>`);
     els.tools.innerHTML = html.join('');
+    applySyntaxHighlight(els.tools);
   }
 
   // Args may include long strings (kernel source, transcripts).
@@ -297,6 +299,7 @@
       html.push('<div class="chat-note">no events yet</div>');
     }
     els.chatFeed.innerHTML = html.join('');
+    applySyntaxHighlight(els.chatFeed);
     els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
   }
 
@@ -314,7 +317,8 @@
   // blocks, single-backtick inline code, and newline preservation. We
   // deliberately avoid a full markdown parser so the viewer stays
   // dependency-free and so a malformed message does not break the
-  // page layout.
+  // page layout. Code blocks emit `language-<lang>` classes so
+  // highlight.js (loaded in viewer.html) can syntax-highlight them.
   function renderMarkdown(text) {
     if (text == null) return '';
     const parts = [];
@@ -324,12 +328,31 @@
     while ((m = re.exec(text)) !== null) {
       const before = text.slice(last, m.index);
       parts.push(renderInline(before));
-      const lang = m[1] ? ` data-lang="${escape(m[1])}"` : '';
-      parts.push(`<pre${lang}><code>${escape(m[2])}</code></pre>`);
+      const lang = m[1] || '';
+      const langAttr = lang ? ` data-lang="${escape(lang)}"` : '';
+      const codeClass = lang ? ` class="language-${escape(lang)}"` : '';
+      parts.push(`<pre${langAttr}><code${codeClass}>${escape(m[2])}</code></pre>`);
       last = re.lastIndex;
     }
     parts.push(renderInline(text.slice(last)));
     return parts.join('');
+  }
+
+  // Run highlight.js across every <pre><code> the viewer has added to
+  // the page. Idempotent: hljs.highlightElement skips elements it has
+  // already processed. Wrapped in a feature-check so the viewer stays
+  // functional when highlight.js is offline or the CDN is blocked.
+  function applySyntaxHighlight(root) {
+    if (typeof window === 'undefined') return;
+    const hljs = window.hljs;
+    if (!hljs || typeof hljs.highlightElement !== 'function') return;
+    const scope = root || document;
+    const blocks = scope.querySelectorAll('pre > code');
+    for (const el of blocks) {
+      try {
+        hljs.highlightElement(el);
+      } catch (_) { /* leave block untouched */ }
+    }
   }
 
   function renderInline(text) {

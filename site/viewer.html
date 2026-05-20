@@ -6,6 +6,15 @@
   <title>ensemble trace</title>
   <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
   <link rel="stylesheet" href="style.css">
+  <!--
+    Syntax highlighting for fenced code blocks in trace events. The
+    library loads before viewer.js so the first render is already
+    highlighted; applySyntaxHighlight short-circuits if the load
+    failed, so an offline run still renders the code unhighlighted.
+  -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cuda.min.js"></script>
 </head>
 <body style="display: block; max-width: none;">
   <main class="wide" style="margin: 0 auto; padding: 32px 36px 64px; max-width: min(1800px, 96vw);">
