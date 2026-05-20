@@ -84,12 +84,13 @@ pub(crate) struct ActorSpec {
     #[allow(dead_code)]
     pub(crate) hidden_goal: Option<String>,
     pub(crate) model: Option<String>,
-    // TODO: filter the world's ToolRegistry by this list before
-    // handing it to the AgentActor. Today every agent sees every
-    // registered tool, which is fine for the worked example but not
-    // for adversarial scenarios with restricted-capability agents.
-    #[allow(dead_code)]
-    pub(crate) tools: Vec<String>,
+    /// Names of tools this agent can call. `None` means unrestricted
+    /// (the agent sees every tool the world registered);
+    /// `Some(names)` filters both the schemas the model sees and the
+    /// dispatcher's accept-list. `Some(empty)` is the bare-NPC case:
+    /// the agent has no tools, and any hallucinated call lands as an
+    /// is_error tool result in the trace.
+    pub(crate) tools: Option<Vec<String>>,
     pub(crate) system_prompt: Option<String>,
     /// Shared HiddenState handle. Populated when the python layer
     /// resolved a persona TOML and computed initial hidden state. The
@@ -300,7 +301,7 @@ impl World {
             persona: persona.map(str::to_string),
             hidden_goal: hidden_goal.map(str::to_string),
             model: Some(model.into()),
-            tools: vec![],
+            tools: None,
             system_prompt: system_prompt.map(str::to_string),
             hidden: hidden.clone(),
             external_inbox: None,
@@ -322,12 +323,13 @@ impl World {
         system_prompt: Option<&str>,
     ) -> PyResult<Agent> {
         let actor_id = ActorId::from_label(id.unwrap_or("agent"));
-        let tool_names: Vec<String> = match tools {
-            Some(list) => list
-                .iter()
-                .map(|item| item.extract::<String>())
-                .collect::<PyResult<_>>()?,
-            None => vec![],
+        let tool_names: Option<Vec<String>> = match tools {
+            Some(list) => Some(
+                list.iter()
+                    .map(|item| item.extract::<String>())
+                    .collect::<PyResult<_>>()?,
+            ),
+            None => None,
         };
         let spec = ActorSpec {
             id: actor_id.clone(),
@@ -719,12 +721,13 @@ impl World {
         tools: Option<&Bound<'_, PyList>>,
     ) -> PyResult<()> {
         let actor_id = ActorId::from_label(id);
-        let tool_names: Vec<String> = match tools {
-            Some(list) => list
-                .iter()
-                .map(|item| item.extract::<String>())
-                .collect::<PyResult<_>>()?,
-            None => vec![],
+        let tool_names: Option<Vec<String>> = match tools {
+            Some(list) => Some(
+                list.iter()
+                    .map(|item| item.extract::<String>())
+                    .collect::<PyResult<_>>()?,
+            ),
+            None => None,
         };
         let inbox = ExternalAgentInbox::new();
         {
@@ -1255,6 +1258,9 @@ fn build_actor(
             let mut a = AgentActor::new(spec.id, model, backend_for_actor, tools);
             if let Some(sp) = spec.system_prompt {
                 a = a.with_system_prompt(sp);
+            }
+            if let Some(allowed) = spec.tools {
+                a = a.with_allowed_tools(allowed);
             }
             Arc::new(a)
         }

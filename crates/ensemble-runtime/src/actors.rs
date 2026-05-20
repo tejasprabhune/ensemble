@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use ensemble_core::actor::{Actor, ActorKind};
@@ -110,6 +111,11 @@ pub struct AgentActor {
     pub tools: Arc<ToolRegistry>,
     pub resources: Option<Arc<crate::resources::ResourceManager>>,
     pub system_prompt: Option<String>,
+    /// Names of tools this agent is allowed to call. `None` means
+    /// every tool registered on the world is in scope; `Some(set)`
+    /// restricts both the schemas advertised to the model and the
+    /// dispatcher's accept-list.
+    allowed_tools: Option<HashSet<String>>,
     history: Mutex<Vec<ChatMessage>>,
 }
 
@@ -127,6 +133,7 @@ impl AgentActor {
             tools,
             resources: None,
             system_prompt: None,
+            allowed_tools: None,
             history: Mutex::new(Vec::new()),
         }
     }
@@ -142,6 +149,29 @@ impl AgentActor {
     ) -> Self {
         self.resources = Some(resources);
         self
+    }
+
+    /// Restrict this agent to a named subset of the world's tools. An
+    /// empty list means "no tools" and is honoured as such; pass
+    /// `None` (or skip this builder) to keep the unrestricted default.
+    pub fn with_allowed_tools(mut self, names: impl IntoIterator<Item = String>) -> Self {
+        self.allowed_tools = Some(names.into_iter().collect());
+        self
+    }
+
+    fn allowed_schemas(&self) -> Vec<crate::backend::ToolSchema> {
+        let all = self.tools.schemas();
+        match &self.allowed_tools {
+            None => all,
+            Some(allow) => all.into_iter().filter(|s| allow.contains(&s.name)).collect(),
+        }
+    }
+
+    fn is_allowed(&self, name: &str) -> bool {
+        match &self.allowed_tools {
+            None => true,
+            Some(allow) => allow.contains(name),
+        }
     }
 }
 
@@ -174,7 +204,7 @@ impl Actor for AgentActor {
                 model: self.model.clone(),
                 system: self.system_prompt.clone(),
                 messages,
-                tools: self.tools.schemas(),
+                tools: self.allowed_schemas(),
                 ..Default::default()
             };
             let resp = match self.backend.complete(req).await {
@@ -218,6 +248,30 @@ impl Actor for AgentActor {
                     },
                 )
                 .await;
+                if !self.is_allowed(&call.name) {
+                    let err_json = serde_json::json!({
+                        "ok": false,
+                        "error": format!(
+                            "tool {} is not in this agent's allowed set",
+                            call.name
+                        ),
+                    });
+                    self.history.lock().push(ChatMessage::tool(format!(
+                        "tool {} blocked: not allowed for this agent",
+                        call.name
+                    )));
+                    bus.append_event(
+                        Some(self.id.clone()),
+                        EventPayload::ToolResult {
+                            id: call_id,
+                            name: call.name,
+                            result: err_json,
+                            is_error: true,
+                        },
+                    )
+                    .await;
+                    continue;
+                }
                 let dispatch = self
                     .tools
                     .dispatch_async(&call.name, &call.args, self.resources.as_deref())
