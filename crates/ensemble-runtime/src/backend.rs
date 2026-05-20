@@ -46,6 +46,28 @@ pub struct CompletionResponse {
     pub text: String,
     pub tool_calls: Vec<ProposedToolCall>,
     pub stop_reason: Option<String>,
+    /// Token (and optionally USD) usage for the completion call. Each
+    /// shipped backend parses the provider's usage block when one is
+    /// present; the runtime records `tokens_in`, `tokens_out`, and
+    /// `usd` (when a pricing entry resolves) as cost annotations
+    /// against the calling actor.
+    #[serde(default)]
+    pub usage: Option<Usage>,
+}
+
+/// Per-completion usage. Backends populate this from the provider's
+/// response so the runtime can attribute cost to the actor that
+/// issued the call. `usd` is filled in when the model is in
+/// `crates/ensemble-runtime/pricing.toml`; otherwise it stays `None`
+/// and the runtime records token totals only.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Usage {
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+    #[serde(default)]
+    pub usd: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

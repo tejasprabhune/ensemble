@@ -11,8 +11,34 @@ use ensemble_core::event::EventPayload;
 use ensemble_core::ids::ActorId;
 use ensemble_core::ids::MessageId;
 
-use crate::backend::{ChatMessage, CompletionRequest, SharedBackend};
+use crate::backend::{ChatMessage, CompletionRequest, CompletionResponse, SharedBackend};
 use crate::tools::ToolRegistry;
+
+/// Forward the usage block from a completion response into the bus's
+/// cost ledger so the trace attributes tokens (and USD, when the
+/// model is in the pricing table) to the actor that issued the
+/// call. Backends that omit usage (the mock backend, or a real
+/// backend whose API response lacks the block) record nothing.
+async fn record_completion_cost(
+    bus: &Bus,
+    actor: &ActorId,
+    response: &CompletionResponse,
+) {
+    let Some(usage) = response.usage.as_ref() else {
+        return;
+    };
+    if usage.input_tokens > 0 {
+        bus.record_cost("tokens_in", usage.input_tokens as f64, Some(actor.clone()))
+            .await;
+    }
+    if usage.output_tokens > 0 {
+        bus.record_cost("tokens_out", usage.output_tokens as f64, Some(actor.clone()))
+            .await;
+    }
+    if let Some(usd) = usage.usd {
+        bus.record_cost("usd", usd, Some(actor.clone())).await;
+    }
+}
 
 /// A simulated end-user driven by an LLM. Receives agent messages,
 /// asks the backend for a reply, and posts that reply on the bus
@@ -86,6 +112,7 @@ impl Actor for UserActor {
                 return Ok(());
             }
         };
+        record_completion_cost(bus, &self.id, &resp).await;
         self.history.lock().push(ChatMessage::assistant(resp.text.clone()));
         if !resp.text.is_empty() {
             bus.send(
@@ -220,6 +247,7 @@ impl Actor for AgentActor {
                     return Ok(());
                 }
             };
+            record_completion_cost(bus, &self.id, &resp).await;
 
             if !resp.text.is_empty() {
                 self.history

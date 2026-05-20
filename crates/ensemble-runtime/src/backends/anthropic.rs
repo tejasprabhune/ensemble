@@ -3,8 +3,9 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use crate::backend::{
-    BackendError, CompletionRequest, CompletionResponse, LLMBackend, ProposedToolCall,
+    BackendError, CompletionRequest, CompletionResponse, LLMBackend, ProposedToolCall, Usage,
 };
+use crate::pricing::{usd_for, Provider};
 
 /// Minimal Anthropic Messages API client. Tool use is supported via the
 /// official `tools` and `tool_use` content blocks. Streaming is off; v0
@@ -42,6 +43,16 @@ impl AnthropicBackend {
 struct AnthropicResponse {
     content: Vec<AnthropicBlock>,
     stop_reason: Option<String>,
+    #[serde(default)]
+    usage: Option<AnthropicUsage>,
+}
+
+#[derive(Deserialize)]
+struct AnthropicUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
 }
 
 #[derive(Deserialize)]
@@ -111,10 +122,25 @@ impl LLMBackend for AnthropicBackend {
             }
         }
 
+        let usage = parsed.usage.map(|u| {
+            let usd = usd_for(
+                Provider::Anthropic,
+                &request.model,
+                u.input_tokens,
+                u.output_tokens,
+            );
+            Usage {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+                usd,
+            }
+        });
+
         Ok(CompletionResponse {
             text,
             tool_calls,
             stop_reason: parsed.stop_reason,
+            usage,
         })
     }
 }

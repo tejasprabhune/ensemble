@@ -3,8 +3,9 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use crate::backend::{
-    BackendError, CompletionRequest, CompletionResponse, LLMBackend, ProposedToolCall,
+    BackendError, CompletionRequest, CompletionResponse, LLMBackend, ProposedToolCall, Usage,
 };
+use crate::pricing::{usd_for, Provider};
 
 /// OpenAI Chat Completions client with function calling. No streaming.
 pub struct OpenAIBackend {
@@ -37,6 +38,16 @@ impl OpenAIBackend {
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<Choice>,
+    #[serde(default)]
+    usage: Option<OpenAIUsage>,
+}
+
+#[derive(Deserialize)]
+struct OpenAIUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
 }
 
 #[derive(Deserialize)]
@@ -129,6 +140,19 @@ impl LLMBackend for OpenAIBackend {
             .await
             .map_err(|e| BackendError::Malformed(e.to_string()))?;
 
+        let usage = parsed.usage.as_ref().map(|u| {
+            let usd = usd_for(
+                Provider::OpenAI,
+                &request.model,
+                u.prompt_tokens,
+                u.completion_tokens,
+            );
+            Usage {
+                input_tokens: u.prompt_tokens,
+                output_tokens: u.completion_tokens,
+                usd,
+            }
+        });
         let Some(choice) = parsed.choices.into_iter().next() else {
             return Err(BackendError::Malformed("no choices returned".into()));
         };
@@ -151,6 +175,7 @@ impl LLMBackend for OpenAIBackend {
             text,
             tool_calls,
             stop_reason: choice.finish_reason,
+            usage,
         })
     }
 }

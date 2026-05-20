@@ -5,12 +5,13 @@ pub mod actors;
 pub mod backend;
 pub mod backends;
 pub mod persona;
+pub mod pricing;
 pub mod resources;
 pub mod tools;
 
 pub use backend::{
     BackendError, ChatMessage, CompletionRequest, CompletionResponse, LLMBackend, ProposedToolCall,
-    SharedBackend, ToolSchema,
+    SharedBackend, ToolSchema, Usage,
 };
 pub use backends::anthropic::AnthropicBackend;
 #[cfg(feature = "mock")]

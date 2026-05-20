@@ -48,3 +48,16 @@ async def test_anthropic_runs_a_lookup(have_anthropic):
         and tc["payload"]["args"].get("user_id") == "u-alice"
         for tc in tool_calls
     ), f"expected lookup_user(u-alice), got {tool_calls}"
+
+    cost_events = [
+        e for e in result.trace if e["payload"]["kind"] == "cost"
+    ]
+    tokens_in = [c for c in cost_events if c["payload"]["unit"] == "tokens_in"]
+    tokens_out = [c for c in cost_events if c["payload"]["unit"] == "tokens_out"]
+    assert tokens_in, "Anthropic backend should record at least one tokens_in cost"
+    assert tokens_out, "Anthropic backend should record at least one tokens_out cost"
+    assert all(c["payload"]["amount"] > 0 for c in tokens_in)
+    assert all(c["payload"]["amount"] > 0 for c in tokens_out)
+    usd = [c for c in cost_events if c["payload"]["unit"] == "usd"]
+    assert usd, f"expected usd cost from pricing table for model {CHEAP_MODEL!r}"
+    assert all(c["payload"]["amount"] > 0 for c in usd)
