@@ -52,10 +52,12 @@ pub struct Envelope {
 
 #[derive(Clone, Debug)]
 pub enum Recipient {
-    /// Direct point-to-point delivery to a single actor.
+    /// Direct point-to-point delivery to a single actor. The enum
+    /// wrapper is retained (rather than collapsing to a bare
+    /// `ActorId`) so message routing can grow further variants
+    /// later (group ids, role-based targets) without a churning
+    /// every call site.
     Actor(ActorId),
-    /// Broadcast: every actor except the sender receives a copy.
-    Broadcast,
 }
 
 #[derive(Clone)]
@@ -287,22 +289,12 @@ impl Bus {
                 payload: payload_for(&message),
             })
             .await;
-        let send_result: Result<(), CoreError> = match to {
-            Recipient::Actor(target) => {
-                if let Some(tx) = inner.inboxes.get(&target) {
-                    tx.send(envelope).await.map_err(|_| CoreError::BusClosed)
-                } else {
-                    Err(CoreError::ActorNotFound(target.to_string()))
-                }
-            }
-            Recipient::Broadcast => {
-                for (id, tx) in inner.inboxes.iter() {
-                    if id == &from {
-                        continue;
-                    }
-                    let _ = tx.send(envelope.clone()).await;
-                }
-                Ok(())
+        let send_result: Result<(), CoreError> = {
+            let Recipient::Actor(target) = to;
+            if let Some(tx) = inner.inboxes.get(&target) {
+                tx.send(envelope).await.map_err(|_| CoreError::BusClosed)
+            } else {
+                Err(CoreError::ActorNotFound(target.to_string()))
             }
         };
         drop(inner);

@@ -156,7 +156,7 @@ async fn snapshot_and_restore_round_trip() {
 
 #[tokio::test]
 async fn scheduler_halts_gracefully_on_budget_exhaustion() {
-    use ensemble_core::bus::{Bus, Message, Recipient};
+    use ensemble_core::bus::{Bus, Message};
     use ensemble_core::scheduler::{BudgetCap, Scheduler, StopReason, TickBudget};
 
     // A bare bus with no actors. We seed enough events directly to
@@ -174,7 +174,6 @@ async fn scheduler_halts_gracefully_on_budget_exhaustion() {
         .await;
     }
     let _ = Message::AgentMessage { text: "n/a".into() };
-    let _ = Recipient::Broadcast;
 
     let scheduler = Scheduler::new(
         bus.clone(),
