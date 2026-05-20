@@ -162,5 +162,13 @@ reconcile_tool = tool(
 <p>The cost is process startup per dispatch (tens to hundreds of milliseconds), so sandbox mode pays off only when isolation is worth more than the latency: tools that run untrusted code, tools that leave CUDA contexts in a bad state, tools that import a binary library that occasionally segfaults. State the parent&#x27;s closures held is not shared with the worker, so a sandboxed tool must encode its entire input in its JSON args and its entire output in its JSON return; anything that needs parent-process state stays in-process.</p>
 <p><code>sandbox_world</code> is the world name the worker imports to re-register the tool. The wrapper fills it in automatically at <code>World(name)</code> construction time, so authors rarely set it themselves.</p>
   </main>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/rust.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script>hljs.highlightAll();</script>
 </body>
 </html>

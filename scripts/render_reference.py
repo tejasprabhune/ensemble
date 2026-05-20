@@ -276,6 +276,15 @@ def render_sidebar(active_slug: str, sections: List[Section]) -> str:
   </aside>"""
 
 
+HLJS_SCRIPTS = """  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/rust.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script>hljs.highlightAll();</script>"""
+
+
 def wrap(slug: str, title: str, body_html: str, sections: List[Section]) -> str:
     sidebar = render_sidebar(slug, sections)
     return f"""<!doctype html>
@@ -293,6 +302,8 @@ def wrap(slug: str, title: str, body_html: str, sections: List[Section]) -> str:
   <main>
 {body_html}
   </main>
+
+{HLJS_SCRIPTS}
 </body>
 </html>
 """

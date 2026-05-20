@@ -188,5 +188,13 @@ for line in std::io::BufRead::lines(reader) {
 <p>The state-changes panel reads <code>state_diff</code> events when present and falls back to summarising <code>tool_result</code> payloads otherwise. Seeded events are styled with a muted left border so they stay visually distinct from runtime decisions.</p>
 <p>The chat view renders code blocks (fenced triple-backtick), inline backticks, and bare newlines from the markdown subset the viewer ships. Tool calls and results show as inline annotations in the conversation; <code>[cost]</code>, <code>[progress]</code>, and <code>[state]</code> notes appear as muted lines so an extended run stays readable.</p>
   </main>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/rust.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script>hljs.highlightAll();</script>
 </body>
 </html>
