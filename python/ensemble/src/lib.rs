@@ -78,6 +78,13 @@ pub(crate) struct ActorSpec {
     /// is_error tool result in the trace.
     pub(crate) tools: Option<Vec<String>>,
     pub(crate) system_prompt: Option<String>,
+    /// Per-actor LLM knobs. Forwarded into the agent's
+    /// CompletionRequest as `extra_params`; the runtime passes them
+    /// through to the backend without interpretation, so a scenario
+    /// that wants `reasoning_effort=high` or `top_p=0.9` on a single
+    /// agent does not need a typed field in the runtime for every
+    /// backend's options.
+    pub(crate) extra_params: std::collections::HashMap<String, serde_json::Value>,
     /// Shared HiddenState handle. Populated when the python layer
     /// resolved a persona TOML and computed initial hidden state. The
     /// same Arc is given to the spawned `User` pyclass so post-run
@@ -303,6 +310,7 @@ impl World {
             model: Some(model.into()),
             tools: None,
             system_prompt: system_prompt.map(str::to_string),
+            extra_params: Default::default(),
             hidden: hidden.clone(),
             external_inbox: None,
             backend_override: backend_override.clone(),
@@ -316,13 +324,14 @@ impl World {
         })
     }
 
-    #[pyo3(signature = (id=None, model="claude-sonnet-4-5", tools=None, system_prompt=None))]
+    #[pyo3(signature = (id=None, model="claude-sonnet-4-5", tools=None, system_prompt=None, params_json=None))]
     fn spawn_agent(
         &self,
         id: Option<&str>,
         model: &str,
         tools: Option<&Bound<'_, PyList>>,
         system_prompt: Option<&str>,
+        params_json: Option<&str>,
     ) -> PyResult<Agent> {
         let actor_id = ActorId::from_label(id.unwrap_or("agent"));
         let tool_names: Option<Vec<String>> = match tools {
@@ -333,6 +342,18 @@ impl World {
             ),
             None => None,
         };
+        let extra_params: std::collections::HashMap<String, serde_json::Value> = match params_json {
+            Some(s) if !s.is_empty() => {
+                let v: serde_json::Value = serde_json::from_str(s)
+                    .map_err(|e| PyValueError::new_err(format!("params_json: {e}")))?;
+                match v {
+                    serde_json::Value::Object(map) => map.into_iter().collect(),
+                    serde_json::Value::Null => Default::default(),
+                    _ => return Err(PyValueError::new_err("params_json must encode a JSON object")),
+                }
+            }
+            _ => Default::default(),
+        };
         let spec = ActorSpec {
             id: actor_id.clone(),
             kind: SpecKind::Agent,
@@ -341,6 +362,7 @@ impl World {
             model: Some(model.into()),
             tools: tool_names,
             system_prompt: system_prompt.map(str::to_string),
+            extra_params,
             hidden: None,
             external_inbox: None,
             backend_override: None,
@@ -395,7 +417,7 @@ impl World {
         let spec: serde_json::Value = serde_json::from_str(until_spec_json)
             .map_err(|e| PyValueError::new_err(format!("bad until spec: {e}")))?;
         let until = build_until(&spec)?;
-        let (bus, actor_handles, seed_messages, budget) = {
+        let (bus, actor_handles, seed_messages, budget, predicates) = {
             let mut inner = self.inner.lock();
             if inner.actors.is_empty() && !inner.registered_inboxes.is_empty() {
                 return Err(PyRuntimeError::new_err(
@@ -408,6 +430,7 @@ impl World {
             let tools = inner.tools.clone();
             let bus = inner.bus.clone();
             let budget = inner.budget;
+            let predicates = inner.predicates.clone();
             let mut handles: Vec<(ActorId, Arc<dyn ensemble_core::actor::Actor>)> = Vec::new();
             for spec in inner.actors.drain(..) {
                 let actor = build_actor(spec, backend.clone(), tools.clone());
@@ -415,7 +438,39 @@ impl World {
             }
             inner.registered_inboxes = handles.iter().map(|(id, _)| id.clone()).collect();
             let seed = inner.seed_messages.drain(..).collect::<Vec<_>>();
-            (bus, handles, seed, budget)
+            // Loud no-inbox guard. The single biggest "scheduler
+            // quiesced; halting" trap is a scenario that spawns an
+            // agent without ever calling .say() or spawning a user
+            // who does. The scheduler then runs for one quiescence
+            // window with nothing to deliver and exits with an empty
+            // trace. Log a structured note so the trace viewer (and
+            // anyone reading the JSONL) can see the cause; the run
+            // still proceeds in case the scenario is intentionally
+            // empty.
+            if seed.is_empty() {
+                let agents_only = handles
+                    .iter()
+                    .all(|(_, a)| matches!(a.kind(), ensemble_core::actor::ActorKind::Agent));
+                if agents_only && !handles.is_empty() {
+                    let bus_for_warn = bus.clone();
+                    global_runtime().block_on(bus_for_warn.append_event(
+                        None,
+                        ensemble_core::event::EventPayload::System {
+                            note: "ensemble: no seed messages queued and only agents are \
+                                   registered; the scheduler will quiesce on the first \
+                                   tick. Spawn a User and call .say(...), or call \
+                                   agent.say(...) to kick off the conversation."
+                                .into(),
+                        },
+                    ));
+                    eprintln!(
+                        "ensemble: no seed messages queued and only agents are registered. \
+                         The scheduler will quiesce on the first tick. Spawn a User and call \
+                         .say(...), or call agent.say(...) to kick off the conversation."
+                    );
+                }
+            }
+            (bus, handles, seed, budget, predicates)
         };
 
         let runtime = global_runtime();
@@ -425,7 +480,8 @@ impl World {
         py.allow_threads(|| {
             runtime
                 .block_on(async move {
-                    let mut scheduler = Scheduler::new(bus.clone(), budget);
+                    let mut scheduler = Scheduler::new(bus.clone(), budget)
+                        .with_predicates(predicates.clone());
                     for (id, actor) in actor_handles {
                         let inbox = bus.register(id).await;
                         scheduler.register(Arc::new(ActorHandle::new(actor, inbox)));
@@ -510,7 +566,7 @@ impl World {
     /// runtime. Returns immediately. The caller is expected to drive
     /// it via `wait_for_until` and stop it via `stop_scheduler`.
     fn start_scheduler(&self) -> PyResult<()> {
-        let (bus, actor_handles, seed_messages, mut budget) = {
+        let (bus, actor_handles, seed_messages, mut budget, predicates) = {
             let mut inner = self.inner.lock();
             if inner.bg_task.is_some() {
                 return Err(PyRuntimeError::new_err("scheduler already started"));
@@ -518,13 +574,14 @@ impl World {
             let backend = inner.backend.clone();
             let tools = inner.tools.clone();
             let bus = inner.bus.clone();
+            let predicates = inner.predicates.clone();
             let mut handles: Vec<(ActorId, Arc<dyn ensemble_core::actor::Actor>)> = Vec::new();
             for spec in inner.actors.drain(..) {
                 let actor = build_actor(spec, backend.clone(), tools.clone());
                 handles.push(actor);
             }
             let seed = inner.seed_messages.drain(..).collect::<Vec<_>>();
-            (bus, handles, seed, inner.budget)
+            (bus, handles, seed, inner.budget, predicates)
         };
         // Loosen the budget: the python harness is in charge of when
         // to stop. Still keep quiescence so a stalled run halts.
@@ -535,7 +592,7 @@ impl World {
         let runtime = global_runtime();
         let mut registered = Vec::new();
         let _enter = runtime.enter();
-        let mut scheduler = Scheduler::new(bus.clone(), budget);
+        let mut scheduler = Scheduler::new(bus.clone(), budget).with_predicates(predicates);
         for (id, actor) in actor_handles {
             let inbox = runtime.block_on(bus.register(id.clone()));
             registered.push(id.clone());
@@ -569,6 +626,7 @@ impl World {
         let until = build_until(&spec)?;
         let bus = self.inner.lock().bus.clone();
         let log = self.inner.lock().log.clone();
+        let predicates = self.inner.lock().predicates.clone();
         let runtime = global_runtime();
         let notifier = bus.notifier();
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
@@ -577,7 +635,15 @@ impl World {
             runtime.block_on(async move {
                 loop {
                     let cur = log.len().await as u64;
-                    let ctx = UntilCtx { tick: cur, log: &log, events_seen: cur as usize };
+                    let snapshot = log.snapshot().await;
+                    let preds = Some(&predicates);
+                    let ctx = UntilCtx {
+                        tick: cur,
+                        log: &log,
+                        events_seen: cur as usize,
+                        trace: Some(snapshot.as_slice()),
+                        predicates: preds,
+                    };
                     if until.check(&ctx) {
                         return true;
                     }
@@ -771,6 +837,7 @@ impl World {
                 model: None,
                 tools: tool_names,
                 system_prompt: None,
+                extra_params: Default::default(),
                 hidden: None,
                 external_inbox: Some(inbox),
                 backend_override: None,
@@ -1451,6 +1518,9 @@ fn build_actor(
             if let Some(allowed) = spec.tools {
                 a = a.with_allowed_tools(allowed);
             }
+            if !spec.extra_params.is_empty() {
+                a = a.with_extra_params(spec.extra_params);
+            }
             Arc::new(a)
         }
         SpecKind::External => {
@@ -1537,7 +1607,16 @@ fn global_runtime() -> &'static tokio::runtime::Runtime {
 }
 
 /// Parse an `until` spec dict into a Rust `Until` closure. Recognised
-/// kinds: `turn_count_gt`, `turn_count_ge`, `any_of`, `all_of`.
+/// kinds: `turn_count_gt`, `turn_count_ge`, `predicate`, `any_of`,
+/// `all_of`.
+///
+/// The `predicate` kind names a world-registered predicate. The
+/// scheduler hands the closure an `UntilCtx` whose `predicates` field
+/// is the world's `PredicateRegistry` and whose `trace` field is the
+/// trace snapshot for this tick; the closure evaluates the named
+/// predicate against that snapshot. Composes with the turn-count
+/// kinds via `any_of` / `all_of`, so "stop on submit OR after N
+/// turns" is one expression.
 fn build_until(spec: &serde_json::Value) -> PyResult<Until> {
     let kind = spec
         .get("kind")
@@ -1559,6 +1638,23 @@ fn build_until(spec: &serde_json::Value) -> PyResult<Until> {
                 .and_then(|v| v.as_u64())
                 .ok_or_else(|| PyValueError::new_err("turn_count_ge requires 'n'"))?;
             Ok(turn_count_exceeds(n))
+        }
+        "predicate" => {
+            let name = spec
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| PyValueError::new_err("predicate until requires 'name'"))?
+                .to_string();
+            let args = spec.get("args").cloned().unwrap_or(serde_json::Value::Null);
+            let label = format!("predicate({name})");
+            Ok(Until::new(label, move |ctx: &UntilCtx<'_>| {
+                let Some(preds) = ctx.predicates else {
+                    return false;
+                };
+                let trace = ctx.trace.unwrap_or(&[]);
+                let pctx = PredicateCtx::with_args(trace, args.clone());
+                preds.evaluate(&name, &pctx).unwrap_or(false)
+            }))
         }
         "any_of" => {
             let parts = spec
