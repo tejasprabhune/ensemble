@@ -565,6 +565,85 @@ footer.site a:hover { color: var(--accent); }
   word-break: break-word;
 }
 
+.tool-line .res-summary {
+  color: var(--dark);
+  font-family: "calling-code", "SF Mono", monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.arg-long {
+  margin: 4px 0;
+}
+
+.arg-long summary {
+  cursor: pointer;
+  font-family: "calling-code", "SF Mono", monospace;
+  font-size: 13px;
+}
+
+.arg-long pre {
+  margin-top: 6px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.chat-tool-args {
+  margin-top: 4px;
+}
+
+.chat-tool-res pre {
+  margin-top: 4px;
+}
+
+.chat-bubble pre {
+  margin: 6px 0;
+  max-height: 360px;
+  overflow: auto;
+  font-size: 13px;
+}
+
+.chat-bubble code {
+  background: var(--code-bg);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.chat-bubble pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.chat-grader {
+  margin: 16px auto;
+  max-width: 520px;
+  border: 1px solid var(--rule);
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.02);
+  font-size: 13px;
+}
+
+.chat-grader-head {
+  font-family: "calling-code", "SF Mono", monospace;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.chat-grader-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "calling-code", "SF Mono", monospace;
+}
+
+.chat-grader-table td {
+  padding: 4px 8px 4px 0;
+  border-bottom: 1px dotted var(--rule);
+}
+
+.chat-grader-table tr:last-child td {
+  border-bottom: none;
+}
+
 table.diff {
   width: 100%;
   border-collapse: collapse;

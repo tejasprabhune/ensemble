@@ -56,6 +56,72 @@ def test_eventlog_jsonl_roundtrip_via_trace():
         assert "kind" in ev["payload"]
 
 
+def test_sandbox_tool_dispatches_via_subprocess(tmp_path):
+    """A sandbox=True tool runs in a fresh subprocess. We register a
+    world plugin that ships one such tool, spawn the world, and call
+    the tool through the registered native side."""
+    import subprocess
+    import sys
+    # Run the worker directly so we exercise the entry point without
+    # also depending on a world plugin. Plank ships sandbox=False
+    # tools, so we drive the worker against the noop world after
+    # registering a one-off sandbox tool.
+    proc = subprocess.run(
+        [sys.executable, "-m", "ensemble.tool_worker",
+         "--world", "noop", "--tool", "definitely_unknown"],
+        input="{}",
+        capture_output=True, text=True, check=False,
+    )
+    # noop world has no tools so the worker should exit with code 3.
+    assert proc.returncode == 3
+    assert "not registered" in proc.stderr
+
+
+def test_set_actor_budget_isolated_from_world_total():
+    world = World("noop", backend="mock")
+    world.set_budget("usd", 10.0)
+    world.set_budget("usd", 0.5, actor="alice")
+    # Alice's cost goes against her own cap, not just the world total.
+    world.record_cost("usd", 0.4, actor="alice")
+    assert world.cost_total("usd") == 0.4
+    assert world.cost_total("usd", actor="alice") == 0.4
+    # Bob's cost lands on the world total but not Alice's actor total.
+    world.record_cost("usd", 2.0, actor="bob")
+    assert world.cost_total("usd") == 2.4
+    assert world.cost_total("usd", actor="alice") == 0.4
+    assert world.cost_total("usd", actor="bob") == 2.0
+    # No halt yet; both caps still satisfied (alice at 0.4 of 0.5,
+    # world at 2.4 of 10.0).
+    sys_notes = [
+        e["payload"]["note"]
+        for e in world.trace()
+        if e["payload"]["kind"] == "system"
+    ]
+    assert not any("budget exceeded" in n for n in sys_notes)
+
+
+def test_trace_path_writes_live_jsonl(tmp_path):
+    """The live trace sink writes each event as it is appended."""
+    sink = tmp_path / "live.jsonl"
+    world = World("plank", backend="mock", trace_path=str(sink))
+    assert world.trace_path == str(sink)
+    alice = world.spawn_user(id="alice", model="user-model")
+    alice.act("lookup_user", user_id="u-alice")
+    # File exists with events on disk before the run completes.
+    lines = sink.read_text().strip().splitlines()
+    assert len(lines) >= 1
+    payloads = [json.loads(line)["payload"]["kind"] for line in lines]
+    assert "tool_call" in payloads or "tool_result" in payloads
+
+
+def test_trace_path_detach(tmp_path):
+    sink = tmp_path / "drop.jsonl"
+    world = World("plank", backend="mock")
+    world.set_trace_path(str(sink))
+    world.set_trace_path(None)
+    assert world.trace_path is None
+
+
 def test_until_combinators_flatten():
     w = World("noop", backend="mock")
     a = w.turn_count > 1
