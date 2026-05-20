@@ -675,6 +675,33 @@ async def enterprise_audit(world: World) -> dict[str, float]:
         intermediate invariants. When the block exits, the scheduler is
         stopped and the trace is final.
       </p>
+      <h3>The async-with surface</h3>
+      <p>
+        <code>world.simulate()</code> returns an async context manager.
+        Entering it starts the scheduler on a background tokio task and
+        hands you a <code>SimulationRun</code> with a single method:
+        <code>await run.wait_until(condition, timeout_ms=30_000)</code>.
+        The condition is either an <code>Until</code> (typically
+        <code>world.turn_count &gt; N</code>) or anything
+        <code>world.until(...)</code> accepts. The call returns
+        <code>True</code> when the predicate fires and <code>False</code>
+        when the timeout elapses; the scheduler keeps running either
+        way, so a returning-false case can be followed by another
+        wait against a different condition. Between waits the python
+        coroutine and the rust scheduler share the world: a
+        <code>user.say(...)</code> issued from python lands in the next
+        delivery cycle, and a <code>world.evaluate_predicate(...)</code>
+        sees whatever events have already been appended.
+      </p>
+      <p>
+        Choose this path when the scenario needs to react to what
+        happened earlier in the run: time pressure, dynamic injection
+        of new prompts, a mid-run grader that decides whether to
+        continue, or anything else the yield form cannot express
+        because it commits to a single until-predicate up front. For
+        scenarios that fit "seed actors, run until N turns, score the
+        trace", stick with the yield flavor; it has fewer moving parts.
+      </p>
     </section>
 
     <section id="toml">
