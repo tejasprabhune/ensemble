@@ -3,6 +3,31 @@
 version = 4
 
 [[package]]
+name = "agora"
+version = "0.1.0"
+dependencies = [
+ "ensemble-core",
+ "ensemble-runtime",
+ "parking_lot",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "agora-py"
+version = "0.1.0"
+dependencies = [
+ "agora",
+ "ensemble-core",
+ "ensemble-runtime",
+ "parking_lot",
+ "pyo3",
+ "serde_json",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -959,31 +984,6 @@ name = "pkg-config"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
-
-[[package]]
-name = "plank"
-version = "0.1.0"
-dependencies = [
- "ensemble-core",
- "ensemble-runtime",
- "parking_lot",
- "rusqlite",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "plank-py"
-version = "0.1.0"
-dependencies = [
- "ensemble-core",
- "ensemble-runtime",
- "parking_lot",
- "plank",
- "pyo3",
- "serde_json",
-]
 
 [[package]]
 name = "portable-atomic"

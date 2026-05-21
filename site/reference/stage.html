@@ -254,6 +254,101 @@ Stage:  https://ensemble-stage.fly.dev/myorg/popcornbench/runs/019542a3-...</cod
     </section>
 
     <section>
+      <h2>Navigating the web UI</h2>
+
+      <h3>Run detail</h3>
+      <p>
+        A run URL opens a page divided into a timeline viewer and a
+        sidebar. The timeline scrubber at the top lets you step through
+        every event in sequence. Two view modes are available:
+        <em>timeline</em>, which shows three synchronized panels (Actors,
+        Tool calls, State changes), and <em>chat</em>, which shows a
+        conversation transcript.
+      </p>
+      <p>
+        The Actors panel shows the last few messages each actor sent up
+        to the current scrubber position. The Tool calls panel lists
+        every tool invocation with its arguments and result. Seed calls
+        (those that happened before any LLM turn) are labeled
+        <code>[seed]</code>. The State changes panel shows each database
+        mutation as a row with the table, field, old value, and new value.
+      </p>
+      <p>
+        The right sidebar shows:
+      </p>
+      <ul>
+        <li><strong>Outcome</strong> -- the grader scores dict produced
+          by the scenario, for example
+          <code>alice_refund_resolved: 0.0</code>.</li>
+        <li><strong>Actors</strong> -- every actor's id, kind (user or
+          agent), model, and persona.</li>
+        <li><strong>Predicates</strong> -- the grader scores rendered
+          with pass/fail color coding.</li>
+        <li><strong>Hidden state</strong> -- the hidden state that was
+          assigned to each user persona (goals, mood, constraints).</li>
+        <li><strong>Cost</strong> -- token and USD totals when the
+          backend reports costs.</li>
+        <li><strong>Metadata</strong> -- any custom metadata attached
+          when the run was created.</li>
+      </ul>
+      <p>
+        The header bar shows status, scenario name, model, world, start
+        time, and wall-clock duration. Runs that are still in progress
+        poll for new events every two seconds and update the scrubber
+        range automatically.
+      </p>
+
+      <h3>Sweep detail</h3>
+      <p>
+        A sweep URL shows a KPI strip at the top with aggregate counts
+        (total runs, completed, failed, running) and a mean primary-
+        outcome score. Below the strip, a matrix table organizes cells
+        by the two axes with the most variation in the sweep config
+        (for example backend and scenario). Each cell shows a colored
+        dot (green for all-completed, red for all-failed, mixed for
+        partial) and the mean score. Clicking a single-run cell
+        navigates to that run. Below the matrix, a flat table lists all
+        child runs in the sweep.
+      </p>
+
+      <h3>Training run detail</h3>
+      <p>
+        A training run URL shows a header with persona name, base model,
+        status, and artifact URI. The body contains one SVG line chart
+        per metric name streamed by <code>ensemble train</code>. Common
+        metrics are <code>train_loss</code> and <code>eval_loss</code>.
+        Charts update every five seconds while the run is in progress.
+        A final metrics table appears once the run completes.
+      </p>
+
+      <h3>Comparing runs</h3>
+      <p>
+        From any project runs table, select two rows by checking their
+        checkboxes and press <kbd>c</kbd>. Stage navigates to
+        <code>/compare?a=...&amp;b=...</code> and loads both runs in
+        parallel. A metadata comparison table at the top highlights
+        rows that differ between the two runs. Below it, an aligned
+        event timeline shows both traces side by side, with identical
+        ticks dimmed and diverging ticks highlighted.
+      </p>
+      <p>
+        You can also open the compare view directly by pasting two run
+        IDs into the compare form at
+        <code>/{org}/{project}/compare</code>.
+      </p>
+
+      <h3>Sharing runs</h3>
+      <p>
+        The "Share" button on a run detail page generates a share link
+        that works without signing in. Click it, then click "Generate
+        link." Stage mints a token and returns a URL of the form
+        <code>https://ensemble-stage.fly.dev/share/{token}</code>. The
+        link expires in 30 days. Send it to a colleague and they can
+        open the full run detail in a read-only view.
+      </p>
+    </section>
+
+    <section>
       <h2>Bulk push</h2>
       <p>
         Traces that accumulated before Stage was configured can be
