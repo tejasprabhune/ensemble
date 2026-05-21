@@ -61,6 +61,58 @@
       of its own tools and state, so the world owns the implementation.
       The scenario asks for it by name.
     </p>
+    <section>
+      <h2>Quick reference</h2>
+      <h3>@predicate forms</h3>
+      <table>
+        <thead>
+          <tr><th>Form</th><th>When to use</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>predicate(name, fn)</code></td><td>Four-argument factory; name and function given explicitly. Good for dynamic registration.</td></tr>
+          <tr><td><code>@predicate(name="...")</code></td><td>Decorator-factory at module level or in a World subclass. Name is explicit, function comes from the decorated method.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>PluginPredicate fields</h3>
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>name</code></td><td>str</td><td>Predicate identifier used in grader expressions and <code>until_predicate()</code>.</td></tr>
+          <tr><td><code>fn</code></td><td>callable</td><td>The predicate function. Receives <code>(trace: list[dict], args: dict)</code> and returns any JSON-serialisable value.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Evaluation surface</h3>
+      <table>
+        <thead>
+          <tr><th>Entry point</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>world.evaluate_predicate(name, args, default)</code></td><td>Call a predicate by name. Returns its value or <code>default</code> if the predicate is not registered.</td></tr>
+          <tr><td><code>world.predicate_names()</code></td><td>List all predicate names registered for this world.</td></tr>
+          <tr><td><code>world.until_predicate(name, **args)</code></td><td>Create an <code>Until</code> that fires when the predicate becomes truthy.</td></tr>
+          <tr><td><code>until_predicate(name, **args)</code></td><td>Module-level alias; identical behavior.</td></tr>
+          <tr><td><code>user.predicate(name, default=False)</code></td><td>Evaluate a predicate scoped to this user's <code>user_id</code>.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Grader expression DSL</h3>
+      <table>
+        <thead>
+          <tr><th>Expression</th><th>Score produced</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>predicate_name</code></td><td>1.0 if predicate returned truthy, else 0.0</td></tr>
+          <tr><td><code>not predicate_name</code></td><td>1.0 if predicate returned falsy, else 0.0</td></tr>
+          <tr><td><code>any_of(p1, p2)</code></td><td>1.0 if either fired</td></tr>
+          <tr><td><code>all_of(p1, p2)</code></td><td>1.0 only if both fired</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <p>
       Predicates are also the contract behind
       <code>world.run(world.until(...))</code> and

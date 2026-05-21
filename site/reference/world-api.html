@@ -71,6 +71,57 @@
     </p>
 
     <section>
+      <h2>Quick reference</h2>
+      <h3>register_world kwargs</h3>
+      <table>
+        <thead>
+          <tr><th>Argument</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>name</code></td><td>str</td><td>Registry name; must match <code>world.toml</code> <code>name</code> field.</td></tr>
+          <tr><td><code>setup</code></td><td>callable | None</td><td>Called once when the world is constructed; receives the world instance.</td></tr>
+          <tr><td><code>tools</code></td><td>list[PluginTool]</td><td>Tool objects to register. Use the <code>@tool</code> decorator to build them.</td></tr>
+          <tr><td><code>predicates</code></td><td>list[PluginPredicate]</td><td>Predicate objects to register. Use the <code>@predicate</code> decorator.</td></tr>
+          <tr><td><code>personas_dir</code></td><td>Path | str | None</td><td>Directory of persona TOML files. Overrides the path from <code>world.toml</code>.</td></tr>
+          <tr><td><code>resources</code></td><td>list[str]</td><td>Named mutual-exclusion locks available to tools.</td></tr>
+          <tr><td><code>shared_state</code></td><td>dict | None</td><td>Initial value of the mutable shared state forwarded to sandboxed tool workers.</td></tr>
+          <tr><td><code>python_package</code></td><td>str | None</td><td>Python package name for the sandbox worker import path.</td></tr>
+          <tr><td><code>package_dir</code></td><td>Path | str | None</td><td>Directory containing the python package (used when the package is not installed).</td></tr>
+          <tr><td><code>default_user_model</code></td><td>str | None</td><td>Default model string for user actors when no persona overrides it.</td></tr>
+          <tr><td><code>default_agent_model</code></td><td>str | None</td><td>Default model string for agent actors when not supplied by the scenario.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>World subclass special names</h3>
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>world_name</code></td><td>class var str</td><td>Registry name. Auto-derived from lower-cased class name if absent.</td></tr>
+          <tr><td><code>setup(self)</code></td><td>method</td><td>Called once at construction. Replaces <code>register_world(setup=...)</code>.</td></tr>
+          <tr><td><code>@tool</code></td><td>decorator</td><td>Marks a method as a world tool. All three <code>@tool</code> forms work.</td></tr>
+          <tr><td><code>@predicate</code></td><td>decorator</td><td>Marks a method as a world predicate.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>world.toml fields</h3>
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Required</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>[world].name</code></td><td>yes</td><td>Registry name; must match the <code>name</code> in <code>register_world</code> or <code>world_name</code>.</td></tr>
+          <tr><td><code>[world].python_package</code></td><td>yes</td><td>Python package that calls <code>register_world</code> on import.</td></tr>
+          <tr><td><code>[world].rust_crate</code></td><td>no</td><td>Rust crate name for worlds with a typed state core.</td></tr>
+          <tr><td><code>[world].personas_dir</code></td><td>no</td><td>Directory of persona TOML files relative to the manifest.</td></tr>
+          <tr><td><code>[[world.default_personas]]</code></td><td>no</td><td>List of persona names pre-loaded by the world. Each entry has a <code>name</code> field.</td></tr>
+          <tr><td><code>[[world.default_tools]]</code></td><td>no</td><td>List of tool names surfaced in MCP and documentation. Each entry has a <code>name</code> field.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
       <h2>Subclassable World</h2>
 <pre><code class="language-python"># popcornbench/world.py
 from ensemble import World, tool, predicate

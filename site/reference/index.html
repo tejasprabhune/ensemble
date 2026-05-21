@@ -196,15 +196,33 @@
     </section>
 
     <section>
-      <h2><a href="training.html">Training runs</a>
-        <a href="sweeps.html">Sweeps</a></h2>
+      <h2><a href="training.html">Training runs</a></h2>
+      <p>
+        How to start a persona fine-tuning job and read its results.
+        The <code>[persona.training]</code> TOML block (LoRA, DPO, and
+        self-play sub-schemas), the three compute backends (modal,
+        skypilot, local), the Stage API endpoints for metrics and
+        status, and how to read the training detail page (loss curves
+        with annotations, hyperparameter table, comparison to past
+        runs for the same persona, the baseline comparison table that
+        answers whether the adapter beat the prompted baseline). Reach
+        for this page when you are training a persona or interpreting
+        a completed training run on Stage.
+      </p>
+    </section>
+
+    <section>
+      <h2><a href="sweeps.html">Sweeps</a></h2>
       <p>
         The <code>sweep.toml</code> schema, the runner command, cell
         expansion, the on-disk layout (one directory per cell plus a
         flat <code>index.jsonl</code>), resume semantics, and
-        concurrency. Reach for this page when you want to run the
-        same scenario across a matrix of backends, models, seeds, or
-        environment variables and aggregate the results.
+        concurrency. How to read the Stage sweep detail page: the KPI
+        strip, matrix view with variance glyphs, cost-over-time chart,
+        per-axis breakdown, and filtered runs list. Reach for this
+        page when you want to run the same scenario across a matrix of
+        backends, models, seeds, or environment variables and aggregate
+        the results.
       </p>
     </section>
 

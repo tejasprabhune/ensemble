@@ -64,6 +64,85 @@
     </p>
 
     <section>
+      <h2>Quick reference</h2>
+      <h3>@tool forms</h3>
+      <table>
+        <thead>
+          <tr><th>Form</th><th>When to use</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>@tool</code> (bare)</td><td>Name from <code>__name__</code>, description from docstring, schema inferred from type hints. Correct for most tools.</td></tr>
+          <tr><td><code>@tool(name=..., description=..., parameters=...)</code></td><td>Override any of the inferred values while keeping the function.</td></tr>
+          <tr><td><code>tool(name, description, parameters, fn)</code></td><td>Four-argument factory for dynamic registration or when the function is defined elsewhere.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>@tool decorator kwargs</h3>
+      <table>
+        <thead>
+          <tr><th>Kwarg</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>name</code></td><td>str</td><td>Tool name the agent uses in its tool call. Defaults to function name.</td></tr>
+          <tr><td><code>description</code></td><td>str</td><td>Natural-language description in the agent's tool list. Defaults to first docstring paragraph.</td></tr>
+          <tr><td><code>parameters</code></td><td>dict</td><td>JSON Schema for the arguments object. Defaults to inferred from type hints.</td></tr>
+          <tr><td><code>timeout_ms</code></td><td>int | None</td><td>Maximum wall time for the function call. A <code>tool_timeout</code> event is emitted if exceeded.</td></tr>
+          <tr><td><code>resources</code></td><td>list[str]</td><td>Named locks the runtime acquires before calling the tool. Tools sharing a resource name are serialized.</td></tr>
+          <tr><td><code>sandbox</code></td><td>bool</td><td>Run the function in a subprocess worker. Required for tools with side effects the main process should not see.</td></tr>
+          <tr><td><code>sandbox_world</code></td><td>str | None</td><td>World name to import inside the sandbox worker. Defaults to the enclosing world's name.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Return envelope keys</h3>
+      <table>
+        <thead>
+          <tr><th>Key</th><th>Required</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>effect</code></td><td>yes (if using envelope)</td><td>The string or dict the agent sees as the tool's output.</td></tr>
+          <tr><td><code>diff</code></td><td>no</td><td>State diff object emitted as a <code>state_diff</code> trace event.</td></tr>
+          <tr><td><code>costs</code></td><td>no</td><td>Dict of <code>{unit: amount}</code> pairs emitted as a <code>cost</code> trace event.</td></tr>
+          <tr><td><code>progress</code></td><td>no</td><td>List of progress steps emitted as <code>progress</code> trace events before the tool returns.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Type hint to JSON Schema inference</h3>
+      <table>
+        <thead>
+          <tr><th>Python type</th><th>JSON Schema result</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>str</code></td><td><code>{"type": "string"}</code></td></tr>
+          <tr><td><code>int</code></td><td><code>{"type": "integer"}</code></td></tr>
+          <tr><td><code>float</code></td><td><code>{"type": "number"}</code></td></tr>
+          <tr><td><code>bool</code></td><td><code>{"type": "boolean"}</code></td></tr>
+          <tr><td><code>Optional[T]</code></td><td>T's schema, parameter removed from <code>required</code></td></tr>
+          <tr><td><code>List[T]</code></td><td><code>{"type": "array", "items": T-schema}</code></td></tr>
+          <tr><td><code>Dict[K, V]</code></td><td><code>{"type": "object"}</code></td></tr>
+          <tr><td><code>Literal["a", "b"]</code></td><td><code>{"type": "string", "enum": ["a", "b"]}</code></td></tr>
+          <tr><td>Any other type</td><td><code>{}</code> (accepted as any JSON)</td></tr>
+        </tbody>
+      </table>
+
+      <h3>PluginTool fields</h3>
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>name</code></td><td>str</td><td>Tool identifier used in tool calls.</td></tr>
+          <tr><td><code>description</code></td><td>str</td><td>Description shown in the agent's tool list.</td></tr>
+          <tr><td><code>parameters</code></td><td>dict</td><td>JSON Schema for arguments.</td></tr>
+          <tr><td><code>fn</code></td><td>callable</td><td>The function to call.</td></tr>
+          <tr><td><code>timeout_ms</code></td><td>int | None</td><td>Timeout in milliseconds.</td></tr>
+          <tr><td><code>resources</code></td><td>list[str]</td><td>Named locks to acquire.</td></tr>
+          <tr><td><code>sandbox</code></td><td>bool</td><td>Run in subprocess worker.</td></tr>
+          <tr><td><code>sandbox_world</code></td><td>str | None</td><td>World name for the sandbox worker.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
       <h2>The common case: bare <code>@tool</code></h2>
       <p>
         In the common case the decorator infers everything from the

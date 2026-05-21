@@ -60,6 +60,57 @@
     <p>This page covers the subcommands and the data layout they read.</p>
 
     <section>
+      <h2>Quick reference</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Command</th>
+            <th>What it does</th>
+            <th>Key flags</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ensemble runs list</code></td>
+            <td>Print recent runs as a table, newest last. Merges local and Stage results when Stage is configured.</td>
+            <td><code>--scenario NAME</code>, <code>--limit N</code>, <code>--traces-dir DIR</code></td>
+          </tr>
+          <tr>
+            <td><code>ensemble runs show &lt;run&gt;</code></td>
+            <td>Print one run's meta.json as pretty-printed JSON. Accepts a full ID or any unique prefix.</td>
+            <td><code>--traces-dir DIR</code></td>
+          </tr>
+          <tr>
+            <td><code>ensemble runs compare &lt;a&gt; &lt;b&gt;</code></td>
+            <td>Diff two runs' scores side by side with a signed delta column.</td>
+            <td><code>--traces-dir DIR</code></td>
+          </tr>
+          <tr>
+            <td><code>ensemble runs export</code></td>
+            <td>Emit the full runs index as JSON (default) or CSV with one score column per metric.</td>
+            <td><code>--format json|csv</code>, <code>--traces-dir DIR</code></td>
+          </tr>
+          <tr>
+            <td><code>ensemble trace view &lt;trace.jsonl&gt;</code></td>
+            <td>Serve one trace in the browser viewer on a local HTTP port.</td>
+            <td><code>--port PORT</code> (default 8765), <code>--site DIR</code></td>
+          </tr>
+          <tr>
+            <td><code>ensemble trace compare &lt;a.jsonl&gt; &lt;b.jsonl&gt;</code></td>
+            <td>Serve a two-column browser view of two traces, scroll-synced by tick.</td>
+            <td><code>--port PORT</code>, <code>--site DIR</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        The <code>--traces-dir DIR</code> flag is global to the
+        <code>ensemble runs</code> subcommand group. It overrides the
+        default <code>./traces</code> index location. Pass a sweep's
+        directory to work with that sweep's cells.
+      </p>
+    </section>
+
+    <section>
       <h2>On-disk layout</h2>
       <p>Every <code>ensemble run</code> produces:</p>
 <pre><code class="language-bash">traces/
@@ -95,7 +146,36 @@
   "costs": {},
   "trace_path": "traces/20260520T143022_my_world_smoke_a1b2c3d4/trace.jsonl"
 }</code></pre>
-      <p>Per-run <code>meta.json</code> carries the same fields.</p>
+      <p>
+        Per-run <code>meta.json</code> carries the same fields plus an
+        optional <code>error</code> key containing the last 2000 bytes
+        of the scenario subprocess's stderr when the run failed. For
+        sweep cells, <code>meta.json</code> also includes an
+        <code>axis_values</code> object with the cell's dimension
+        assignments (e.g., <code>{"backend": "anthropic", "AGORA_SEED": "2"}</code>).
+      </p>
+      <p>The full <code>meta.json</code> / <code>runs.jsonl</code> row schema:</p>
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>run_id</code></td><td>string</td><td>Sortable timestamp ID, e.g. <code>20260520T143022_my_world_smoke_a1b2c3d4</code>.</td></tr>
+          <tr><td><code>scenario</code></td><td>string</td><td>Scenario name as passed to <code>ensemble run</code>.</td></tr>
+          <tr><td><code>world</code></td><td>string</td><td>World name resolved at run time.</td></tr>
+          <tr><td><code>backend</code></td><td>string</td><td>Backend used: mock, anthropic, openai, vllm, or the resolved auto value.</td></tr>
+          <tr><td><code>started_at</code></td><td>float</td><td>Unix timestamp (seconds) when the scenario started.</td></tr>
+          <tr><td><code>finished_at</code></td><td>float</td><td>Unix timestamp when the scenario ended (success or failure).</td></tr>
+          <tr><td><code>duration_s</code></td><td>float</td><td>Wall time in seconds.</td></tr>
+          <tr><td><code>scores</code></td><td>object</td><td>Grader scores as <code>{metric: value}</code> pairs. Empty object on failure.</td></tr>
+          <tr><td><code>costs</code></td><td>object</td><td>Cost totals: <code>{"usd": 0.013, "tokens_in": 4500, "tokens_out": 1200}</code>. Empty if no cost events were recorded.</td></tr>
+          <tr><td><code>trace_path</code></td><td>string</td><td>Relative path to the run's <code>trace.jsonl</code> file.</td></tr>
+          <tr><td><code>axis_values</code></td><td>object</td><td>Sweep cells only: the dimension assignments for this cell.</td></tr>
+          <tr><td><code>error</code></td><td>string|null</td><td>Last 2000 bytes of stderr when the run failed. Absent on success.</td></tr>
+          <tr><td><code>stage_run_id</code></td><td>string|null</td><td>Stage UUID for this run, when Stage was configured.</td></tr>
+          <tr><td><code>stage_url</code></td><td>string|null</td><td>Stage permalink for this run, when Stage was configured.</td></tr>
+        </tbody>
+      </table>
     </section>
 
     <section>

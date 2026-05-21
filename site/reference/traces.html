@@ -58,6 +58,51 @@
     </p>
 
     <section>
+      <h2>Quick reference</h2>
+      <h3>Event kinds</h3>
+      <table>
+        <thead>
+          <tr><th>Kind</th><th>Emitted by</th><th>Key payload fields</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>system</code></td><td>Runtime, grader</td><td><code>note</code> (str). Grader output uses <code>"grader: " + json.dumps({...})</code> prefix.</td></tr>
+          <tr><td><code>user_message</code></td><td>User actor LLM</td><td><code>actor</code>, <code>text</code></td></tr>
+          <tr><td><code>agent_message</code></td><td>Agent actor LLM</td><td><code>actor</code>, <code>text</code></td></tr>
+          <tr><td><code>tool_call</code></td><td>Agent actor LLM</td><td><code>actor</code>, <code>name</code>, <code>args</code> (dict), <code>seed</code> (bool)</td></tr>
+          <tr><td><code>tool_result</code></td><td>Runtime (world tool)</td><td><code>actor</code>, <code>name</code>, <code>result</code> (any JSON)</td></tr>
+          <tr><td><code>state_diff</code></td><td>Tool return envelope</td><td><code>actor</code>, <code>diff</code> (object with <code>table</code>, <code>field</code>, <code>old</code>, <code>new</code>)</td></tr>
+          <tr><td><code>cost</code></td><td>LLM response usage, tool return envelope</td><td><code>actor</code>, <code>unit</code> (str), <code>amount</code> (float), <code>running_total</code> (float)</td></tr>
+          <tr><td><code>progress</code></td><td>Tool return envelope</td><td><code>actor</code>, <code>tool</code> (str), <code>fraction</code> (0.0-1.0), <code>message</code> (str)</td></tr>
+          <tr><td><code>tool_timeout</code></td><td>Runtime (timeout exceeded)</td><td><code>actor</code>, <code>name</code>, <code>timeout_ms</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>Event envelope fields</h3>
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>tick</code></td><td>int</td><td>Monotonically increasing event counter. Used by the trace viewer scrubber.</td></tr>
+          <tr><td><code>ts_ms</code></td><td>int</td><td>Wall-clock timestamp in milliseconds since epoch.</td></tr>
+          <tr><td><code>actor</code></td><td>str | null</td><td>Actor ID, or null for system events.</td></tr>
+          <tr><td><code>message_id</code></td><td>str | null</td><td>Groups tool_call and its corresponding tool_result by the same ID.</td></tr>
+          <tr><td><code>payload</code></td><td>object</td><td>Event-kind-specific payload. Always has a <code>kind</code> field matching the outer kind.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>The <code>seed</code> flag on tool_call</h3>
+      <p>
+        A tool call is marked <code>seed: true</code> when it was
+        injected by the scenario (e.g., via <code>world.opener(...)</code>
+        or an <code>initial_action</code> in scenarios.toml) rather than
+        chosen by the LLM. Graders and predicates use this flag to
+        distinguish "initial ticket" from "agent called a tool" and
+        to avoid double-counting cost.
+      </p>
+    </section>
+
+    <section>
       <h2>Event envelope</h2>
       <p>Every line of a JSONL trace decodes to one event:</p>
 <pre><code class="language-json">{

@@ -136,7 +136,8 @@ async def audit(world):
       <h2>World</h2>
       <p>
         <code>World(name, *, backend=None, base_url=None, dotenv=True,
-        verbose=None, trace_path=None, external_agent_id=None)</code>
+        verbose=None, trace_path=None, external_agent_id=None,
+        stage=None)</code>
         is the scenario-facing wrapper around the native rust world.
         Construction is what triggers the world plugin to register
         itself: the python package named in <code>world.toml</code>
@@ -144,6 +145,23 @@ async def audit(world):
         <code>import agora</code> at the top of the scenario module
         so agora's <code>register_world</code> runs before the World
         is built).
+      </p>
+      <p>Constructor keyword arguments:</p>
+      <table>
+        <thead>
+          <tr><th>Argument</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>backend</code></td><td><code>None</code></td><td>LLM backend: <code>"mock"</code>, <code>"anthropic"</code>, <code>"openai"</code>, <code>"vllm"</code>, <code>"auto"</code>, or <code>None</code> (falls through to <code>"auto"</code>).</td></tr>
+          <tr><td><code>base_url</code></td><td><code>None</code></td><td>Override the backend's default API base URL. Useful for vLLM or local proxies.</td></tr>
+          <tr><td><code>dotenv</code></td><td><code>True</code></td><td>Controls <code>.env</code> file loading. <code>True</code>: load <code>.env</code> if it exists (default). <code>False</code>: skip. <code>"override"</code>: load and let <code>.env</code> values override existing env vars. A string path: load that specific file.</td></tr>
+          <tr><td><code>verbose</code></td><td><code>None</code></td><td>Print turn-by-turn progress to stderr. <code>None</code> inherits from the environment (<code>ENSEMBLE_VERBOSE</code>).</td></tr>
+          <tr><td><code>trace_path</code></td><td><code>None</code></td><td>Mirror every event to this JSONL file as it is appended. Set by <code>ensemble run</code> automatically.</td></tr>
+          <tr><td><code>external_agent_id</code></td><td><code>None</code></td><td>Names the agent slot the connected MCP client drives. Used by <code>ensemble mcp serve --as-agent</code>.</td></tr>
+          <tr><td><code>stage</code></td><td><code>None</code></td><td>A <code>Stage</code> instance for explicit Stage configuration. Overrides all environment variables and config files.</td></tr>
+        </tbody>
+      </table>
+      <p>
       </p>
       <p>
         A <code>World</code> subclass
@@ -155,36 +173,53 @@ async def audit(world):
         <a href="world-api.html">world-api reference</a> covers the
         subclass form in detail.
       </p>
-      <p>The properties:</p>
-      <ul>
-        <li><code>world.name</code>: the world's registry name.</li>
-        <li><code>world.backend</code>: the chosen backend's string
-          name.</li>
-        <li><code>world.turn_count</code>: a sentinel that produces
-          an <code>Until</code> from <code>&gt; N</code> or
-          <code>&gt;= N</code> comparisons.</li>
-        <li><code>world.trace_path</code>: the current live-trace
-          sink path, or <code>None</code> when no sink is attached.</li>
-        <li><code>world.users</code> / <code>world.agents</code>:
-          lists of <code>User</code> / <code>Agent</code> proxies the
-          scenario has spawned, in declaration order.</li>
-        <li><code>world.shared_state</code>: a mutable dict the
-          runtime forwards into sandbox workers via
-          <code>ENSEMBLE_SHARED_STATE</code>. See the
-          <a href="world-api.html#sandbox-contract">sandbox contract</a>.</li>
-      </ul>
-      <p>
-        The methods documented in their own subsections below:
-        <code>spawn_user</code>, <code>spawn_agent</code>,
-        <code>until</code>, <code>until_predicate</code>,
-        <code>run</code>, <code>simulate</code>, <code>trace</code>,
-        <code>apply</code>, <code>log_note</code>,
-        <code>log_event</code>, <code>actor_hidden_state</code>,
-        <code>tool_names</code>, <code>predicate_names</code>,
-        <code>evaluate_predicate</code>, <code>set_budget</code>,
-        <code>cost_total</code>, <code>record_cost</code>,
-        <code>set_trace_path</code>.
-      </p>
+      <p>Properties and their types:</p>
+      <table>
+        <thead>
+          <tr><th>Property</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>world.name</code></td><td>str</td><td>The world's registry name, as declared in <code>world.toml</code>.</td></tr>
+          <tr><td><code>world.run_id</code></td><td>str</td><td>The local run identifier (timestamp + hex suffix). Available once the world is constructed.</td></tr>
+          <tr><td><code>world.run_url</code></td><td>str | None</td><td>The Stage permalink for this run, e.g. <code>https://stage.ensemble.sh/org/proj/runs/uuid</code>. <code>None</code> when Stage is not configured.</td></tr>
+          <tr><td><code>world.backend</code></td><td>str</td><td>The resolved backend name: <code>mock</code>, <code>anthropic</code>, <code>openai</code>, or <code>vllm</code>.</td></tr>
+          <tr><td><code>world.turn_count</code></td><td>TurnCount</td><td>A sentinel object; supports <code>&gt; N</code> and <code>&gt;= N</code> comparisons that produce <code>Until</code> conditions.</td></tr>
+          <tr><td><code>world.trace_path</code></td><td>Path | None</td><td>Current live-trace sink path, or <code>None</code> when no sink is attached.</td></tr>
+          <tr><td><code>world.users</code></td><td>list[User]</td><td>User proxies spawned by this scenario, in declaration order.</td></tr>
+          <tr><td><code>world.agents</code></td><td>list[Agent]</td><td>Agent proxies spawned by this scenario, in declaration order.</td></tr>
+          <tr><td><code>world.shared_state</code></td><td>dict</td><td>Mutable shared state forwarded to sandbox workers via <code>ENSEMBLE_SHARED_STATE</code>.</td></tr>
+        </tbody>
+      </table>
+      <p>Methods on World (each documented in a subsection below):</p>
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Returns</th><th>Brief description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>spawn_user(...)</code></td><td>User</td><td>Create a user actor with an optional persona and hidden state.</td></tr>
+          <tr><td><code>spawn_agent(...)</code></td><td>Agent</td><td>Create an agent actor with a model and tool list.</td></tr>
+          <tr><td><code>opener(message, to)</code></td><td>Opener</td><td>Create an opener that delivers the first message.</td></tr>
+          <tr><td><code>until(condition)</code></td><td>Until</td><td>Wrap a boolean expression as a halt condition.</td></tr>
+          <tr><td><code>until_predicate(name, **args)</code></td><td>Until</td><td>Halt when a named world predicate becomes true.</td></tr>
+          <tr><td><code>until_agent_emits(actor_id, ...)</code></td><td>Until</td><td>Halt when an agent's message matches a pattern.</td></tr>
+          <tr><td><code>until_done(actor_id, signal)</code></td><td>Until</td><td>Halt when an external agent signals completion.</td></tr>
+          <tr><td><code>run(until)</code></td><td>list[dict]</td><td>Blocking run; returns the event list.</td></tr>
+          <tr><td><code>simulate()</code></td><td>Simulation</td><td>Async context manager; yields a SimulationRun.</td></tr>
+          <tr><td><code>trace()</code></td><td>list[dict]</td><td>Return all events recorded so far.</td></tr>
+          <tr><td><code>apply(tool, **kwargs)</code></td><td>dict</td><td>Invoke a tool at the system level (no actor).</td></tr>
+          <tr><td><code>log_note(text)</code></td><td>None</td><td>Append a system event with a free-text note.</td></tr>
+          <tr><td><code>log_event(kind, payload)</code></td><td>None</td><td>Append an arbitrary event kind to the trace.</td></tr>
+          <tr><td><code>actor_hidden_state(actor_id)</code></td><td>dict</td><td>Return a snapshot of a user's hidden state.</td></tr>
+          <tr><td><code>tool_names()</code></td><td>list[str]</td><td>List the tools this world exposes.</td></tr>
+          <tr><td><code>predicate_names()</code></td><td>list[str]</td><td>List the predicates this world exposes.</td></tr>
+          <tr><td><code>evaluate_predicate(name, args, default)</code></td><td>Any</td><td>Evaluate a predicate by name with arguments.</td></tr>
+          <tr><td><code>set_budget(unit, amount, actor)</code></td><td>None</td><td>Set a spending limit for an actor (or the whole run).</td></tr>
+          <tr><td><code>cost_total(unit, actor)</code></td><td>float</td><td>Return cumulative spend in the given unit.</td></tr>
+          <tr><td><code>record_cost(unit, amount, actor)</code></td><td>None</td><td>Manually record a cost event.</td></tr>
+          <tr><td><code>cost_summary()</code></td><td>dict</td><td>Return per-actor and total cost breakdown.</td></tr>
+          <tr><td><code>set_trace_path(path)</code></td><td>None</td><td>Redirect the live trace to a new file path.</td></tr>
+        </tbody>
+      </table>
     </section>
 
     <section>

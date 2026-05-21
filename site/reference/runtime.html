@@ -58,6 +58,63 @@
     </p>
 
     <section>
+      <h2>Quick reference</h2>
+      <h3>Backend selector strings</h3>
+      <table>
+        <thead>
+          <tr><th>String</th><th>Backend</th><th>Required env var</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>"mock"</code></td><td>MockBackend</td><td>None. Returns deterministic canned responses.</td></tr>
+          <tr><td><code>"anthropic"</code></td><td>AnthropicBackend</td><td><code>ANTHROPIC_API_KEY</code></td></tr>
+          <tr><td><code>"openai"</code></td><td>OpenAIBackend</td><td><code>OPENAI_API_KEY</code></td></tr>
+          <tr><td><code>"vllm"</code></td><td>LocalAdapterBackend</td><td><code>ENSEMBLE_VLLM_BASE_URL</code></td></tr>
+          <tr><td><code>"auto"</code></td><td>First available in order: anthropic, openai, vllm, mock</td><td>Whichever backend is selected</td></tr>
+        </tbody>
+      </table>
+
+      <h3>CompletionRequest fields</h3>
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>model</code></td><td>str</td><td>Model identifier, e.g. <code>"claude-sonnet-4-6"</code>.</td></tr>
+          <tr><td><code>system</code></td><td>str | None</td><td>System prompt text.</td></tr>
+          <tr><td><code>messages</code></td><td>list[Message]</td><td>Conversation history. Each message has <code>role</code> and <code>content</code>.</td></tr>
+          <tr><td><code>tools</code></td><td>list[ToolDef] | None</td><td>Tools available in this turn.</td></tr>
+          <tr><td><code>max_tokens</code></td><td>int</td><td>Maximum tokens to generate. Forwarded as <code>max_tokens</code> (Anthropic) or <code>max_completion_tokens</code> (OpenAI).</td></tr>
+          <tr><td><code>temperature</code></td><td>float | None</td><td>Sampling temperature.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>CompletionResponse fields</h3>
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>content</code></td><td>str | None</td><td>Text content of the response.</td></tr>
+          <tr><td><code>tool_calls</code></td><td>list[ToolCall] | None</td><td>Tool calls requested in this response.</td></tr>
+          <tr><td><code>stop_reason</code></td><td>str</td><td><code>"end_turn"</code>, <code>"tool_use"</code>, <code>"max_tokens"</code>, or backend-specific string.</td></tr>
+          <tr><td><code>usage</code></td><td>Usage | None</td><td>Token counts and USD cost annotation.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Usage fields</h3>
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>tokens_in</code></td><td>int</td><td>Input/prompt tokens consumed.</td></tr>
+          <tr><td><code>tokens_out</code></td><td>int</td><td>Output/completion tokens generated.</td></tr>
+          <tr><td><code>usd</code></td><td>float</td><td>Computed USD cost from the pricing table. 0.0 for mock.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
       <h2>LLMBackend trait</h2>
 <pre><code class="language-rust">// crates/ensemble-runtime/src/backend.rs
 #[async_trait]
