@@ -84,6 +84,14 @@ enum Cmd {
         #[command(subcommand)]
         sub: SweepCmd,
     },
+    /// Cross-run observability: list, show, compare, export.
+    Runs {
+        #[command(subcommand)]
+        sub: RunsCmd,
+        /// Where the runs index lives (default: ./traces).
+        #[arg(long = "traces-dir", global = true)]
+        traces_dir: Option<PathBuf>,
+    },
     /// Manage the registry of installed worlds at ~/.ensemble/worlds.toml.
     Worlds {
         #[command(subcommand)]
@@ -134,6 +142,26 @@ enum ModelsCmd {
     /// Print available backends, whether their keys are set, and the
     /// model identifiers each backend knows about.
     List,
+}
+
+#[derive(Subcommand)]
+enum RunsCmd {
+    /// Print recent runs as a table.
+    List {
+        #[arg(long)]
+        scenario: Option<String>,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Print one run's meta as JSON. <run> may be a unique prefix.
+    Show { run: String },
+    /// Diff two runs' scores side by side. Args may be unique prefixes.
+    Compare { a: String, b: String },
+    /// Emit the full runs index as json or csv.
+    Export {
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -213,6 +241,7 @@ fn main() -> Result<()> {
         },
         Cmd::Models { sub } => models_subcommand(sub),
         Cmd::Sweep { sub } => sweep_subcommand(sub),
+        Cmd::Runs { sub, traces_dir } => runs_subcommand(sub, traces_dir.as_deref()),
         Cmd::Worlds { sub } => worlds_subcommand(sub),
         Cmd::Mcp { sub } => mcp_subcommand(sub),
         Cmd::Train { persona, backend } => train(&persona, &backend),
@@ -232,6 +261,41 @@ fn models_subcommand(sub: ModelsCmd) -> Result<()> {
         .context("invoking python -m ensemble.cli_models; is python on PATH?")?;
     if !status.success() {
         return Err(anyhow!("models subcommand failed (exit {status})"));
+    }
+    Ok(())
+}
+
+fn runs_subcommand(sub: RunsCmd, traces_dir: Option<&std::path::Path>) -> Result<()> {
+    let mut cmd = python_command(false);
+    cmd.args(["-m", "ensemble.cli_runs"]);
+    if let Some(td) = traces_dir {
+        cmd.args(["--traces-dir"]).arg(td);
+    }
+    match sub {
+        RunsCmd::List { scenario, limit } => {
+            cmd.arg("list");
+            if let Some(s) = scenario {
+                cmd.args(["--scenario", &s]);
+            }
+            if let Some(n) = limit {
+                cmd.args(["--limit", &n.to_string()]);
+            }
+        }
+        RunsCmd::Show { run } => {
+            cmd.arg("show").arg(&run);
+        }
+        RunsCmd::Compare { a, b } => {
+            cmd.arg("compare").arg(&a).arg(&b);
+        }
+        RunsCmd::Export { format } => {
+            cmd.arg("export").args(["--format", &format]);
+        }
+    }
+    let status = cmd
+        .status()
+        .context("invoking python -m ensemble.cli_runs; is python on PATH?")?;
+    if !status.success() {
+        return Err(anyhow!("runs subcommand failed (exit {status})"));
     }
     Ok(())
 }
