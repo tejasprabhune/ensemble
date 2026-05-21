@@ -428,6 +428,19 @@ class World:
         # rust side every call.
         self._registered_predicate_names: set[str] = set()
 
+        # Per-world default models, populated from the world plugin's
+        # register_world(default_user_model=..., default_agent_model=...)
+        # call. spawn_user/spawn_agent fall back to these before the
+        # framework-wide sentinels.
+        self._default_user_model: Optional[str] = None
+        self._default_agent_model: Optional[str] = None
+
+        # Counters that back auto-generated actor ids when the caller
+        # does not pass one.
+        self._next_user_index: int = 1
+        self._next_agent_index: int = 1
+        self._next_opener_index: int = 1
+
         if definition is not None:
             self._apply_definition(definition)
 
@@ -453,6 +466,10 @@ class World:
             self._sandbox_python_package = definition.python_package
         if definition.package_dir and not self._sandbox_package_dir:
             self._sandbox_package_dir = definition.package_dir
+        if definition.default_user_model:
+            self._default_user_model = definition.default_user_model
+        if definition.default_agent_model:
+            self._default_agent_model = definition.default_agent_model
         tools, predicates = definition.build()
         for t in tools:
             self._register_native_tool(t)
@@ -582,7 +599,7 @@ class World:
         id: Optional[str] = None,
         persona: Optional[str] = None,
         hidden_goal: Optional[str] = None,
-        model: str = "user-model",
+        model: Optional[str] = None,
         system_prompt: Optional[str] = None,
         hidden_state: Optional[Dict[str, Any]] = None,
         interactive: bool = True,
@@ -592,6 +609,16 @@ class World:
         defaults. Trained personas (with an ``adapter_name``) route
         through a per-user vLLM backend.
 
+        When ``model`` is omitted the world's ``default_user_model``
+        (set on ``register_world`` or in ``world.toml``) is used; if
+        the world declares none either, the framework-wide sentinel
+        ``"user-model"`` is used so the trace records the actor's
+        intended role.
+
+        When ``id`` is omitted an auto-generated id (``user-1``,
+        ``user-2``, ...) is assigned so the smoke scenario can elide
+        the field.
+
         ``interactive=False`` makes the user silent on inbound messages:
         the scheduler still records what the agent said into the user's
         history, but the user does not call the backend to produce a
@@ -600,6 +627,12 @@ class World:
         job is to deliver one or more seed messages and then stay
         silent, so the run does not waste backend calls (and 404 against
         sentinel model names like ``"user-model"``)."""
+
+        if id is None:
+            id = f"user-{self._next_user_index}"
+            self._next_user_index += 1
+        if model is None:
+            model = self._default_user_model or "user-model"
 
         overrides: Dict[str, Any] = {}
         if hidden_goal is not None:
@@ -670,7 +703,7 @@ class World:
     def spawn_agent(
         self,
         id: Optional[str] = None,
-        model: str = "claude-sonnet-4-5",
+        model: Optional[str] = None,
         tools: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
         params: Optional[Dict[str, Any]] = None,
@@ -680,7 +713,17 @@ class World:
         agent can override the backend's defaults (temperature,
         max_tokens, reasoning_effort, top_p, ...). Unknown keys are
         forwarded verbatim; the backend chooses what to do with
-        them."""
+        them.
+
+        When ``model`` is omitted the world's ``default_agent_model``
+        is used; the framework-wide fallback is ``claude-sonnet-4-5``.
+        When ``id`` is omitted an auto-generated id (``agent-1``,
+        ``agent-2``, ...) is assigned."""
+        if id is None:
+            id = f"agent-{self._next_agent_index}"
+            self._next_agent_index += 1
+        if model is None:
+            model = self._default_agent_model or "claude-sonnet-4-5"
         if id is not None and id == self._external_agent_id:
             agent = self._spawn_external_agent(id, list(tools or []))
             self.log_event("agent_spawned", {

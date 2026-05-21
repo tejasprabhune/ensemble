@@ -90,6 +90,12 @@ class WorldDefinition:
     # from a fresh subprocess (the sandbox worker uses them).
     python_package: Optional[str] = None
     package_dir: Optional[Path] = None
+    # Per-world default models. When set, spawn_user() and
+    # spawn_agent() consult these before falling back to the
+    # framework-wide sentinels. The audit called out the repetition
+    # of model="claude-sonnet-4-5" on every spawn line in plank.
+    default_user_model: Optional[str] = None
+    default_agent_model: Optional[str] = None
 
     def build(self) -> "tuple[List[PluginTool], List[PluginPredicate]]":
         """Materialize tools and predicates for one World instance.
@@ -119,6 +125,8 @@ def register_world(
     shared_state: Optional[Dict[str, Any]] = None,
     python_package: Optional[str] = None,
     package_dir: Optional[Path | str] = None,
+    default_user_model: Optional[str] = None,
+    default_agent_model: Optional[str] = None,
 ) -> WorldDefinition:
     """Register a world plugin under ``name``. Idempotent: calling
     twice for the same name overwrites the prior definition.
@@ -174,6 +182,8 @@ def register_world(
         initial_shared_state=dict(shared_state or {}),
         python_package=python_package,
         package_dir=pkg_dir,
+        default_user_model=default_user_model,
+        default_agent_model=default_agent_model,
     )
     _WORLDS[name] = defn
     if pd is not None:

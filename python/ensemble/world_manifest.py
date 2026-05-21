@@ -55,6 +55,8 @@ class WorldManifest:
     personas_dir: Optional[Path] = None
     default_tools: List[str] = field(default_factory=list)
     default_personas: List[str] = field(default_factory=list)
+    default_user_model: Optional[str] = None
+    default_agent_model: Optional[str] = None
     resources: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     cli: Dict[str, Any] = field(default_factory=dict)
     raw: Dict[str, Any] = field(default_factory=dict)
@@ -115,6 +117,9 @@ def load_manifest(path: str | Path) -> WorldManifest:
     if not isinstance(cli, dict):
         raise ManifestError(f"{p}: world.cli must be a table")
 
+    default_user_model = world.get("default_user_model")
+    default_agent_model = world.get("default_agent_model")
+
     return WorldManifest(
         name=str(name),
         root=p.parent,
@@ -123,6 +128,8 @@ def load_manifest(path: str | Path) -> WorldManifest:
         personas_dir=personas_dir,
         default_tools=default_tools,
         default_personas=default_personas,
+        default_user_model=str(default_user_model) if default_user_model else None,
+        default_agent_model=str(default_agent_model) if default_agent_model else None,
         resources={
             k: (v if isinstance(v, dict) else {"value": v})
             for k, v in resources.items()
