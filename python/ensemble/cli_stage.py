@@ -20,6 +20,15 @@ from .stage import (
 )
 
 
+def _is_uuid(s: str) -> bool:
+    import uuid as _uuid_mod
+    try:
+        _uuid_mod.UUID(s)
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
 def _use_color() -> bool:
     if os.environ.get("NO_COLOR"):
         return False
@@ -357,38 +366,48 @@ def cmd_push(args: argparse.Namespace) -> int:
         short_id = local_id[:32] if len(local_id) > 32 else local_id
         print(f"  {_C.MUTED}{short_id}{_C.RESET}", end="  ", flush=True)
 
-        # Skip if already pushed (stage_run_id recorded in meta).
-        if stage_run_id:
+        # A run_id that parses as a UUID is usable as a Stage run ID directly.
+        local_is_uuid = _is_uuid(local_id)
+
+        # Skip if already on Stage: prefer stored stage_run_id, fall back to
+        # local_id when it is a valid UUID (e.g. Stage-integrated runs).
+        check_id = stage_run_id or (local_id if local_is_uuid else None)
+        if check_id:
             try:
-                stage_api_call(cfg, "GET", f"/v1/runs/{stage_run_id}")
+                stage_api_call(cfg, "GET", f"/v1/runs/{check_id}")
                 print(f"{_C.MUTED}skipped{_C.RESET}")
                 skipped += 1
                 continue
             except RuntimeError:
                 pass  # not found; push it
 
-        # Create the run on Stage (server generates the UUID).
+        # Create the run. Pass the local ID when it is a valid UUID so Stage
+        # stores the same ID; otherwise let Stage generate a new one.
+        create_body: dict = {
+            "scenario": meta.get("scenario", ""),
+            "world": meta.get("world", ""),
+            "backend": meta.get("backend", ""),
+            "metadata": {
+                **{k: meta[k] for k in ("started_at", "finished_at", "duration_s") if k in meta},
+                **({"local_run_id": local_id} if not local_is_uuid else {}),
+            },
+        }
+        if local_is_uuid:
+            create_body["id"] = local_id
+
         try:
             created = stage_api_call(
                 cfg, "POST",
                 f"/v1/projects/{cfg.org_slug}/{cfg.project_slug}/runs",
-                {
-                    "scenario": meta.get("scenario", ""),
-                    "world": meta.get("world", ""),
-                    "backend": meta.get("backend", ""),
-                    "metadata": {
-                        **{k: meta[k] for k in ("started_at", "finished_at", "duration_s") if k in meta},
-                        "local_run_id": local_id,
-                    },
-                },
+                create_body,
             )
         except RuntimeError as e:
             print(f"{_C.ERR}failed{_C.RESET}  {_C.MUTED}create-run: {e}{_C.RESET}")
             failed += 1
             continue
 
-        stage_run_id = created.get("id", "")
-        if stage_run_id and meta_path.exists():
+        stage_run_id = created.get("id", "") or local_id
+        if meta_path.exists():
             try:
                 meta["stage_run_id"] = stage_run_id
                 meta["stage_url"] = created.get("url", "")
