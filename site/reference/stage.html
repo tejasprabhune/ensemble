@@ -90,27 +90,37 @@
     <section>
       <h2>Authentication</h2>
       <p>
-        Stage uses GitHub OAuth for identity. Run
-        <code>ensemble stage login</code> to open a browser to the
-        GitHub authorization page. After you authorize, the server
-        redirects back to a local listener on a random high port and
-        writes the resulting API key to
-        <code>~/.ensemble/stage.toml</code> with 0600 permissions.
+        Stage uses GitHub OAuth for identity. Sign in at
+        <a href="https://ensemble-stage.fly.dev">ensemble-stage.fly.dev</a>
+        by clicking "Sign in with GitHub." After you authorize, Stage
+        creates your account, using your GitHub login as your personal
+        org slug, and redirects you to your org page.
       </p>
-<pre><code class="language-bash">ensemble stage login
-# Opens browser, waits for callback, writes ~/.ensemble/stage.toml
+      <p>
+        Once signed in, go to <a href="https://ensemble-stage.fly.dev/me">/me</a>
+        and create a push-scoped API key. Give it a name you will
+        recognize (for example "laptop" or "workstation"), leave the
+        scope as "push," and click "Create key." The raw key value
+        appears exactly once in a banner. Copy it and store it
+        somewhere safe; the server stores only a SHA-256 hash and the
+        value cannot be recovered.
+      </p>
+<pre><code class="language-bash"># After copying the key from /me:
+export ENSEMBLE_STAGE_API_KEY=stage_sk_...
 
-ensemble stage whoami
-# github_login: tejasprabhune
-# default_org: tejasprabhune</code></pre>
+# Verify it works:
+curl -s -H "Authorization: Bearer $ENSEMBLE_STAGE_API_KEY" \
+  https://ensemble-stage.fly.dev/v1/me
+# {"id": 1, "github_login": "tejasprabhune", "default_org_slug": "tejasprabhune"}</code></pre>
       <p>
-        The API key lives only in the credentials file on your machine.
-        It is never written to the project's <code>.stage.toml</code>
-        or committed to version control.
+        The key lives wherever you store it (shell profile, password
+        manager, CI secret). It is never written to the project's
+        <code>.stage.toml</code> or committed to version control.
       </p>
       <p>
-        To revoke access, run <code>ensemble stage logout</code> or
-        delete the key from the Stage web UI under Settings.
+        To revoke access, return to
+        <a href="https://ensemble-stage.fly.dev/me">/me</a> and click
+        "Revoke" next to the key.
       </p>
     </section>
 
@@ -173,20 +183,35 @@ world = World("plank", stage=stage)</code></pre>
       <h2>Projects</h2>
       <p>
         Every run belongs to a Stage project of the form
-        <code>org_slug/project_slug</code>. Create a project from the
-        CLI:
-      </p>
-<pre><code class="language-bash">ensemble stage projects create myorg/popcornbench</code></pre>
-      <p>
-        This calls the Stage API and writes
-        <code>.stage.toml</code> in the current directory referencing
-        the new project. Subsequent commands in the same directory pick
-        up the project automatically.
+        <code>org_slug/project_slug</code>, where
+        <code>org_slug</code> is typically your GitHub login for
+        personal projects.
       </p>
       <p>
-        To list projects you have access to:
+        Create a project through the Stage web UI. After signing in,
+        your personal org page at
+        <code>https://ensemble-stage.fly.dev/your-login</code> shows
+        an inline form. Fill in a slug (lowercase letters, digits, and
+        hyphens), a display name, and click "Create project." Stage
+        redirects you to the new project page.
       </p>
-<pre><code class="language-bash">ensemble stage projects list</code></pre>
+      <p>
+        Once the project exists, set the project slug as an environment
+        variable so ensemble targets it automatically:
+      </p>
+<pre><code class="language-bash">export ENSEMBLE_STAGE_PROJECT=myorg/popcornbench</code></pre>
+      <p>
+        For a repository where everyone should target the same Stage
+        project, write <code>.stage.toml</code> at the root and commit
+        it:
+      </p>
+<pre><code class="language-toml">[stage]
+project = "myorg/popcornbench"</code></pre>
+      <p>
+        The environment variable takes priority over the config file;
+        each developer still provides their own
+        <code>ENSEMBLE_STAGE_API_KEY</code>.
+      </p>
     </section>
 
     <section>

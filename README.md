@@ -109,12 +109,12 @@ export ENSEMBLE_STAGE_PROJECT=myorg/popcornbench
 ./target/debug/ensemble stage push traces/
 ```
 
-To authenticate for the first time:
+To set up Stage for the first time:
 
-```sh
-./target/debug/ensemble stage login   # opens browser, writes ~/.ensemble/stage.toml
-./target/debug/ensemble stage whoami  # confirm setup
-```
+1. Sign in at [ensemble-stage.fly.dev](https://ensemble-stage.fly.dev) with GitHub.
+2. Go to [/me](https://ensemble-stage.fly.dev/me) and create a push-scoped API key. Copy the key when it appears; it is shown exactly once.
+3. Create a project at `https://ensemble-stage.fly.dev/your-github-login` using the inline form.
+4. Set the two environment variables above and run any scenario.
 
 Stage is entirely optional. Local JSONL traces are always written first
 and are complete whether or not Stage is reachable. See
