@@ -212,6 +212,16 @@ break_judge = "claude-sonnet-4-5"    # model used to score trajectory outcomes</
             <td><code>/v1/projects/{org}/{proj}/training_runs</code></td>
             <td>List training runs, newest first.</td>
           </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/training_runs/{id}/past_runs</code></td>
+            <td>The 5 most recent completed training runs for the same persona, with their metrics included. Used by the comparison overlay chart on the detail page.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/training_runs/{id}/baseline_comparison</code></td>
+            <td>Trained-vs-prompted comparison. Finds eval runs whose <code>metadata.adapter_uri</code> matches this run's <code>artifact_uri</code>, groups by (scenario, backend), matches against baseline runs, and returns per-group deltas. Response: <code>{"linked": bool, "reason"?: string, "entries": [...]}</code>. When <code>linked</code> is false, <code>reason</code> is <code>"no_artifact"</code> or <code>"no_trained_runs"</code>.</td>
+          </tr>
         </tbody>
       </table>
       <p>

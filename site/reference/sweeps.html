@@ -237,6 +237,82 @@ preset = ["fast", "balanced", "thorough"]</code></pre>
       </p>
     </section>
 
+    <section>
+      <h2>Cancelling a sweep</h2>
+      <p>
+        A running sweep can be cancelled from the sweep detail page or
+        via the API. Cancellation marks the sweep as
+        <code>cancelled</code> and prevents new child runs from being
+        registered. Runs that are already in flight continue to
+        completion; Stage only observes runs, it does not terminate
+        them.
+      </p>
+      <p>
+        From the web UI, a "Cancel sweep" button appears in the action
+        row above the KPI strip when the sweep status is
+        <code>running</code>. Clicking it prompts for confirmation
+        before posting the cancel request. The button disappears once
+        the sweep reaches any terminal state.
+      </p>
+      <p>Via the API:</p>
+<pre><code class="language-bash">curl -X POST \
+  -H "Authorization: Bearer $ENSEMBLE_STAGE_API_KEY" \
+  "https://ensemble-stage.fly.dev/v1/sweeps/019542b0-.../cancel"</code></pre>
+      <p>
+        Returns <code>{"ok": true}</code> on success. Returns
+        <code>404</code> if the sweep is not found or is already in a
+        terminal state (<code>completed</code>, <code>failed</code>, or
+        <code>cancelled</code>). Accepts both session cookies and API
+        keys.
+      </p>
+    </section>
+
+    <section>
+      <h2>Stage API for sweeps</h2>
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/projects/{org}/{proj}/sweeps</code></td>
+            <td>Create sweep. Body: <code>{config: object}</code>. Config is stored as-is; use it to record your axes and parameters.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/projects/{org}/{proj}/sweeps</code></td>
+            <td>List sweeps newest-first. Each entry includes id, status, config, and timestamps.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/sweeps/{id}</code></td>
+            <td>Sweep metadata: status, config, started_at, ended_at.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/sweeps/{id}/runs</code></td>
+            <td>All child runs with scenario, world, backend, status, outcome, wall_time_ms, total_cost, and timestamps.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/sweeps/{id}/runs</code></td>
+            <td>Register an existing run as a child. Body: <code>{run_id}</code>. Run and sweep must be in the same project.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/sweeps/{id}/status</code></td>
+            <td>Update sweep status. Body: <code>{status}</code>. Valid values: running, completed, failed, cancelled.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/sweeps/{id}/cancel</code></td>
+            <td>Cancel a running sweep. No body required. Returns 404 if already terminal.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <section id="reading-the-sweep-detail-page-on-stage">
       <h2>Reading the sweep detail page on Stage</h2>
       <p>
