@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 
-PROD_BASE_URL = "https://stage.ensemble.sh"
+PROD_BASE_URL = "https://ensemble-stage.fly.dev"
 
 
 @dataclass

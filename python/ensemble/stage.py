@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
-PROD_BASE_URL = "https://stage.ensemble.sh"
+PROD_BASE_URL = "https://ensemble-stage.fly.dev"
 _CREDS_PATH = Path.home() / ".ensemble" / "stage.toml"
 _PROJECT_TOML = Path(".stage.toml")
 

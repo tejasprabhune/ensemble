@@ -270,7 +270,7 @@ impl World {
         let stage_config = match (stage_api_key, stage_project) {
             (Some(key), Some(project)) => {
                 let base = stage_base_url
-                    .unwrap_or("https://stage.ensemble.sh")
+                    .unwrap_or("https://ensemble-stage.fly.dev")
                     .to_string();
                 Some(StageConfig {
                     api_key: key.to_string(),

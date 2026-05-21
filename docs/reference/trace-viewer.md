@@ -76,7 +76,7 @@ import { mountViewer } from './viewer.js';
 import { StagePollingSource } from './sources/stage-polling.js';
 
 const source = new StagePollingSource({
-  baseUrl: 'https://stage.ensemble.sh',
+  baseUrl: 'https://ensemble-stage.fly.dev',
   runId: '019542a3-4e7b-7000-8e1d-3f9a1c2d5e6f',
   apiKey: 'stage_sk_...',  // omit for public projects
 });

@@ -100,7 +100,7 @@ export ENSEMBLE_STAGE_PROJECT=myorg/popcornbench
 # Runs now print a Stage URL alongside the run id:
 ./target/debug/ensemble run plank.refund_storm
 # Run id: 019542a3-4e7b-7000-8e1d-3f9a1c2d5e6f
-# Stage:  https://stage.ensemble.sh/myorg/popcornbench/runs/019542a3-...
+# Stage:  https://ensemble-stage.fly.dev/myorg/popcornbench/runs/019542a3-...
 
 # ensemble runs list merges local and Stage results:
 ./target/debug/ensemble runs list

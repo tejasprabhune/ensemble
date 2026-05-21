@@ -58,7 +58,7 @@ def _start_recording_server(
     response_body: dict = None,
 ) -> tuple:
     if response_body is None:
-        response_body = {"id": "run_abc", "url": "https://stage.ensemble.sh/runs/run_abc"}
+        response_body = {"id": "run_abc", "url": "https://ensemble-stage.fly.dev/runs/run_abc"}
     server = http.server.HTTPServer(("127.0.0.1", 0), _RecordingHandler)
     server._requests = []
     server._status_code = status_code

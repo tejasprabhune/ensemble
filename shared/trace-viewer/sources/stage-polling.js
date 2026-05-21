@@ -7,7 +7,7 @@
 //
 // Usage:
 //   const src = new StagePollingSource({
-//     baseUrl: 'https://stage.ensemble.sh',
+//     baseUrl: 'https://ensemble-stage.fly.dev',
 //     runId: '019542a3-...',
 //     apiKey: 'stage_sk_...',   // optional; omit for public projects
 //   });
