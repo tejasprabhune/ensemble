@@ -22,7 +22,7 @@ tests/                python integration tests
 
 ## Requirements
 
-- Rust 1.85+ (workspace edition 2021; some transitive deps require edition2024, stabilized in 1.85)
+- Rust stable (1.85+; workspace edition 2021, some transitive deps require edition2024)
 - Python 3.10+
 - `uv` for Python env and package management
 
