@@ -52,356 +52,404 @@
       Stage is ensemble's cloud observability backend. It stores run
       histories, sweep results, and training metrics so you can share
       them with teammates, compare runs across machines, and revisit
-      results long after the local files have been cleaned up. It is
-      entirely optional: ensemble always writes a local JSONL trace,
-      and Stage receives the same events in parallel.
+      results long after the local files have been cleaned up. Stage is
+      entirely optional: ensemble always writes a complete local JSONL
+      trace first, and Stage receives the same events in parallel. If
+      Stage is unreachable the local run is unaffected.
     </p>
 
     <section>
       <h2>When to use Stage</h2>
       <p>
-        The local trace file is the right choice for iteration on a
-        single machine. You can open it in the viewer, diff two runs
-        with <code>ensemble runs compare</code>, and build your grader
-        against it. You do not need Stage for any of that.
+        The local trace file and the <code>ensemble runs</code>
+        subcommands are the right tools when you are iterating alone on
+        a single machine. You can open any run in the viewer, diff two
+        runs with <code>ensemble runs compare</code>, and export the
+        index for downstream scripts without touching Stage at all.
       </p>
       <p>
-        Use Stage when you want any of the following:
+        Stage adds value when any of the following apply. You want to
+        share a run with a colleague who does not have the file on their
+        machine. You run scenarios on more than one machine and want a
+        unified history without manually syncing files. You are running
+        sweeps and want a persistent matrix view that outlives the
+        working directory. You are training a persona and want metric
+        charts across training steps. You are writing a script that
+        needs to query run results without reading JSONL files from
+        disk.
       </p>
-      <ul>
-        <li>Share a run URL with a colleague who does not have the
-          trace file on their machine.</li>
-        <li>See a merged history of runs across multiple machines or
-          researchers in a single <code>ensemble runs list</code>
-          view.</li>
-        <li>Track sweep results and training metrics in a persistent
-          store that outlives the working directory.</li>
-        <li>Push older local traces that accumulated before Stage
-          was set up.</li>
-      </ul>
       <p>
-        Stage and local traces are complementary, not competing. Every
-        event goes to the local JSONL file first; Stage receives them
-        in parallel over an asynchronous buffered connection. If Stage
-        is unreachable, the local trace is unaffected.
+        Stage and local traces are complementary. Every event goes to
+        the local JSONL file first; Stage receives them asynchronously
+        in batches. If you have Stage configured and a run fails to
+        reach it, the local trace is still complete and you can push
+        it retroactively.
       </p>
     </section>
 
     <section>
-      <h2>Authentication</h2>
+      <h2>Setting up</h2>
       <p>
-        Stage uses GitHub OAuth for identity. Sign in at
+        Stage uses GitHub OAuth for identity. Open
         <a href="https://ensemble-stage.fly.dev">ensemble-stage.fly.dev</a>
-        by clicking "Sign in with GitHub." After you authorize, Stage
-        creates your account, using your GitHub login as your personal
-        org slug, and redirects you to your org page.
+        and click "Sign in with GitHub." After you authorize the app,
+        Stage creates your account and uses your GitHub login as your
+        personal org slug. You land on your org page at
+        <code>/your-github-login</code>.
       </p>
       <p>
-        Once signed in, go to <a href="https://ensemble-stage.fly.dev/me">/me</a>
-        and create a push-scoped API key. Give it a name you will
-        recognize (for example "laptop" or "workstation"), leave the
-        scope as "push," and click "Create key." The raw key value
-        appears exactly once in a banner. Copy it and store it
-        somewhere safe; the server stores only a SHA-256 hash and the
-        value cannot be recovered.
-      </p>
-<pre><code class="language-bash"># After copying the key from /me:
-export ENSEMBLE_STAGE_API_KEY=stage_sk_...
-
-# Verify it works:
-curl -s -H "Authorization: Bearer $ENSEMBLE_STAGE_API_KEY" \
-  https://ensemble-stage.fly.dev/v1/me
-# {"id": 1, "github_login": "tejasprabhune", "default_org_slug": "tejasprabhune"}</code></pre>
-      <p>
-        The key lives wherever you store it (shell profile, password
-        manager, CI secret). It is never written to the project's
-        <code>.stage.toml</code> or committed to version control.
+        Create a project from your org page. The inline form at the top
+        of the page takes a slug (lowercase letters, digits, and
+        hyphens), a display name, and an optional description. Click
+        "Create project." Stage redirects you to the new project page at
+        <code>/your-login/your-project-slug</code>.
       </p>
       <p>
-        To revoke access, return to
+        Create an API key by going to
+        <a href="https://ensemble-stage.fly.dev/me">/me</a>. Give the
+        key a name you will recognize ("laptop" or "ci" work well),
+        leave the scope as "push," and click "Create key." The full key
+        value appears exactly once in a banner at the top of the page.
+        Copy it immediately and store it somewhere safe, such as your
+        shell profile or a password manager. The server stores only a
+        SHA-256 hash, so the value cannot be recovered after you leave
+        the page.
+      </p>
+      <p>
+        To revoke a key, return to
         <a href="https://ensemble-stage.fly.dev/me">/me</a> and click
-        "Revoke" next to the key.
+        "Revoke" next to the key's name.
       </p>
     </section>
 
     <section>
-      <h2>Configuration</h2>
+      <h2>Configuring ensemble</h2>
       <p>
-        Configuration follows a three-level precedence:
-      </p>
-      <ol>
-        <li>An explicit <code>Stage(...)</code> object passed to
-          <code>World()</code>.</li>
-        <li>Environment variables:
-          <code>ENSEMBLE_STAGE_API_KEY</code>,
-          <code>ENSEMBLE_STAGE_PROJECT</code>,
-          <code>ENSEMBLE_STAGE_BASE_URL</code> (optional),
-          <code>ENSEMBLE_STAGE_ENABLED</code> (set to
-          <code>0</code> to disable).</li>
-        <li>Config files: the API key comes from
-          <code>~/.ensemble/stage.toml</code> under
-          <code>[credentials]</code>; the project slug comes from
-          <code>.stage.toml</code> in the working directory under
-          <code>[stage]</code>.</li>
-      </ol>
-      <p>
-        The common case is to set two environment variables and let the
-        rest happen automatically:
+        The two environment variables <code>ENSEMBLE_STAGE_API_KEY</code>
+        and <code>ENSEMBLE_STAGE_PROJECT</code> are all you need for the
+        common case. Set them in your shell profile or export them in
+        the session before running scenarios:
       </p>
 <pre><code class="language-bash">export ENSEMBLE_STAGE_API_KEY=stage_sk_...
-export ENSEMBLE_STAGE_PROJECT=myorg/popcornbench
-ensemble run agora.refund_storm</code></pre>
+export ENSEMBLE_STAGE_PROJECT=myorg/myproject</code></pre>
       <p>
-        For a project where everyone should target the same Stage
-        project, write <code>.stage.toml</code> at the repository root
-        and commit it:
+        For a repository where everyone should target the same Stage
+        project, write a <code>.stage.toml</code> file at the repository
+        root and commit it. Each developer still provides their own
+        <code>ENSEMBLE_STAGE_API_KEY</code> independently; the file
+        only records which project to target.
       </p>
 <pre><code class="language-toml">[stage]
-project = "myorg/popcornbench"</code></pre>
+project = "myorg/myproject"</code></pre>
       <p>
-        Each developer still needs
-        <code>ENSEMBLE_STAGE_API_KEY</code> or a personal credentials
-        file; the project file only records which Stage project to
-        target.
+        Configuration resolves through three levels of precedence. An
+        explicit <code>Stage(...)</code> object passed to
+        <code>World()</code> wins. Environment variables win over config
+        files. Within config files, the API key comes from
+        <code>~/.ensemble/stage.toml</code> under
+        <code>[credentials]</code>, and the project slug comes from
+        <code>.stage.toml</code> in the working directory under
+        <code>[stage]</code>.
       </p>
       <p>
-        To disable Stage for one command while it is otherwise
-        configured, set <code>ENSEMBLE_STAGE_ENABLED=0</code>:
-      </p>
-<pre><code class="language-bash">ENSEMBLE_STAGE_ENABLED=0 ensemble run agora.refund_storm</code></pre>
-      <p>
-        To configure Stage explicitly in Python:
+        To configure Stage in Python rather than through environment
+        variables, pass a <code>Stage</code> object directly to
+        <code>World()</code>:
       </p>
 <pre><code class="language-python">from ensemble.stage import Stage
 from ensemble import World
 
-stage = Stage(project="myorg/popcornbench", api_key="stage_sk_...")
+stage = Stage(project="myorg/myproject", api_key="stage_sk_...")
 world = World("agora", stage=stage)</code></pre>
+      <p>
+        To disable Stage for a single command without unsetting
+        environment variables, set
+        <code>ENSEMBLE_STAGE_ENABLED=0</code>:
+      </p>
+<pre><code class="language-bash">ENSEMBLE_STAGE_ENABLED=0 ensemble run agora.refund_storm</code></pre>
     </section>
 
     <section>
-      <h2>Projects</h2>
+      <h2>Running a scenario</h2>
       <p>
-        Every run belongs to a Stage project of the form
-        <code>org_slug/project_slug</code>, where
-        <code>org_slug</code> is typically your GitHub login for
-        personal projects.
+        Once the environment variables are set, running a scenario works
+        exactly as before. Stage integration is transparent: ensemble
+        creates the run entity on Stage before the scenario starts,
+        streams events in the background, and prints the Stage URL
+        alongside the run id on stderr.
+      </p>
+<pre><code class="language-bash">ensemble run agora.refund_storm
+# Run id: 019e4ac0-9075-7113-a038-dfeac521846f
+# Stage:  https://ensemble-stage.fly.dev/myorg/myproject/runs/019e4ac0-...</code></pre>
+      <p>
+        The Stage URL is the permanent address for that run. You can
+        open it while the run is still in progress to watch events
+        arrive, or share it with a colleague. The run stays accessible
+        on Stage after the local trace file is cleaned up.
       </p>
       <p>
-        Create a project through the Stage web UI. After signing in,
-        your personal org page at
-        <code>https://ensemble-stage.fly.dev/your-login</code> shows
-        an inline form. Fill in a slug (lowercase letters, digits, and
-        hyphens), a display name, and click "Create project." Stage
-        redirects you to the new project page.
-      </p>
-      <p>
-        Once the project exists, set the project slug as an environment
-        variable so ensemble targets it automatically:
-      </p>
-<pre><code class="language-bash">export ENSEMBLE_STAGE_PROJECT=myorg/popcornbench</code></pre>
-      <p>
-        For a repository where everyone should target the same Stage
-        project, write <code>.stage.toml</code> at the root and commit
-        it:
-      </p>
-<pre><code class="language-toml">[stage]
-project = "myorg/popcornbench"</code></pre>
-      <p>
-        The environment variable takes priority over the config file;
-        each developer still provides their own
-        <code>ENSEMBLE_STAGE_API_KEY</code>.
-      </p>
-    </section>
-
-    <section>
-      <h2>Runs, sweeps, and training runs</h2>
-      <p>
-        Stage tracks three entity types, each with its own URL and
-        status lifecycle.
-      </p>
-      <p>
-        <strong>Runs.</strong> When Stage is configured,
-        <code>ensemble run</code> creates a run entity before the
-        scenario starts and prints its URL to stderr:
-      </p>
-<pre><code class="language-bash">Run id: 019542a3-4e7b-7000-8e1d-3f9a1c2d5e6f
-Stage:  https://ensemble-stage.fly.dev/myorg/popcornbench/runs/019542a3-...</code></pre>
-      <p>
-        Events stream to Stage throughout the run in the background.
-        The local trace file receives every event first; Stage receives
-        them asynchronously in batches of up to 100. When the scenario
-        ends, remaining events are flushed with a five-second timeout
-        and the run is marked completed. If Stage is unreachable, a
-        warning with an event count and a
-        <code>ensemble stage push</code> hint is printed, and the local
-        trace is complete regardless.
-      </p>
-      <p>
-        <strong>Sweeps.</strong> <code>ensemble sweep run</code>
-        creates a parent sweep entity on Stage before launching cells.
-        Each child run includes the sweep's id, so Stage can group
-        them. The sweep URL is printed at startup and the final status
-        is posted when all cells finish.
-      </p>
-      <p>
-        <strong>Training runs.</strong> <code>ensemble train</code>
-        creates a training run entity and streams step metrics during
-        training. The training run URL is printed at startup. Metric
-        flushing uses a background thread with a 30-second timer so
-        individual training steps are not blocked by network I/O.
+        Events reach Stage asynchronously in batches of up to 100. When
+        the scenario finishes, any remaining buffered events are flushed
+        with a five-second timeout before the run is marked completed.
+        If the flush fails, ensemble prints a warning with an event
+        count and an <code>ensemble stage push</code> command you can
+        run retroactively.
       </p>
     </section>
 
     <section>
-      <h2>Navigating the web UI</h2>
+      <h2>The run detail page</h2>
+      <p>
+        Opening a run URL on Stage shows the full trace in a structured
+        layout. The page is divided into several sections that correspond
+        to different aspects of what happened during the scenario.
+      </p>
+      <p>
+        The <strong>timeline</strong> at the top is a scrubber over the
+        trace. Each tick represents one event. Clicking a tick or
+        dragging the slider updates all panels below to show the state
+        at that point in the run. The tick count and the scenario name
+        appear in the header.
+      </p>
+      <p>
+        The <strong>actors panel</strong> shows which actors (users and
+        agents) sent messages and when. Each message appears with its
+        sender, recipient, and text, annotated with the tick it occurred
+        at. This panel gives a narrative view of the conversation as it
+        unfolded.
+      </p>
+      <p>
+        The <strong>tool calls panel</strong> lists every tool dispatch
+        in order: the tool name, the arguments the agent passed, and the
+        result the world returned. For tools that emit diffs, a
+        collapsed diff indicator appears next to the result.
+      </p>
+      <p>
+        The <strong>state changes panel</strong> shows the world state
+        diffs that tools produced. Each diff entry identifies the table,
+        row, and field that changed, plus the old and new values. This
+        panel confirms that a refund landed in the database, or that a
+        ticket status moved from "open" to "escalated."
+      </p>
+      <p>
+        The <strong>hidden state</strong> section shows each user actor's
+        hidden goal and the values of their hidden state fields at each
+        tick. This is the private context the grader evaluates after the
+        run; seeing it alongside the conversation lets you audit whether
+        the agent resolved the user's unstated objective.
+      </p>
+      <p>
+        The <strong>predicates</strong> section shows the final result
+        of every grader predicate evaluation: which predicates fired,
+        which did not, and the score each one contributed. If a run
+        scored unexpectedly, this section shows exactly which predicate
+        caused the divergence.
+      </p>
+      <p>
+        The <strong>outcome</strong> section summarizes the final
+        scores as a key-value table, matching the JSON object the
+        scenario yielded. The <strong>cost</strong> section shows the
+        total token and USD costs broken down by actor and by call.
+      </p>
+    </section>
 
-      <h3>Run detail</h3>
+    <section>
+      <h2>Running a sweep</h2>
       <p>
-        A run URL opens a page divided into a timeline viewer and a
-        sidebar. The timeline scrubber at the top lets you step through
-        every event in sequence. Two view modes are available:
-        <em>timeline</em>, which shows three synchronized panels (Actors,
-        Tool calls, State changes), and <em>chat</em>, which shows a
-        conversation transcript.
+        Sweeps on Stage work through the same
+        <code>ensemble sweep run</code> command you use locally. When
+        Stage is configured, ensemble creates a parent sweep entity
+        before launching cells and associates each cell run with the
+        parent. The sweep URL is printed at startup.
+      </p>
+<pre><code class="language-bash">ensemble sweep run sweep.toml
+# Sweep id: 019a1b2c-...
+# Stage:    https://ensemble-stage.fly.dev/myorg/myproject/sweeps/019a1b2c-...</code></pre>
+      <p>
+        The sweep detail page shows a matrix view with one row per cell.
+        Each row shows the cell's flag and environment variable
+        combinations, whether the cell completed or failed, and the
+        grader scores for that cell. Clicking a row opens the run detail
+        page for that specific cell.
       </p>
       <p>
-        The Actors panel shows the last few messages each actor sent up
-        to the current scrubber position. The Tool calls panel lists
-        every tool invocation with its arguments and result. Seed calls
-        (those that happened before any LLM turn) are labeled
-        <code>[seed]</code>. The State changes panel shows each database
-        mutation as a row with the table, field, old value, and new value.
+        Cells that were skipped because a prior run already existed
+        appear as "skipped" in the matrix. Passing
+        <code>--no-resume</code> forces all cells to re-run and updates
+        their rows in the matrix.
       </p>
-      <p>
-        The right sidebar shows:
-      </p>
-      <ul>
-        <li><strong>Outcome</strong> -- the grader scores dict produced
-          by the scenario, for example
-          <code>alice_refund_resolved: 0.0</code>.</li>
-        <li><strong>Actors</strong> -- every actor's id, kind (user or
-          agent), model, and persona.</li>
-        <li><strong>Predicates</strong> -- the grader scores rendered
-          with pass/fail color coding.</li>
-        <li><strong>Hidden state</strong> -- the hidden state that was
-          assigned to each user persona (goals, mood, constraints).</li>
-        <li><strong>Cost</strong> -- token and USD totals when the
-          backend reports costs.</li>
-        <li><strong>Metadata</strong> -- any custom metadata attached
-          when the run was created.</li>
-      </ul>
-      <p>
-        The header bar shows status, scenario name, model, world, start
-        time, and wall-clock duration. Runs that are still in progress
-        poll for new events every two seconds and update the scrubber
-        range automatically.
-      </p>
+    </section>
 
-      <h3>Sweep detail</h3>
+    <section>
+      <h2>Training</h2>
       <p>
-        A sweep URL shows a KPI strip at the top with aggregate counts
-        (total runs, completed, failed, running) and a mean primary-
-        outcome score. Below the strip, a matrix table organizes cells
-        by the two axes with the most variation in the sweep config
-        (for example backend and scenario). Each cell shows a colored
-        dot (green for all-completed, red for all-failed, mixed for
-        partial) and the mean score. Clicking a single-run cell
-        navigates to that run. Below the matrix, a flat table lists all
-        child runs in the sweep.
+        When you run <code>ensemble train</code> with Stage configured,
+        ensemble creates a training run entity and streams step metrics
+        as training progresses. The training run URL is printed at
+        startup.
       </p>
+<pre><code class="language-bash">ensemble train examples/agora/personas/frustrated_power_user.toml --backend modal
+# Training run: https://ensemble-stage.fly.dev/myorg/myproject/training/019b2c3d-...</code></pre>
+      <p>
+        The training run detail page shows a chart for each metric that
+        was streamed: loss, reward, KL divergence, and any custom
+        metrics the training backend reported. The x-axis is the
+        training step. The chart updates live while training is in
+        progress and freezes when the run completes or fails.
+      </p>
+      <p>
+        Metric flushing uses a background thread with a 30-second timer
+        so individual training steps are not blocked by network I/O.
+        If the training process exits uncleanly, buffered metrics are
+        flushed at process teardown.
+      </p>
+    </section>
 
-      <h3>Training run detail</h3>
+    <section>
+      <h2>Comparing runs</h2>
       <p>
-        A training run URL shows a header with persona name, base model,
-        status, and artifact URI. The body contains one SVG line chart
-        per metric name streamed by <code>ensemble train</code>. Common
-        metrics are <code>train_loss</code> and <code>eval_loss</code>.
-        Charts update every five seconds while the run is in progress.
-        A final metrics table appears once the run completes.
+        Stage lets you compare any two runs side by side. From the runs
+        list page for a project, select two runs by clicking their
+        checkboxes, then press <kbd>c</kbd>. Stage opens a comparison
+        view with both runs' timelines synchronized by tick.
       </p>
+      <p>
+        The comparison view shows the two traces in parallel columns.
+        Scrubbing the shared timeline updates both columns simultaneously,
+        so you can see how the agents diverged at the same point in the
+        run. The scores table at the bottom shows both runs' grader
+        outputs side by side with differences highlighted.
+      </p>
+      <p>
+        You can navigate directly to a comparison by providing two run
+        ids in the query string:
+        <code>/myorg/myproject/compare?a=019e4ac0&amp;b=019f5bd1</code>.
+        This URL is shareable: a colleague with access to the project
+        sees the same view without needing to reproduce either run
+        locally.
+      </p>
+    </section>
 
-      <h3>Comparing runs</h3>
+    <section>
+      <h2>Sharing</h2>
       <p>
-        From any project runs table, select two rows by checking their
-        checkboxes and press <kbd>c</kbd>. Stage navigates to
-        <code>/compare?a=...&amp;b=...</code> and loads both runs in
-        parallel. A metadata comparison table at the top highlights
-        rows that differ between the two runs. Below it, an aligned
-        event timeline shows both traces side by side, with identical
-        ticks dimmed and diverging ticks highlighted.
+        Any run, sweep, or training run detail page has a "Share"
+        button in the top-right corner. Clicking it generates a share
+        token and returns a URL of the form
+        <code>/share/&lt;token&gt;</code>. Anyone who has that URL can
+        view the run without a Stage account or GitHub login. Share
+        tokens give read-only access to the specific run they were
+        generated for and do not grant access to the rest of the
+        project.
       </p>
       <p>
-        You can also open the compare view directly by pasting two run
-        IDs into the compare form at
-        <code>/{org}/{project}/compare</code>.
-      </p>
-
-      <h3>Sharing runs</h3>
-      <p>
-        The "Share" button on a run detail page generates a share link
-        that works without signing in. Click it, then click "Generate
-        link." Stage mints a token and returns a URL of the form
-        <code>https://ensemble-stage.fly.dev/share/{token}</code>. The
-        link expires in 30 days. Send it to a colleague and they can
-        open the full run detail in a read-only view.
+        Share tokens do not expire by default. To revoke access, open
+        the run detail page, click "Manage shares," and delete the
+        token. The URL stops working immediately.
       </p>
     </section>
 
     <section>
       <h2>Bulk push</h2>
       <p>
-        Traces that accumulated before Stage was configured can be
-        pushed retroactively. The push command reads each run's
-        <code>meta.json</code>, checks whether that run id is already
-        on Stage, and skips it if so. Idempotent: running push twice
+        Local traces that accumulated before Stage was configured can
+        be pushed retroactively. The push command reads each run
+        directory's <code>meta.json</code>, checks whether that run id
+        already exists on Stage, and skips it if so. Running push twice
         on the same directory is safe.
       </p>
 <pre><code class="language-bash"># Push every trace under traces/:
 ensemble stage push traces/
 
 # Push one specific run directory:
-ensemble stage push traces/019542a3-4e7b-7000-8e1d-3f9a1c2d5e6f/
+ensemble stage push traces/019e4ac0-9075-7113-a038-dfeac521846f/
 
 # Push using a glob pattern:
 ensemble stage push "traces/*/trace.jsonl"</code></pre>
       <p>
-        Push reports a count at the end:
-        <code>N pushed, M skipped, K failed</code>.
+        Push prints a summary when it finishes:
+        <code>N pushed, M skipped, K failed</code>. Failures are
+        printed individually with the run id and error so you can
+        retry them selectively.
+      </p>
+    </section>
+
+    <section>
+      <h2>Stage API</h2>
+      <p>
+        Stage exposes a REST API at <code>/v1</code> for querying run
+        results, sweep summaries, and training metrics programmatically.
+        The same push-scoped API key you use for <code>ensemble run</code>
+        authenticates API requests.
+      </p>
+<pre><code class="language-bash"># List runs for a project:
+curl -s -H "Authorization: Bearer $ENSEMBLE_STAGE_API_KEY" \
+  "https://ensemble-stage.fly.dev/v1/projects/myorg/myproject/runs?limit=20"
+
+# Fetch one run's metadata and scores:
+curl -s -H "Authorization: Bearer $ENSEMBLE_STAGE_API_KEY" \
+  "https://ensemble-stage.fly.dev/v1/projects/myorg/myproject/runs/019e4ac0-..."
+
+# Fetch the run's full event stream as JSONL:
+curl -s -H "Authorization: Bearer $ENSEMBLE_STAGE_API_KEY" \
+  "https://ensemble-stage.fly.dev/v1/projects/myorg/myproject/runs/019e4ac0-.../events"</code></pre>
+      <p>
+        The runs list endpoint returns a paginated response with each
+        run's id, scenario, scores, backend, and timestamps. The
+        single-run endpoint returns the same fields plus the full scores
+        table. The events endpoint streams the trace as
+        newline-delimited JSON, matching the local
+        <code>trace.jsonl</code> format exactly.
+      </p>
+      <p>
+        The API is rate-limited per key. For bulk access to many runs,
+        prefer the events endpoint over the UI and cache responses
+        locally rather than re-fetching on each script run.
       </p>
     </section>
 
     <section>
       <h2>Troubleshooting</h2>
       <p>
-        <strong>Stage push failures.</strong> If events fail to reach
-        Stage during a run, the last line of output includes a count
-        and an <code>ensemble stage push</code> hint with the trace
-        path. The run is still locally complete. Run push afterwards to
-        retroactively send the events.
+        <strong>Events failed to reach Stage.</strong> If events fail
+        to push during a run, the last line of output includes a count
+        and an <code>ensemble stage push</code> command with the trace
+        path. The run is locally complete. Run that command afterwards
+        to send the events retroactively.
       </p>
       <p>
         <strong>Credential errors.</strong> If
-        <code>ensemble stage whoami</code> returns an unauthorized
-        error, the stored key may have been revoked. Run
-        <code>ensemble stage logout</code> then
+        <code>ensemble stage whoami</code> returns an unauthorized error,
+        the stored key may have been revoked or the wrong key is in the
+        environment. Run <code>ensemble stage logout</code> then
         <code>ensemble stage login</code> to get a fresh key.
       </p>
       <p>
-        <strong>Wrong project.</strong> If runs are appearing in the
-        wrong Stage project, check <code>.stage.toml</code> in the
-        current directory and the
-        <code>ENSEMBLE_STAGE_PROJECT</code> environment variable.
-        Explicit Stage config in Python beats both.
+        <strong>Wrong project.</strong> If runs appear in the wrong
+        Stage project, check <code>.stage.toml</code> in the current
+        directory and the <code>ENSEMBLE_STAGE_PROJECT</code> environment
+        variable. An explicit <code>Stage</code> object passed to
+        <code>World()</code> takes priority over both.
       </p>
       <p>
         <strong>Self-hosted Stage.</strong> Set
-        <code>ENSEMBLE_STAGE_BASE_URL</code> to your instance's URL.
-        The same variable can go in <code>~/.ensemble/stage.toml</code>
-        under <code>[credentials].base_url</code> or in the project's
+        <code>ENSEMBLE_STAGE_BASE_URL</code> to your instance's URL. The
+        same variable can go in <code>~/.ensemble/stage.toml</code> under
+        <code>[credentials].base_url</code>, or in the project's
         <code>.stage.toml</code> under <code>[stage].base_url</code>.
       </p>
     </section>
+
+    <footer class="site">
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
+    </footer>
   </main>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script>hljs.highlightAll();</script>
 </body>
 </html>
