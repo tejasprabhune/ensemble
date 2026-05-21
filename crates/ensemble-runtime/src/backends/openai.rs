@@ -298,7 +298,13 @@ impl OpenAIBackend {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(BackendError::Rejected(format!("{status}: {text}")));
+            return Err(BackendError::Rejected(
+                super::auth_hint::format_rejection(
+                    super::auth_hint::Provider::OpenAI,
+                    status,
+                    &text,
+                ),
+            ));
         }
 
         let parsed: ResponsesResponse = resp
@@ -463,7 +469,13 @@ impl OpenAIBackend {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(BackendError::Rejected(format!("{status}: {text}")));
+            return Err(BackendError::Rejected(
+                super::auth_hint::format_rejection(
+                    super::auth_hint::Provider::OpenAI,
+                    status,
+                    &text,
+                ),
+            ));
         }
 
         let parsed: ChatResponse = resp

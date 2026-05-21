@@ -101,7 +101,13 @@ impl LLMBackend for AnthropicBackend {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(BackendError::Rejected(format!("{status}: {text}")));
+            return Err(BackendError::Rejected(
+                super::auth_hint::format_rejection(
+                    super::auth_hint::Provider::Anthropic,
+                    status,
+                    &text,
+                ),
+            ));
         }
 
         let parsed: AnthropicResponse = resp
