@@ -79,6 +79,11 @@ enum Cmd {
         #[command(subcommand)]
         sub: ModelsCmd,
     },
+    /// Run a sweep: cartesian product over CLI flags and environment.
+    Sweep {
+        #[command(subcommand)]
+        sub: SweepCmd,
+    },
     /// Manage the registry of installed worlds at ~/.ensemble/worlds.toml.
     Worlds {
         #[command(subcommand)]
@@ -129,6 +134,18 @@ enum ModelsCmd {
     /// Print available backends, whether their keys are set, and the
     /// model identifiers each backend knows about.
     List,
+}
+
+#[derive(Subcommand)]
+enum SweepCmd {
+    /// Run a sweep defined by a sweep.toml.
+    Run {
+        /// Path to the sweep TOML.
+        config: PathBuf,
+        /// Re-run cells whose meta.json already exists (default: skip them).
+        #[arg(long = "no-resume")]
+        no_resume: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -195,6 +212,7 @@ fn main() -> Result<()> {
             }
         },
         Cmd::Models { sub } => models_subcommand(sub),
+        Cmd::Sweep { sub } => sweep_subcommand(sub),
         Cmd::Worlds { sub } => worlds_subcommand(sub),
         Cmd::Mcp { sub } => mcp_subcommand(sub),
         Cmd::Train { persona, backend } => train(&persona, &backend),
@@ -214,6 +232,26 @@ fn models_subcommand(sub: ModelsCmd) -> Result<()> {
         .context("invoking python -m ensemble.cli_models; is python on PATH?")?;
     if !status.success() {
         return Err(anyhow!("models subcommand failed (exit {status})"));
+    }
+    Ok(())
+}
+
+fn sweep_subcommand(sub: SweepCmd) -> Result<()> {
+    let mut cmd = python_command(false);
+    cmd.args(["-m", "ensemble.cli_sweep"]);
+    match sub {
+        SweepCmd::Run { config, no_resume } => {
+            cmd.arg("run").arg(&config);
+            if no_resume {
+                cmd.arg("--no-resume");
+            }
+        }
+    }
+    let status = cmd
+        .status()
+        .context("invoking python -m ensemble.cli_sweep; is python on PATH?")?;
+    if !status.success() {
+        return Err(anyhow!("sweep subcommand failed (exit {status})"));
     }
     Ok(())
 }
