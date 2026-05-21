@@ -496,7 +496,7 @@ impl World {
         // Release the GIL across the scheduler run so plugin tools and
         // predicates implemented in python can call back into the
         // interpreter without deadlocking on this thread's lock.
-        py.allow_threads(|| {
+        py.detach(|| {
             runtime
                 .block_on(async move {
                     let mut scheduler = Scheduler::new(bus.clone(), budget)
@@ -650,7 +650,7 @@ impl World {
         let notifier = bus.notifier();
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
 
-        Ok(py.allow_threads(|| {
+        Ok(py.detach(|| {
             runtime.block_on(async move {
                 loop {
                     let cur = log.len().await as u64;
@@ -776,7 +776,7 @@ impl World {
         let bus = self.inner.lock().bus.clone();
         let unit = unit.to_string();
         let actor = actor.map(ActorId::from_label);
-        py.allow_threads(|| {
+        py.detach(|| {
             global_runtime().block_on(async move {
                 bus.set_budget(unit, amount, actor).await;
             })
@@ -791,7 +791,7 @@ impl World {
         let bus = self.inner.lock().bus.clone();
         let unit = unit.to_string();
         let actor = actor.map(ActorId::from_label);
-        py.allow_threads(|| {
+        py.detach(|| {
             global_runtime().block_on(async move {
                 match actor {
                     Some(a) => bus.actor_cost_total(&a, &unit).await,
@@ -816,7 +816,7 @@ impl World {
         let bus = self.inner.lock().bus.clone();
         let unit = unit.to_string();
         let actor = actor.map(ActorId::from_label);
-        py.allow_threads(|| {
+        py.detach(|| {
             global_runtime()
                 .block_on(async move { bus.record_cost(unit, amount, actor).await })
         });
@@ -869,7 +869,7 @@ impl World {
     /// Pop the next message addressed to an external agent. Returns a
     /// dict with `from`, `kind`, and `text` or `None` when nothing is
     /// pending. Polling-based; callers add their own sleep loop.
-    fn external_recv(&self, py: Python<'_>, agent_id: &str) -> PyResult<PyObject> {
+    fn external_recv(&self, py: Python<'_>, agent_id: &str) -> PyResult<Py<PyAny>> {
         let key = ActorId::from_label(agent_id);
         let item = {
             let inner = self.inner.lock();
@@ -883,7 +883,7 @@ impl World {
         match item {
             None => Ok(py.None()),
             Some(item) => {
-                let d = pyo3::types::PyDict::new_bound(py);
+                let d = pyo3::types::PyDict::new(py);
                 d.set_item("from", item.from)?;
                 d.set_item("kind", item.kind)?;
                 d.set_item("text", item.text)?;
@@ -904,7 +904,7 @@ impl World {
     ) -> PyResult<()> {
         let bus = self.inner.lock().bus.clone();
         let msg = Message::AgentMessage { text: text.into() };
-        py.allow_threads(|| {
+        py.detach(|| {
             global_runtime().block_on(bus.send(
                 ActorId::from_label(agent_id),
                 Recipient::Actor(ActorId::from_label(target)),
@@ -940,7 +940,7 @@ impl World {
         let tool_owned = tool_name.to_string();
         let runtime = global_runtime();
         
-        let outcome_json = py.allow_threads(move || {
+        let outcome_json = py.detach(move || {
             runtime.block_on(async move {
                 bus.append_event(
                     Some(actor.clone()),
@@ -1060,7 +1060,7 @@ impl World {
         let tool_owned = tool_name.to_string();
         let runtime = global_runtime();
 
-        let outcome_json = py.allow_threads(move || {
+        let outcome_json = py.detach(move || {
             runtime.block_on(async move {
                 bus.append_event(
                     None,
@@ -1175,7 +1175,7 @@ impl World {
             -> Result<ToolOutcome, ToolError> {
             let args_str = serde_json::to_string(args)
                 .map_err(|e| ToolError::Execution(format!("serialize args: {e}")))?;
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 let result_obj = callable
                     .call1(py, (args_str,))
                     .map_err(|e| ToolError::Execution(format!("python tool: {e}")))?;
@@ -1244,7 +1244,7 @@ impl World {
             let trace_str =
                 serde_json::to_string(ctx.trace).unwrap_or_else(|_| "[]".into());
             let args_str = ctx.args.to_string();
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 match callable.call1(py, (trace_str, args_str)) {
                     Ok(v) => v.extract::<bool>(py).unwrap_or(false),
                     Err(e) => {
@@ -1318,11 +1318,11 @@ impl User {
     /// `None` when the user shares the world's default backend. Used
     /// by tests and tooling to verify the resolved choice without
     /// having to stand up the backend itself.
-    fn backend_info(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn backend_info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         match &self.backend_choice {
             None => Ok(py.None()),
             Some(BackendChoice::Vllm { base_url, adapter }) => {
-                let d = pyo3::types::PyDict::new_bound(py);
+                let d = pyo3::types::PyDict::new(py);
                 d.set_item("kind", "vllm")?;
                 d.set_item("base_url", base_url)?;
                 d.set_item("adapter", adapter.clone())?;
@@ -1382,7 +1382,7 @@ impl User {
         // spawn_blocking path inside dispatch_async will deadlock if
         // we hold the GIL through block_on. Release it for the
         // duration of the dispatch.
-        py.allow_threads(|| runtime.block_on(async move {
+        py.detach(|| runtime.block_on(async move {
             bus.append_event(
                 Some(actor.clone()),
                 EventPayload::ToolCall {
