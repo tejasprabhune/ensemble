@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
-use crate::backend::{BackendError, CompletionRequest, CompletionResponse, LLMBackend, SharedBackend};
+use crate::backend::{
+    BackendError, CompletionRequest, CompletionResponse, LLMBackend, SharedBackend,
+};
 
 /// Hidden state lives alongside the persona and is rendered into a
 /// tagged block in the system prompt each turn. Personas are told
@@ -15,7 +17,9 @@ pub struct HiddenState {
 
 impl HiddenState {
     pub fn new(value: serde_json::Value) -> Self {
-        Self { inner: Arc::new(RwLock::new(value)) }
+        Self {
+            inner: Arc::new(RwLock::new(value)),
+        }
     }
 
     pub fn snapshot(&self) -> serde_json::Value {

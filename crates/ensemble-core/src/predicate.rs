@@ -22,7 +22,10 @@ pub struct PredicateCtx<'a> {
 
 impl<'a> PredicateCtx<'a> {
     pub fn new(trace: &'a [Event]) -> Self {
-        Self { trace, args: serde_json::Value::Null }
+        Self {
+            trace,
+            args: serde_json::Value::Null,
+        }
     }
 
     pub fn with_args(trace: &'a [Event], args: serde_json::Value) -> Self {
@@ -132,7 +135,10 @@ mod tests {
             args: serde_json::json!({}),
             seed: false,
         })];
-        assert_eq!(reg.evaluate("any_refund", &PredicateCtx::new(&trace)), Some(true));
+        assert_eq!(
+            reg.evaluate("any_refund", &PredicateCtx::new(&trace)),
+            Some(true)
+        );
         assert_eq!(reg.evaluate("missing", &PredicateCtx::new(&trace)), None);
     }
 }

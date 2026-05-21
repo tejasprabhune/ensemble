@@ -58,7 +58,11 @@ pub struct ToolOutcome {
 
 impl ToolOutcome {
     pub fn effect_only(effect: serde_json::Value) -> Self {
-        Self { effect, diff: None, costs: HashMap::new() }
+        Self {
+            effect,
+            diff: None,
+            costs: HashMap::new(),
+        }
     }
 
     pub fn with_diff(effect: serde_json::Value, diff: serde_json::Value) -> Self {
@@ -112,17 +116,12 @@ impl Tool {
         F: Fn(&serde_json::Value) -> Result<E, ToolError> + Send + Sync + 'static,
         E: Serialize,
     {
-        Self::wrap(
-            name,
-            description,
-            parameters,
-            move |args, _emitter| {
-                let effect = run(args)?;
-                serde_json::to_value(effect)
-                    .map(ToolOutcome::effect_only)
-                    .map_err(|e| ToolError::Execution(format!("serialize: {e}")))
-            },
-        )
+        Self::wrap(name, description, parameters, move |args, _emitter| {
+            let effect = run(args)?;
+            serde_json::to_value(effect)
+                .map(ToolOutcome::effect_only)
+                .map_err(|e| ToolError::Execution(format!("serialize: {e}")))
+        })
     }
 
     /// State-changing tool: returns both an effect and a diff. The diff
@@ -140,19 +139,14 @@ impl Tool {
         E: Serialize,
         D: Serialize,
     {
-        Self::wrap(
-            name,
-            description,
-            parameters,
-            move |args, _emitter| {
-                let (effect, diff) = run(args)?;
-                let ev = serde_json::to_value(effect)
-                    .map_err(|e| ToolError::Execution(format!("serialize effect: {e}")))?;
-                let dv = serde_json::to_value(diff)
-                    .map_err(|e| ToolError::Execution(format!("serialize diff: {e}")))?;
-                Ok(ToolOutcome::with_diff(ev, dv))
-            },
-        )
+        Self::wrap(name, description, parameters, move |args, _emitter| {
+            let (effect, diff) = run(args)?;
+            let ev = serde_json::to_value(effect)
+                .map_err(|e| ToolError::Execution(format!("serialize effect: {e}")))?;
+            let dv = serde_json::to_value(diff)
+                .map_err(|e| ToolError::Execution(format!("serialize diff: {e}")))?;
+            Ok(ToolOutcome::with_diff(ev, dv))
+        })
     }
 
     /// Tool with progress reporting. The closure receives an emitter
@@ -166,10 +160,7 @@ impl Tool {
         run: F,
     ) -> Self
     where
-        F: Fn(&serde_json::Value, &ProgressEmitter) -> Result<E, ToolError>
-            + Send
-            + Sync
-            + 'static,
+        F: Fn(&serde_json::Value, &ProgressEmitter) -> Result<E, ToolError> + Send + Sync + 'static,
         E: Serialize,
     {
         Self::wrap(name, description, parameters, move |args, emitter| {
@@ -239,9 +230,7 @@ impl ToolRegistry {
     }
 
     pub fn register(&self, tool: Tool) {
-        self.tools
-            .write()
-            .insert(tool.schema.name.clone(), tool);
+        self.tools.write().insert(tool.schema.name.clone(), tool);
     }
 
     pub fn get(&self, name: &str) -> Option<Tool> {
@@ -249,7 +238,11 @@ impl ToolRegistry {
     }
 
     pub fn schemas(&self) -> Vec<ToolSchema> {
-        self.tools.read().values().map(|t| t.schema.clone()).collect()
+        self.tools
+            .read()
+            .values()
+            .map(|t| t.schema.clone())
+            .collect()
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -264,11 +257,7 @@ impl ToolRegistry {
     /// closure inline, and surfaces buffered progress on the returned
     /// outcome via the trailing flush path. Most callers should use
     /// [`dispatch_async`] instead.
-    pub fn dispatch(
-        &self,
-        name: &str,
-        args: &serde_json::Value,
-    ) -> Result<ToolOutcome, ToolError> {
+    pub fn dispatch(&self, name: &str, args: &serde_json::Value) -> Result<ToolOutcome, ToolError> {
         let tool = self
             .tools
             .read()
@@ -310,9 +299,7 @@ impl ToolRegistry {
         let emitter_for_task = emitter.clone();
         let run = tool.run.clone();
         let args = args.clone();
-        let join = tokio::task::spawn_blocking(move || {
-            run(&args, &emitter_for_task)
-        });
+        let join = tokio::task::spawn_blocking(move || run(&args, &emitter_for_task));
         let timeout = tool.timeout;
         let result = match timeout {
             Some(d) => tokio::time::timeout(d, join).await,
@@ -325,9 +312,7 @@ impl ToolRegistry {
                 timed_out_after: None,
             },
             Ok(Err(join_err)) => DispatchResult {
-                outcome: Err(ToolError::Execution(format!(
-                    "tool panicked: {join_err}"
-                ))),
+                outcome: Err(ToolError::Execution(format!("tool panicked: {join_err}"))),
                 progress: emitter.drain(),
                 timed_out_after: None,
             },

@@ -1,7 +1,7 @@
-use ensemble_core::prelude::*;
 use ensemble_core::bus::Bus;
 use ensemble_core::error::{RestoreError, ToolError};
 use ensemble_core::event::EventPayload;
+use ensemble_core::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Default, Clone, Debug)]
@@ -41,17 +41,16 @@ impl WorldState for Counter {
     type ToolEffect = CounterEffect;
     type Diff = CounterDiff;
 
-    fn apply(
-        &mut self,
-        call: Self::ToolCall,
-    ) -> Result<(Self::ToolEffect, Self::Diff), ToolError> {
+    fn apply(&mut self, call: Self::ToolCall) -> Result<(Self::ToolEffect, Self::Diff), ToolError> {
         match call {
             CounterCall::Inc { by, note } => {
                 let old = self.value;
                 self.value += by;
                 self.history.push(note.clone());
                 Ok((
-                    CounterEffect { new_value: self.value },
+                    CounterEffect {
+                        new_value: self.value,
+                    },
                     CounterDiff {
                         field: "value",
                         old,
@@ -86,8 +85,8 @@ impl WorldState for Counter {
     }
 
     fn restore(&mut self, snapshot: &[u8]) -> Result<(), RestoreError> {
-        let snap: CounterSnapshot = serde_json::from_slice(snapshot)
-            .map_err(|e| RestoreError::Decode(e.to_string()))?;
+        let snap: CounterSnapshot =
+            serde_json::from_slice(snapshot).map_err(|e| RestoreError::Decode(e.to_string()))?;
         self.value = snap.value;
         self.history = snap.history;
         Ok(())
@@ -107,7 +106,10 @@ async fn apply_emits_tool_result_and_diff() {
             actor.clone(),
             "call-1",
             "inc",
-            CounterCall::Inc { by: 5, note: "first".into() },
+            CounterCall::Inc {
+                by: 5,
+                note: "first".into(),
+            },
         )
         .await
         .unwrap();
@@ -116,7 +118,13 @@ async fn apply_emits_tool_result_and_diff() {
     let events = log.snapshot().await;
     assert_eq!(events.len(), 2);
     match &events[0].payload {
-        EventPayload::ToolResult { id, name, is_error, seed: _, .. } => {
+        EventPayload::ToolResult {
+            id,
+            name,
+            is_error,
+            seed: _,
+            ..
+        } => {
             assert_eq!(id, "call-1");
             assert_eq!(name, "inc");
             assert!(!is_error);
@@ -137,12 +145,18 @@ async fn apply_emits_tool_result_and_diff() {
 async fn snapshot_and_restore_round_trip() {
     let world = WorldHandle::new(Counter::default());
     world
-        .apply(CounterCall::Inc { by: 7, note: "a".into() })
+        .apply(CounterCall::Inc {
+            by: 7,
+            note: "a".into(),
+        })
         .await
         .unwrap();
     let snap = world.snapshot().await;
     world
-        .apply(CounterCall::Inc { by: 100, note: "b".into() })
+        .apply(CounterCall::Inc {
+            by: 100,
+            note: "b".into(),
+        })
         .await
         .unwrap();
     let post = world.with(|c| c.value).await;
@@ -177,11 +191,20 @@ async fn scheduler_halts_gracefully_on_budget_exhaustion() {
 
     let scheduler = Scheduler::new(
         bus.clone(),
-        TickBudget { max_ticks: 4, max_events: 1000, quiescence_ms: 50, drain_grace_ms: 50 },
+        TickBudget {
+            max_ticks: 4,
+            max_events: 1000,
+            quiescence_ms: 50,
+            drain_grace_ms: 50,
+        },
     );
     let stop = scheduler.run().await.unwrap();
     match stop {
-        StopReason::BudgetExhausted { cap: BudgetCap::Ticks, ticks, .. } => {
+        StopReason::BudgetExhausted {
+            cap: BudgetCap::Ticks,
+            ticks,
+            ..
+        } => {
             assert!(ticks >= 4);
         }
         other => panic!("expected BudgetExhausted(Ticks), got {other:?}"),
@@ -201,7 +224,9 @@ async fn until_combinators_compose() {
     let actor = ActorId::from_label("agent");
     bus.append_event(
         Some(actor),
-        EventPayload::System { note: "tick".into() },
+        EventPayload::System {
+            note: "tick".into(),
+        },
     )
     .await;
 

@@ -22,12 +22,20 @@ pub enum StopReason {
     Quiescent,
     /// Exhausted `max_ticks` or `max_events`. The cap that fired is
     /// reported so callers can tell the difference.
-    BudgetExhausted { ticks: u64, events: usize, cap: BudgetCap },
+    BudgetExhausted {
+        ticks: u64,
+        events: usize,
+        cap: BudgetCap,
+    },
     /// A cost annotation pushed the world's running total past a
     /// declared budget. The unit, the amount of the offending
     /// annotation, and the configured budget are reported so
     /// scenarios can include them in failure messages.
-    BudgetExceeded { unit: String, amount: f64, budget: f64 },
+    BudgetExceeded {
+        unit: String,
+        amount: f64,
+        budget: f64,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -225,9 +233,11 @@ impl Scheduler {
                     BudgetCap::Events => "max_events",
                 }
             ),
-            StopReason::BudgetExceeded { unit, amount, budget } => format!(
-                "budget exceeded: {unit} {amount} > {budget}; halting"
-            ),
+            StopReason::BudgetExceeded {
+                unit,
+                amount,
+                budget,
+            } => format!("budget exceeded: {unit} {amount} > {budget}; halting"),
         };
         let tick = bus.current_tick().await;
         log.append(Event {

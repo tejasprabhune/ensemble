@@ -44,10 +44,18 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: "user".into(), content: content.into(), ..Default::default() }
+        Self {
+            role: "user".into(),
+            content: content.into(),
+            ..Default::default()
+        }
     }
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: "assistant".into(), content: content.into(), ..Default::default() }
+        Self {
+            role: "assistant".into(),
+            content: content.into(),
+            ..Default::default()
+        }
     }
     pub fn assistant_with_calls(
         content: impl Into<String>,
@@ -61,15 +69,20 @@ impl ChatMessage {
         }
     }
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: "system".into(), content: content.into(), ..Default::default() }
+        Self {
+            role: "system".into(),
+            content: content.into(),
+            ..Default::default()
+        }
     }
     pub fn tool(content: impl Into<String>) -> Self {
-        Self { role: "tool".into(), content: content.into(), ..Default::default() }
+        Self {
+            role: "tool".into(),
+            content: content.into(),
+            ..Default::default()
+        }
     }
-    pub fn tool_result(
-        tool_call_id: impl Into<String>,
-        content: impl Into<String>,
-    ) -> Self {
+    pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
             role: "tool".into(),
             content: content.into(),

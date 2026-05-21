@@ -12,6 +12,7 @@ use pyo3::types::PyList;
 
 use ensemble_core::actor::ActorHandle;
 use ensemble_core::bus::{Bus, Message, Recipient};
+use ensemble_core::error::ToolError;
 use ensemble_core::event::{EventLog, EventPayload, EventSink, TraceFile};
 use ensemble_core::ids::{ActorId, MessageId};
 use ensemble_core::predicate::{PredicateCtx, PredicateRegistry};
@@ -22,7 +23,6 @@ use ensemble_runtime::{
     MockBackend, MockScript, MockTurn, OpenAIBackend, PromptedPersona, SharedBackend, StageConfig,
     StageSink, Tool, ToolOutcome, ToolRegistry, UserActor,
 };
-use ensemble_core::error::ToolError;
 
 mod world_registry;
 use world_registry::{WorldBundle, WorldRegistry};
@@ -123,7 +123,10 @@ pub(crate) struct ActorSpec {
 /// a `SharedBackend` by `build_actor` at scheduler launch time.
 #[derive(Clone, Debug)]
 pub(crate) enum BackendChoice {
-    Vllm { base_url: String, adapter: Option<String> },
+    Vllm {
+        base_url: String,
+        adapter: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -190,12 +193,18 @@ impl ensemble_core::actor::Actor for ExternalForwardActor {
         let (kind, text) = match envelope.message {
             Message::UserMessage { text } => ("user", text),
             Message::AgentMessage { text } => ("agent", text),
-            Message::ToolResult { name, result, is_error, .. } => {
-                let prefix = if is_error { "tool_error" } else { "tool_result" };
-                (
-                    prefix,
-                    format!("{} {}: {}", prefix, name, result),
-                )
+            Message::ToolResult {
+                name,
+                result,
+                is_error,
+                ..
+            } => {
+                let prefix = if is_error {
+                    "tool_error"
+                } else {
+                    "tool_result"
+                };
+                (prefix, format!("{} {}: {}", prefix, name, result))
             }
             _ => return Ok(()),
         };
@@ -333,29 +342,45 @@ impl World {
     /// configured or the create-run HTTP call fails (caller continues
     /// without Stage in that case).
     #[pyo3(signature = (scenario, sweep_id = ""))]
-    fn init_stage_run(&self, py: Python<'_>, scenario: &str, sweep_id: &str) -> PyResult<Option<String>> {
+    fn init_stage_run(
+        &self,
+        py: Python<'_>,
+        scenario: &str,
+        sweep_id: &str,
+    ) -> PyResult<Option<String>> {
         let (config, run_id, backend_kind, log) = {
             let inner = self.inner.lock();
             let cfg = match inner.stage_config.clone() {
                 Some(c) => c,
                 None => return Ok(None),
             };
-            (cfg, inner.run_id.to_string(), inner.backend_kind, inner.log.clone())
+            (
+                cfg,
+                inner.run_id.to_string(),
+                inner.backend_kind,
+                inner.log.clone(),
+            )
         };
         let world_name = self.inner.lock().name.clone();
         let scenario_owned = scenario.to_string();
-        let sweep_id_opt = if sweep_id.is_empty() { None } else { Some(sweep_id.to_string()) };
+        let sweep_id_opt = if sweep_id.is_empty() {
+            None
+        } else {
+            Some(sweep_id.to_string())
+        };
         let rt = global_runtime();
         // Release the GIL while blocking on the HTTP call so a Python-backed
         // mock server running on another thread can handle the request.
-        let result = py.detach(|| rt.block_on(StageSink::create(
-            config,
-            run_id,
-            &scenario_owned,
-            &world_name,
-            backend_kind,
-            sweep_id_opt,
-        )));
+        let result = py.detach(|| {
+            rt.block_on(StageSink::create(
+                config,
+                run_id,
+                &scenario_owned,
+                &world_name,
+                backend_kind,
+                sweep_id_opt,
+            ))
+        });
         match result {
             Ok((sink, run_url)) => {
                 log.set_event_sink(Some(sink.clone() as Arc<dyn EventSink>));
@@ -468,7 +493,11 @@ impl World {
                 match v {
                     serde_json::Value::Object(map) => map.into_iter().collect(),
                     serde_json::Value::Null => Default::default(),
-                    _ => return Err(PyValueError::new_err("params_json must encode a JSON object")),
+                    _ => {
+                        return Err(PyValueError::new_err(
+                            "params_json must encode a JSON object",
+                        ))
+                    }
                 }
             }
             _ => Default::default(),
@@ -496,7 +525,10 @@ impl World {
 
     /// Test-only: queue a canned mock response for a given model.
     fn _mock_say(&self, model: &str, text: &str) {
-        self.inner.lock().script.push_for(model, MockTurn::text(text));
+        self.inner
+            .lock()
+            .script
+            .push_for(model, MockTurn::text(text));
     }
 
     /// Test-only: queue a canned mock turn that emits both text and a
@@ -522,7 +554,10 @@ impl World {
     fn _mock_tool(&self, model: &str, tool: &str, args_json: &str) -> PyResult<()> {
         let args: serde_json::Value = serde_json::from_str(args_json)
             .map_err(|e| PyValueError::new_err(format!("bad json: {e}")))?;
-        self.inner.lock().script.push_for(model, MockTurn::tool(tool, args));
+        self.inner
+            .lock()
+            .script
+            .push_for(model, MockTurn::tool(tool, args));
         Ok(())
     }
 
@@ -573,16 +608,18 @@ impl World {
                     .all(|(_, a)| matches!(a.kind(), ensemble_core::actor::ActorKind::Agent));
                 if agents_only && !handles.is_empty() {
                     let bus_for_warn = bus.clone();
-                    global_runtime().block_on(bus_for_warn.append_event(
-                        None,
-                        ensemble_core::event::EventPayload::System {
-                            note: "ensemble: no seed messages queued and only agents are \
+                    global_runtime().block_on(
+                        bus_for_warn.append_event(
+                            None,
+                            ensemble_core::event::EventPayload::System {
+                                note: "ensemble: no seed messages queued and only agents are \
                                    registered; the scheduler will quiesce on the first \
                                    tick. Spawn a User and call .say(...), or call \
                                    agent.say(...) to kick off the conversation."
-                                .into(),
-                        },
-                    ));
+                                    .into(),
+                            },
+                        ),
+                    );
                     eprintln!(
                         "ensemble: no seed messages queued and only agents are registered. \
                          The scheduler will quiesce on the first tick. Spawn a User and call \
@@ -600,8 +637,8 @@ impl World {
         py.detach(|| {
             runtime
                 .block_on(async move {
-                    let mut scheduler = Scheduler::new(bus.clone(), budget)
-                        .with_predicates(predicates.clone());
+                    let mut scheduler =
+                        Scheduler::new(bus.clone(), budget).with_predicates(predicates.clone());
                     for (id, actor) in actor_handles {
                         let inbox = bus.register(id).await;
                         scheduler.register(Arc::new(ActorHandle::new(actor, inbox)));
@@ -867,13 +904,7 @@ impl World {
     /// is scoped to that actor's own running total; otherwise it is
     /// a world-wide cap.
     #[pyo3(signature = (unit, amount, actor=None))]
-    fn set_budget(
-        &self,
-        py: Python<'_>,
-        unit: &str,
-        amount: f64,
-        actor: Option<&str>,
-    ) {
+    fn set_budget(&self, py: Python<'_>, unit: &str, amount: f64, actor: Option<&str>) {
         let bus = self.inner.lock().bus.clone();
         let unit = unit.to_string();
         let actor = actor.map(ActorId::from_label);
@@ -918,8 +949,7 @@ impl World {
         let unit = unit.to_string();
         let actor = actor.map(ActorId::from_label);
         py.detach(|| {
-            global_runtime()
-                .block_on(async move { bus.record_cost(unit, amount, actor).await })
+            global_runtime().block_on(async move { bus.record_cost(unit, amount, actor).await })
         });
         Ok(())
     }
@@ -929,11 +959,7 @@ impl World {
     /// the python layer drains via `external_recv`. Used by the MCP
     /// entry point to plumb scenario messages to a connected client.
     #[pyo3(signature = (id, tools=None))]
-    fn register_external_agent(
-        &self,
-        id: &str,
-        tools: Option<&Bound<'_, PyList>>,
-    ) -> PyResult<()> {
+    fn register_external_agent(&self, id: &str, tools: Option<&Bound<'_, PyList>>) -> PyResult<()> {
         let actor_id = ActorId::from_label(id);
         let tool_names: Option<Vec<String>> = match tools {
             Some(list) => Some(
@@ -1040,7 +1066,7 @@ impl World {
         let call_id = MessageId::new().to_string();
         let tool_owned = tool_name.to_string();
         let runtime = global_runtime();
-        
+
         let outcome_json = py.detach(move || {
             runtime.block_on(async move {
                 bus.append_event(
@@ -1110,8 +1136,7 @@ impl World {
                         }
                     }
                     Err(e) => {
-                        let err_json =
-                            serde_json::json!({"ok": false, "error": e.to_string()});
+                        let err_json = serde_json::json!({"ok": false, "error": e.to_string()});
                         body.insert("effect".into(), err_json.clone());
                         body.insert("is_error".into(), serde_json::Value::Bool(true));
                         bus.append_event(
@@ -1141,12 +1166,7 @@ impl World {
     /// want to evolve world state outside of an actor's turn (test
     /// setup, scenario-author seed actions that don't belong to any
     /// user, scheduled world events). Returns the effect JSON.
-    fn apply(
-        &self,
-        py: Python<'_>,
-        tool_name: &str,
-        args_json: &str,
-    ) -> PyResult<String> {
+    fn apply(&self, py: Python<'_>, tool_name: &str, args_json: &str) -> PyResult<String> {
         let args: serde_json::Value = serde_json::from_str(args_json)
             .map_err(|e| PyValueError::new_err(format!("bad args json: {e}")))?;
         let (bus, tools, resources) = {
@@ -1219,19 +1239,15 @@ impl World {
                         )
                         .await;
                         if let Some(diff) = outcome.diff {
-                            bus.append_event(
-                                None,
-                                EventPayload::StateDiff { diff, seed: true },
-                            )
-                            .await;
+                            bus.append_event(None, EventPayload::StateDiff { diff, seed: true })
+                                .await;
                         }
                         for (unit, amount) in costs {
                             bus.record_cost(unit, amount, None).await;
                         }
                     }
                     Err(e) => {
-                        let err_json =
-                            serde_json::json!({"ok": false, "error": e.to_string()});
+                        let err_json = serde_json::json!({"ok": false, "error": e.to_string()});
                         body.insert("effect".into(), err_json.clone());
                         body.insert("is_error".into(), serde_json::Value::Bool(true));
                         bus.append_event(
@@ -1272,8 +1288,9 @@ impl World {
             .map_err(|e| PyValueError::new_err(format!("bad parameters json: {e}")))?;
         let tools = self.inner.lock().tools.clone();
         let tool_name = name.to_string();
-        let wrapper = move |args: &serde_json::Value, emitter: &ensemble_runtime::ProgressEmitter|
-            -> Result<ToolOutcome, ToolError> {
+        let wrapper = move |args: &serde_json::Value,
+                            emitter: &ensemble_runtime::ProgressEmitter|
+              -> Result<ToolOutcome, ToolError> {
             let args_str = serde_json::to_string(args)
                 .map_err(|e| ToolError::Execution(format!("serialize args: {e}")))?;
             Python::attach(|py| {
@@ -1281,14 +1298,11 @@ impl World {
                     .call1(py, (args_str,))
                     .map_err(|e| ToolError::Execution(format!("python tool: {e}")))?;
                 let result_str: String = result_obj.extract(py).map_err(|e| {
-                    ToolError::Execution(format!(
-                        "python tool must return a JSON string: {e}"
-                    ))
+                    ToolError::Execution(format!("python tool must return a JSON string: {e}"))
                 })?;
-                let parsed: serde_json::Value = serde_json::from_str(&result_str)
-                    .map_err(|e| ToolError::Execution(format!(
-                        "python tool returned non-json: {e}"
-                    )))?;
+                let parsed: serde_json::Value = serde_json::from_str(&result_str).map_err(|e| {
+                    ToolError::Execution(format!("python tool returned non-json: {e}"))
+                })?;
                 let effect = parsed
                     .get("effect")
                     .cloned()
@@ -1320,7 +1334,11 @@ impl World {
                         emitter.emit(fraction, message);
                     }
                 }
-                Ok(ToolOutcome { effect, diff, costs })
+                Ok(ToolOutcome {
+                    effect,
+                    diff,
+                    costs,
+                })
             })
         };
         tools.register(Tool {
@@ -1342,8 +1360,7 @@ impl World {
     fn register_predicate(&self, name: &str, callable: Py<PyAny>) -> PyResult<()> {
         let preds = self.inner.lock().predicates.clone();
         preds.register(name.to_string(), move |ctx| {
-            let trace_str =
-                serde_json::to_string(ctx.trace).unwrap_or_else(|_| "[]".into());
+            let trace_str = serde_json::to_string(ctx.trace).unwrap_or_else(|_| "[]".into());
             let args_str = ctx.args.to_string();
             Python::attach(|py| {
                 match callable.call1(py, (trace_str, args_str)) {
@@ -1366,11 +1383,7 @@ impl World {
     /// world-supplied: a Plank world exposes things like
     /// `had_double_refund` and `agent_recommended_upgrade`.
     #[pyo3(signature = (name, args_json=None))]
-    fn evaluate_predicate(
-        &self,
-        name: &str,
-        args_json: Option<&str>,
-    ) -> PyResult<Option<bool>> {
+    fn evaluate_predicate(&self, name: &str, args_json: Option<&str>) -> PyResult<Option<bool>> {
         let args = match args_json {
             Some(s) => serde_json::from_str(s)
                 .map_err(|e| PyValueError::new_err(format!("bad args json: {e}")))?,
@@ -1478,87 +1491,91 @@ impl User {
         let actor = ActorId::from_label(&self.id);
         let tool_owned = tool.to_string();
         let runtime = global_runtime();
-        
+
         // Plugin tools call back into Python under the GIL; the
         // spawn_blocking path inside dispatch_async will deadlock if
         // we hold the GIL through block_on. Release it for the
         // duration of the dispatch.
-        py.detach(|| runtime.block_on(async move {
-            bus.append_event(
-                Some(actor.clone()),
-                EventPayload::ToolCall {
-                    id: call_id.clone(),
-                    name: tool_owned.clone(),
-                    args: args.clone(),
-                    seed: true,
-                },
-            )
-            .await;
-            let dispatch = tools.dispatch_async(&tool_owned, &args, Some(&resources)).await;
-            for entry in dispatch.progress {
+        py.detach(|| {
+            runtime.block_on(async move {
                 bus.append_event(
                     Some(actor.clone()),
-                    EventPayload::Progress {
-                        id: call_id.clone(),
-                        tool: tool_owned.clone(),
-                        fraction: entry.fraction,
-                        message: entry.message,
-                    },
-                )
-                .await;
-            }
-            if let Some(after) = dispatch.timed_out_after {
-                bus.append_event(
-                    Some(actor.clone()),
-                    EventPayload::ToolTimeout {
+                    EventPayload::ToolCall {
                         id: call_id.clone(),
                         name: tool_owned.clone(),
-                        after_ms: after.as_millis() as u64,
+                        args: args.clone(),
+                        seed: true,
                     },
                 )
                 .await;
-            }
-            match dispatch.outcome {
-                Ok(outcome) => {
-                    let costs = outcome.costs.clone();
+                let dispatch = tools
+                    .dispatch_async(&tool_owned, &args, Some(&resources))
+                    .await;
+                for entry in dispatch.progress {
                     bus.append_event(
                         Some(actor.clone()),
-                        EventPayload::ToolResult {
-                            id: call_id,
-                            name: tool_owned,
-                            result: outcome.effect,
-                            is_error: false,
-                            seed: true,
+                        EventPayload::Progress {
+                            id: call_id.clone(),
+                            tool: tool_owned.clone(),
+                            fraction: entry.fraction,
+                            message: entry.message,
                         },
                     )
                     .await;
-                    if let Some(diff) = outcome.diff {
+                }
+                if let Some(after) = dispatch.timed_out_after {
+                    bus.append_event(
+                        Some(actor.clone()),
+                        EventPayload::ToolTimeout {
+                            id: call_id.clone(),
+                            name: tool_owned.clone(),
+                            after_ms: after.as_millis() as u64,
+                        },
+                    )
+                    .await;
+                }
+                match dispatch.outcome {
+                    Ok(outcome) => {
+                        let costs = outcome.costs.clone();
                         bus.append_event(
                             Some(actor.clone()),
-                            EventPayload::StateDiff { diff, seed: true },
+                            EventPayload::ToolResult {
+                                id: call_id,
+                                name: tool_owned,
+                                result: outcome.effect,
+                                is_error: false,
+                                seed: true,
+                            },
+                        )
+                        .await;
+                        if let Some(diff) = outcome.diff {
+                            bus.append_event(
+                                Some(actor.clone()),
+                                EventPayload::StateDiff { diff, seed: true },
+                            )
+                            .await;
+                        }
+                        for (unit, amount) in costs {
+                            bus.record_cost(unit, amount, Some(actor.clone())).await;
+                        }
+                    }
+                    Err(e) => {
+                        let err_json = serde_json::json!({"ok": false, "error": e.to_string()});
+                        bus.append_event(
+                            Some(actor),
+                            EventPayload::ToolResult {
+                                id: call_id,
+                                name: tool_owned,
+                                result: err_json,
+                                is_error: true,
+                                seed: true,
+                            },
                         )
                         .await;
                     }
-                    for (unit, amount) in costs {
-                        bus.record_cost(unit, amount, Some(actor.clone())).await;
-                    }
                 }
-                Err(e) => {
-                    let err_json = serde_json::json!({"ok": false, "error": e.to_string()});
-                    bus.append_event(
-                        Some(actor),
-                        EventPayload::ToolResult {
-                            id: call_id,
-                            name: tool_owned,
-                            result: err_json,
-                            is_error: true,
-                            seed: true,
-                        },
-                    )
-                    .await;
-                }
-            }
-        }));
+            })
+        });
         Ok(())
     }
 }
@@ -1683,10 +1700,13 @@ fn build_backend(
         }
     };
     Ok(match chosen {
-        "mock" => (Arc::new(MockBackend::new(script.clone())) as SharedBackend, "mock"),
+        "mock" => (
+            Arc::new(MockBackend::new(script.clone())) as SharedBackend,
+            "mock",
+        ),
         "anthropic" => {
-            let mut be = AnthropicBackend::from_env()
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+            let mut be =
+                AnthropicBackend::from_env().map_err(|e| PyValueError::new_err(format!("{e}")))?;
             let url = base_url
                 .map(str::to_string)
                 .or_else(|| std::env::var("ANTHROPIC_BASE_URL").ok());
@@ -1696,8 +1716,8 @@ fn build_backend(
             (Arc::new(be) as SharedBackend, "anthropic")
         }
         "openai" => {
-            let mut be = OpenAIBackend::from_env()
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+            let mut be =
+                OpenAIBackend::from_env().map_err(|e| PyValueError::new_err(format!("{e}")))?;
             let url = base_url
                 .map(str::to_string)
                 .or_else(|| std::env::var("OPENAI_BASE_URL").ok());
@@ -1707,9 +1727,8 @@ fn build_backend(
             (Arc::new(be) as SharedBackend, "openai")
         }
         "vllm" => {
-            let base = base_url.ok_or_else(|| {
-                PyValueError::new_err("vllm backend requires base_url=...")
-            })?;
+            let base = base_url
+                .ok_or_else(|| PyValueError::new_err("vllm backend requires base_url=..."))?;
             let be = LocalAdapterBackend::new(base);
             (Arc::new(be) as SharedBackend, "vllm")
         }
@@ -1750,9 +1769,10 @@ fn build_until(spec: &serde_json::Value) -> PyResult<Until> {
                 .get("n")
                 .and_then(|v| v.as_u64())
                 .ok_or_else(|| PyValueError::new_err("turn_count_gt requires 'n'"))?;
-            Ok(Until::new(format!("turn_count > {n}"), move |ctx: &UntilCtx<'_>| {
-                ctx.tick > n
-            }))
+            Ok(Until::new(
+                format!("turn_count > {n}"),
+                move |ctx: &UntilCtx<'_>| ctx.tick > n,
+            ))
         }
         "turn_count_ge" => {
             let n = spec
@@ -1783,10 +1803,7 @@ fn build_until(spec: &serde_json::Value) -> PyResult<Until> {
                 .get("parts")
                 .and_then(|v| v.as_array())
                 .ok_or_else(|| PyValueError::new_err("any_of requires 'parts'"))?;
-            let built: Vec<Until> = parts
-                .iter()
-                .map(build_until)
-                .collect::<PyResult<_>>()?;
+            let built: Vec<Until> = parts.iter().map(build_until).collect::<PyResult<_>>()?;
             Ok(ensemble_core::until::any_of(built))
         }
         "all_of" => {
@@ -1794,10 +1811,7 @@ fn build_until(spec: &serde_json::Value) -> PyResult<Until> {
                 .get("parts")
                 .and_then(|v| v.as_array())
                 .ok_or_else(|| PyValueError::new_err("all_of requires 'parts'"))?;
-            let built: Vec<Until> = parts
-                .iter()
-                .map(build_until)
-                .collect::<PyResult<_>>()?;
+            let built: Vec<Until> = parts.iter().map(build_until).collect::<PyResult<_>>()?;
             Ok(ensemble_core::until::all_of(built))
         }
         other => Err(PyValueError::new_err(format!(

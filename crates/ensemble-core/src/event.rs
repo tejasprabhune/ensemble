@@ -146,7 +146,10 @@ impl TraceFile {
             .append(!truncate)
             .open(&path)
             .await?;
-        Ok(Self { path, file: Arc::new(Mutex::new(file)) })
+        Ok(Self {
+            path,
+            file: Arc::new(Mutex::new(file)),
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -202,7 +205,11 @@ impl EventLog {
     }
 
     pub async fn sink_path(&self) -> Option<PathBuf> {
-        self.sink.lock().await.as_ref().map(|s| s.path().to_path_buf())
+        self.sink
+            .lock()
+            .await
+            .as_ref()
+            .map(|s| s.path().to_path_buf())
     }
 
     pub async fn append(&self, event: Event) {

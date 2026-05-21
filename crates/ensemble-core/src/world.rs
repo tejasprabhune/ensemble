@@ -12,10 +12,7 @@ pub trait WorldState: Send + Sync + 'static {
     type ToolEffect: Serialize + Send;
     type Diff: Serialize + Send;
 
-    fn apply(
-        &mut self,
-        call: Self::ToolCall,
-    ) -> Result<(Self::ToolEffect, Self::Diff), ToolError>;
+    fn apply(&mut self, call: Self::ToolCall) -> Result<(Self::ToolEffect, Self::Diff), ToolError>;
 
     fn snapshot(&self) -> Vec<u8>;
     fn restore(&mut self, snapshot: &[u8]) -> Result<(), RestoreError>;
@@ -42,10 +39,7 @@ impl<S: WorldState> WorldHandle<S> {
         }
     }
 
-    pub async fn apply(
-        &self,
-        call: S::ToolCall,
-    ) -> Result<(S::ToolEffect, S::Diff), ToolError> {
+    pub async fn apply(&self, call: S::ToolCall) -> Result<(S::ToolEffect, S::Diff), ToolError> {
         let mut guard = self.inner.lock().await;
         guard.apply(call)
     }
@@ -79,12 +73,10 @@ impl<S: WorldState> WorldHandle<S> {
         S::ToolEffect: Clone,
     {
         let (effect, diff) = self.apply(call).await?;
-        let effect_json = serde_json::to_value(&effect).map_err(|e| {
-            ToolError::Execution(format!("could not serialize tool effect: {e}"))
-        })?;
-        let diff_json = serde_json::to_value(&diff).map_err(|e| {
-            ToolError::Execution(format!("could not serialize diff: {e}"))
-        })?;
+        let effect_json = serde_json::to_value(&effect)
+            .map_err(|e| ToolError::Execution(format!("could not serialize tool effect: {e}")))?;
+        let diff_json = serde_json::to_value(&diff)
+            .map_err(|e| ToolError::Execution(format!("could not serialize diff: {e}")))?;
         let call_id = call_id.into();
         bus.append_event(
             Some(actor.clone()),
@@ -99,7 +91,10 @@ impl<S: WorldState> WorldHandle<S> {
         .await;
         bus.append_event(
             Some(actor),
-            EventPayload::StateDiff { diff: diff_json, seed: false },
+            EventPayload::StateDiff {
+                diff: diff_json,
+                seed: false,
+            },
         )
         .await;
         Ok(effect)

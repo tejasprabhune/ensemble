@@ -49,7 +49,11 @@ pub fn turn_count_exceeds(n: u64) -> Until {
 pub fn any_of(parts: Vec<Until>) -> Until {
     let label = format!(
         "any_of({})",
-        parts.iter().map(|u| u.label.as_str()).collect::<Vec<_>>().join(", ")
+        parts
+            .iter()
+            .map(|u| u.label.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     let arcs: Vec<Arc<dyn Fn(&UntilCtx<'_>) -> bool + Send + Sync>> =
         parts.into_iter().map(|u| u.predicate).collect();
@@ -59,7 +63,11 @@ pub fn any_of(parts: Vec<Until>) -> Until {
 pub fn all_of(parts: Vec<Until>) -> Until {
     let label = format!(
         "all_of({})",
-        parts.iter().map(|u| u.label.as_str()).collect::<Vec<_>>().join(", ")
+        parts
+            .iter()
+            .map(|u| u.label.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     let arcs: Vec<Arc<dyn Fn(&UntilCtx<'_>) -> bool + Send + Sync>> =
         parts.into_iter().map(|u| u.predicate).collect();

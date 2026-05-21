@@ -163,7 +163,10 @@ impl OpenAIBackend {
                 "user" => {
                     let mut obj = serde_json::Map::new();
                     obj.insert("role".into(), serde_json::Value::String("user".into()));
-                    obj.insert("content".into(), serde_json::Value::String(m.content.clone()));
+                    obj.insert(
+                        "content".into(),
+                        serde_json::Value::String(m.content.clone()),
+                    );
                     if let Some(name) = &m.name {
                         obj.insert("name".into(), serde_json::Value::String(name.clone()));
                     }
@@ -177,12 +180,9 @@ impl OpenAIBackend {
                         }));
                     }
                     for call in &m.tool_calls {
-                        let call_id = call
-                            .id
-                            .clone()
-                            .unwrap_or_else(|| "call_unknown".into());
-                        let args = serde_json::to_string(&call.args)
-                            .unwrap_or_else(|_| "{}".into());
+                        let call_id = call.id.clone().unwrap_or_else(|| "call_unknown".into());
+                        let args =
+                            serde_json::to_string(&call.args).unwrap_or_else(|_| "{}".into());
                         input.push(serde_json::json!({
                             "type": "function_call",
                             "call_id": call_id,
@@ -254,9 +254,10 @@ impl OpenAIBackend {
             // directly stay in control.
             for (k, v) in &request.extra_params {
                 if k == "reasoning_effort" {
-                    let existing = map.get("reasoning").cloned().unwrap_or_else(|| {
-                        serde_json::json!({})
-                    });
+                    let existing = map
+                        .get("reasoning")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!({}));
                     if let serde_json::Value::Object(mut rmap) = existing {
                         rmap.insert("effort".to_string(), v.clone());
                         rmap.entry("summary".to_string())
@@ -298,13 +299,11 @@ impl OpenAIBackend {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(BackendError::Rejected(
-                super::auth_hint::format_rejection(
-                    super::auth_hint::Provider::OpenAI,
-                    status,
-                    &text,
-                ),
-            ));
+            return Err(BackendError::Rejected(super::auth_hint::format_rejection(
+                super::auth_hint::Provider::OpenAI,
+                status,
+                &text,
+            )));
         }
 
         let parsed: ResponsesResponse = resp
@@ -352,7 +351,10 @@ impl OpenAIBackend {
                     }
                 }
                 ResponseOutputItem::FunctionCall {
-                    call_id, id, name, arguments,
+                    call_id,
+                    id,
+                    name,
+                    arguments,
                 } => {
                     let args = serde_json::from_str(&arguments)
                         .unwrap_or_else(|_| serde_json::Value::Null);
@@ -469,13 +471,11 @@ impl OpenAIBackend {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(BackendError::Rejected(
-                super::auth_hint::format_rejection(
-                    super::auth_hint::Provider::OpenAI,
-                    status,
-                    &text,
-                ),
-            ));
+            return Err(BackendError::Rejected(super::auth_hint::format_rejection(
+                super::auth_hint::Provider::OpenAI,
+                status,
+                &text,
+            )));
         }
 
         let parsed: ChatResponse = resp

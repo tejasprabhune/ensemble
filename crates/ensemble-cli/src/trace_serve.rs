@@ -8,22 +8,18 @@ use anyhow::{Context, Result};
 // The viewer ships as embedded files baked into the binary.
 // `ensemble trace view <path>` works without --site or any extra
 // assets on disk; --site is still honoured for development.
-const EMBEDDED_VIEWER_HTML: &str =
-    include_str!("../../../site/viewer.html");
+const EMBEDDED_VIEWER_HTML: &str = include_str!("../../../site/viewer.html");
 const EMBEDDED_VIEWER_JS: &str = include_str!("../../../site/viewer.js");
 const EMBEDDED_VIEWER_CSS: &str = include_str!("../../../site/style.css");
 // Shared viewer modules (DataSource abstraction + LocalJsonlSource).
-const EMBEDDED_SHARED_VIEWER_JS: &str =
-    include_str!("../../../shared/trace-viewer/viewer.js");
+const EMBEDDED_SHARED_VIEWER_JS: &str = include_str!("../../../shared/trace-viewer/viewer.js");
 const EMBEDDED_SHARED_LOCAL_JS: &str =
     include_str!("../../../shared/trace-viewer/sources/local-jsonl.js");
 const EMBEDDED_SHARED_STAGE_JS: &str =
     include_str!("../../../shared/trace-viewer/sources/stage-polling.js");
 // Compare-mode viewer: two traces side by side, scroll-synced by tick.
-const EMBEDDED_COMPARE_HTML: &str =
-    include_str!("../../../site/compare.html");
-const EMBEDDED_COMPARE_JS: &str =
-    include_str!("../../../site/compare.js");
+const EMBEDDED_COMPARE_HTML: &str = include_str!("../../../site/compare.html");
+const EMBEDDED_COMPARE_JS: &str = include_str!("../../../site/compare.js");
 
 /// Bundle of trace bytes the server holds in memory. Single-trace
 /// mode populates `primary` only; compare mode populates `primary`
@@ -36,25 +32,31 @@ struct TraceBytes {
 }
 
 pub fn serve(trace: &Path, port: u16, site: Option<&Path>) -> Result<()> {
-    let trace_bytes = fs::read(trace)
-        .with_context(|| format!("read trace from {}", trace.display()))?;
-    let traces = TraceBytes { primary: trace_bytes, secondary: None };
+    let trace_bytes =
+        fs::read(trace).with_context(|| format!("read trace from {}", trace.display()))?;
+    let traces = TraceBytes {
+        primary: trace_bytes,
+        secondary: None,
+    };
     let site_dir = prepare_site_dir(site, &traces)?;
     serve_loop(port, site_dir, traces, /* compare = */ false)
 }
 
 pub fn serve_compare(a: &Path, b: &Path, port: u16, site: Option<&Path>) -> Result<()> {
-    let a_bytes = fs::read(a)
-        .with_context(|| format!("read trace from {}", a.display()))?;
-    let b_bytes = fs::read(b)
-        .with_context(|| format!("read trace from {}", b.display()))?;
-    let traces = TraceBytes { primary: a_bytes, secondary: Some(b_bytes) };
+    let a_bytes = fs::read(a).with_context(|| format!("read trace from {}", a.display()))?;
+    let b_bytes = fs::read(b).with_context(|| format!("read trace from {}", b.display()))?;
+    let traces = TraceBytes {
+        primary: a_bytes,
+        secondary: Some(b_bytes),
+    };
     let site_dir = prepare_site_dir(site, &traces)?;
     serve_loop(port, site_dir, traces, /* compare = */ true)
 }
 
 fn prepare_site_dir(site: Option<&Path>, traces: &TraceBytes) -> Result<Option<PathBuf>> {
-    let Some(s) = site else { return Ok(None); };
+    let Some(s) = site else {
+        return Ok(None);
+    };
     if !s.exists() {
         anyhow::bail!("site directory not found: {}", s.display());
     }
@@ -66,8 +68,7 @@ fn prepare_site_dir(site: Option<&Path>, traces: &TraceBytes) -> Result<Option<P
         let b_path = s.join("trace_b.jsonl");
         fs::write(&a_path, &traces.primary)
             .with_context(|| format!("bake trace into {}", a_path.display()))?;
-        fs::write(&b_path, b)
-            .with_context(|| format!("bake trace into {}", b_path.display()))?;
+        fs::write(&b_path, b).with_context(|| format!("bake trace into {}", b_path.display()))?;
     }
     Ok(Some(s.to_path_buf()))
 }
@@ -123,10 +124,18 @@ fn serve_one(
         p.truncate(idx);
     }
     if p.is_empty() {
-        p = if compare { "compare.html".into() } else { "viewer.html".into() };
+        p = if compare {
+            "compare.html".into()
+        } else {
+            "viewer.html".into()
+        };
     }
     if p == "index.html" {
-        p = if compare { "compare.html".into() } else { "viewer.html".into() };
+        p = if compare {
+            "compare.html".into()
+        } else {
+            "viewer.html".into()
+        };
     }
 
     if p == "trace.jsonl" || p == "trace_a.jsonl" {

@@ -268,9 +268,12 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Init { name, path, world, with_rust } => {
-            scaffold::init(&name, path.as_deref(), world.as_deref(), with_rust)
-        }
+        Cmd::Init {
+            name,
+            path,
+            world,
+            with_rust,
+        } => scaffold::init(&name, path.as_deref(), world.as_deref(), with_rust),
         Cmd::Run {
             scenario,
             world,
@@ -553,7 +556,13 @@ fn stage_subcommand(sub: StageCmd) -> Result<()> {
 
 fn train(persona: &std::path::Path, backend: &str) -> Result<()> {
     let status = Command::new("uv")
-        .args(["run", "ensemble-train", persona.to_str().unwrap_or(""), "--backend", backend])
+        .args([
+            "run",
+            "ensemble-train",
+            persona.to_str().unwrap_or(""),
+            "--backend",
+            backend,
+        ])
         .status()
         .context("invoking uv run ensemble-train; is the train workspace synced?")?;
     if !status.success() {

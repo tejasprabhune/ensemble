@@ -33,7 +33,10 @@ impl PlankDb {
         register_all(&state, &tools);
         let preds = PredicateRegistry::new();
         predicates::register_all(&state, &preds);
-        Self { tools, predicates: preds }
+        Self {
+            tools,
+            predicates: preds,
+        }
     }
 
     /// Names of the tools this PlankDb instance carries.
@@ -61,8 +64,8 @@ impl PlankDb {
             .get(name)
             .ok_or_else(|| PyKeyError::new_err(format!("unknown tool {name:?}")))?;
         let emitter = ensemble_runtime::ProgressEmitter::new();
-        let outcome = (tool.run)(&args, &emitter)
-            .map_err(|e| PyRuntimeError::new_err(format!("{e}")))?;
+        let outcome =
+            (tool.run)(&args, &emitter).map_err(|e| PyRuntimeError::new_err(format!("{e}")))?;
         let progress: Vec<serde_json::Value> = emitter
             .drain()
             .into_iter()
@@ -102,16 +105,9 @@ impl PlankDb {
     /// Evaluate a predicate by name against the supplied trace JSON
     /// and args JSON. Returns false (not an exception) for unknown
     /// predicates so graders stay robust to plug-in worlds.
-    fn evaluate_predicate(
-        &self,
-        name: &str,
-        trace_json: &str,
-        args_json: &str,
-    ) -> PyResult<bool> {
-        let trace: Vec<ensemble_core::event::Event> =
-            serde_json::from_str(trace_json).map_err(|e| {
-                PyValueError::new_err(format!("bad trace json: {e}"))
-            })?;
+    fn evaluate_predicate(&self, name: &str, trace_json: &str, args_json: &str) -> PyResult<bool> {
+        let trace: Vec<ensemble_core::event::Event> = serde_json::from_str(trace_json)
+            .map_err(|e| PyValueError::new_err(format!("bad trace json: {e}")))?;
         let args: serde_json::Value = if args_json.is_empty() {
             serde_json::Value::Null
         } else {

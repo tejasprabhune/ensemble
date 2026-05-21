@@ -5,9 +5,7 @@ use ensemble_core::event::{EventLog, EventPayload};
 use ensemble_core::ids::ActorId;
 use ensemble_core::prelude::*;
 
-use ensemble_runtime::{
-    AgentActor, MockBackend, MockScript, MockTurn, ToolRegistry, UserActor,
-};
+use ensemble_runtime::{AgentActor, MockBackend, MockScript, MockTurn, ToolRegistry, UserActor};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn agent_uses_tool_via_mock_backend() {
@@ -52,16 +50,28 @@ async fn agent_uses_tool_via_mock_backend() {
 
     let mut scheduler = Scheduler::new(
         bus.clone(),
-        TickBudget { max_ticks: 40, max_events: 80, quiescence_ms: 200, drain_grace_ms: 100 },
+        TickBudget {
+            max_ticks: 40,
+            max_events: 80,
+            quiescence_ms: 200,
+            drain_grace_ms: 100,
+        },
     );
-    scheduler.register(Arc::new(ensemble_core::actor::ActorHandle::new(user, user_inbox)));
-    scheduler.register(Arc::new(ensemble_core::actor::ActorHandle::new(agent, agent_inbox)));
+    scheduler.register(Arc::new(ensemble_core::actor::ActorHandle::new(
+        user, user_inbox,
+    )));
+    scheduler.register(Arc::new(ensemble_core::actor::ActorHandle::new(
+        agent,
+        agent_inbox,
+    )));
     scheduler.set_until(turn_count_exceeds(8)).await;
 
     bus.send(
         user_id.clone(),
         Recipient::Actor(agent_id.clone()),
-        Message::UserMessage { text: "I need help with my ticket".into() },
+        Message::UserMessage {
+            text: "I need help with my ticket".into(),
+        },
     )
     .await
     .unwrap();
@@ -78,6 +88,9 @@ async fn agent_uses_tool_via_mock_backend() {
             _ => {}
         }
     }
-    assert!(tool_calls >= 1, "expected at least one tool call, got events: {events:?}");
+    assert!(
+        tool_calls >= 1,
+        "expected at least one tool call, got events: {events:?}"
+    );
     assert!(tool_results >= 1, "expected at least one tool result");
 }

@@ -73,7 +73,11 @@ impl MockScript {
     }
 
     pub fn push_for(&self, model: impl Into<String>, turn: MockTurn) {
-        self.by_model.lock().entry(model.into()).or_default().push(turn);
+        self.by_model
+            .lock()
+            .entry(model.into())
+            .or_default()
+            .push(turn);
     }
 
     fn take(&self, model: &str) -> Option<MockTurn> {
@@ -115,11 +119,14 @@ impl LLMBackend for MockBackend {
         &self,
         request: CompletionRequest,
     ) -> Result<CompletionResponse, BackendError> {
-        let turn = self.script.take(&request.model).unwrap_or_else(|| MockTurn {
-            text: String::new(),
-            tool_calls: vec![],
-            stop_reason: Some("script_exhausted".into()),
-        });
+        let turn = self
+            .script
+            .take(&request.model)
+            .unwrap_or_else(|| MockTurn {
+                text: String::new(),
+                tool_calls: vec![],
+                stop_reason: Some("script_exhausted".into()),
+            });
         Ok(CompletionResponse {
             text: turn.text,
             tool_calls: turn.tool_calls,

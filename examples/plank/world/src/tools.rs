@@ -17,10 +17,7 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-fn arg_str<'a>(
-    args: &'a serde_json::Value,
-    key: &str,
-) -> Result<&'a str, ToolError> {
+fn arg_str<'a>(args: &'a serde_json::Value, key: &str) -> Result<&'a str, ToolError> {
     args.get(key)
         .and_then(|v| v.as_str())
         .ok_or_else(|| ToolError::InvalidArgs(format!("missing string {key:?}")))
@@ -137,7 +134,12 @@ pub fn lookup_user(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
             let user_id = arg_str(args, "user_id")?;
             let s = state.lock();
             let rec = s.lookup_user(user_id)?;
-            s.audit("agent", "lookup_user", &json!({ "user_id": user_id }), now_ms())?;
+            s.audit(
+                "agent",
+                "lookup_user",
+                &json!({ "user_id": user_id }),
+                now_ms(),
+            )?;
             Ok(ok(rec))
         },
     ));
@@ -157,7 +159,12 @@ pub fn lookup_ticket(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
             let ticket_id = arg_str(args, "ticket_id")?;
             let s = state.lock();
             let rec = s.lookup_ticket(ticket_id)?;
-            s.audit("agent", "lookup_ticket", &json!({ "ticket_id": ticket_id }), now_ms())?;
+            s.audit(
+                "agent",
+                "lookup_ticket",
+                &json!({ "ticket_id": ticket_id }),
+                now_ms(),
+            )?;
             Ok(ok(rec))
         },
     ));
@@ -167,53 +174,53 @@ pub fn issue_refund(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(
         Tool::new_with_diff(
-        "issue_refund",
-        "Issue a refund to a user. Amounts are in whole cents. Acquires \
+            "issue_refund",
+            "Issue a refund to a user. Amounts are in whole cents. Acquires \
          the `billing_db` resource so concurrent refund attempts \
          serialize through the runtime.",
-        json!({
-            "type": "object",
-            "properties": {
-                "user_id": { "type": "string" },
-                "amount_cents": { "type": "integer" },
-                "reason": { "type": "string" }
+            json!({
+                "type": "object",
+                "properties": {
+                    "user_id": { "type": "string" },
+                    "amount_cents": { "type": "integer" },
+                    "reason": { "type": "string" }
+                },
+                "required": ["user_id", "amount_cents", "reason"]
+            }),
+            move |args| {
+                let user_id = arg_str(args, "user_id")?;
+                let amount = arg_i64(args, "amount_cents")?;
+                let reason = arg_str(args, "reason")?;
+                let s = state.lock();
+                let prior = s.refund_count_for(user_id)?;
+                if prior >= 1 {
+                    return Err(ToolError::Execution(
+                        "user already has a refund this run; policy prevents double refunds".into(),
+                    ));
+                }
+                let refund_id = format!("r-{}-{}", user_id, now_ms());
+                s.record_refund(&refund_id, user_id, amount, reason, now_ms())?;
+                s.audit(
+                    "agent",
+                    "issue_refund",
+                    &json!({"user_id": user_id, "amount_cents": amount, "reason": reason}),
+                    now_ms(),
+                )?;
+                let effect = ok(json!({
+                    "refund_id": refund_id,
+                    "user_id": user_id,
+                    "amount_cents": amount,
+                }));
+                let diff = json!([{
+                    "table": "refunds",
+                    "row_id": refund_id,
+                    "field": "row",
+                    "old": null,
+                    "new": {"user_id": user_id, "amount_cents": amount, "reason": reason}
+                }]);
+                Ok((effect, diff))
             },
-            "required": ["user_id", "amount_cents", "reason"]
-        }),
-        move |args| {
-            let user_id = arg_str(args, "user_id")?;
-            let amount = arg_i64(args, "amount_cents")?;
-            let reason = arg_str(args, "reason")?;
-            let s = state.lock();
-            let prior = s.refund_count_for(user_id)?;
-            if prior >= 1 {
-                return Err(ToolError::Execution(
-                    "user already has a refund this run; policy prevents double refunds".into(),
-                ));
-            }
-            let refund_id = format!("r-{}-{}", user_id, now_ms());
-            s.record_refund(&refund_id, user_id, amount, reason, now_ms())?;
-            s.audit(
-                "agent",
-                "issue_refund",
-                &json!({"user_id": user_id, "amount_cents": amount, "reason": reason}),
-                now_ms(),
-            )?;
-            let effect = ok(json!({
-                "refund_id": refund_id,
-                "user_id": user_id,
-                "amount_cents": amount,
-            }));
-            let diff = json!([{
-                "table": "refunds",
-                "row_id": refund_id,
-                "field": "row",
-                "old": null,
-                "new": {"user_id": user_id, "amount_cents": amount, "reason": reason}
-            }]);
-            Ok((effect, diff))
-        },
-    )
+        )
         .with_resources(vec!["billing_db".to_string()]),
     );
 }
@@ -339,7 +346,10 @@ mod tests {
             "update_subscription",
             "slow_billing_check",
         ] {
-            assert!(names.contains(&expected.to_string()), "missing tool {expected}");
+            assert!(
+                names.contains(&expected.to_string()),
+                "missing tool {expected}"
+            );
         }
         assert_eq!(names.len(), 8);
     }

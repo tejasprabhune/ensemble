@@ -119,17 +119,16 @@ impl Bus {
     /// scopes the cap to that actor's own running total; a cost
     /// recorded against a different actor does not consume the cap.
     /// `None` declares a world-wide cap.
-    pub async fn set_budget(
-        &self,
-        unit: impl Into<String>,
-        amount: f64,
-        actor: Option<ActorId>,
-    ) {
+    pub async fn set_budget(&self, unit: impl Into<String>, amount: f64, actor: Option<ActorId>) {
         let unit = unit.into();
         let mut state = self.costs.lock().await;
         match actor {
             Some(a) => {
-                state.actor_budgets.entry(a).or_default().insert(unit, amount);
+                state
+                    .actor_budgets
+                    .entry(a)
+                    .or_default()
+                    .insert(unit, amount);
             }
             None => {
                 state.budgets.insert(unit, amount);
@@ -138,13 +137,7 @@ impl Bus {
     }
 
     pub async fn cost_total(&self, unit: &str) -> f64 {
-        *self
-            .costs
-            .lock()
-            .await
-            .totals
-            .get(unit)
-            .unwrap_or(&0.0)
+        *self.costs.lock().await.totals.get(unit).unwrap_or(&0.0)
     }
 
     pub async fn actor_cost_total(&self, actor: &ActorId, unit: &str) -> f64 {
@@ -161,12 +154,7 @@ impl Bus {
     /// (and the per-actor total when `actor` is supplied), appends a
     /// `Cost` event to the log, and signals the scheduler to halt if
     /// any cap (world-wide or per-actor) has been crossed.
-    pub async fn record_cost(
-        &self,
-        unit: impl Into<String>,
-        amount: f64,
-        actor: Option<ActorId>,
-    ) {
+    pub async fn record_cost(&self, unit: impl Into<String>, amount: f64, actor: Option<ActorId>) {
         let unit = unit.into();
         let (new_total, world_budget, actor_total, actor_budget) = {
             let mut state = self.costs.lock().await;

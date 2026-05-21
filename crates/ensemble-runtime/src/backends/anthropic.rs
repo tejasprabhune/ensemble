@@ -58,8 +58,14 @@ struct AnthropicUsage {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AnthropicBlock {
-    Text { text: String },
-    ToolUse { id: String, name: String, input: serde_json::Value },
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
 }
 
 #[async_trait]
@@ -101,13 +107,11 @@ impl LLMBackend for AnthropicBackend {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(BackendError::Rejected(
-                super::auth_hint::format_rejection(
-                    super::auth_hint::Provider::Anthropic,
-                    status,
-                    &text,
-                ),
-            ));
+            return Err(BackendError::Rejected(super::auth_hint::format_rejection(
+                super::auth_hint::Provider::Anthropic,
+                status,
+                &text,
+            )));
         }
 
         let parsed: AnthropicResponse = resp

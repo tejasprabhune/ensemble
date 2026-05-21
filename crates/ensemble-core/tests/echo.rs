@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ensemble_core::prelude::*;
 use ensemble_core::bus::{Message, Recipient};
+use ensemble_core::prelude::*;
 
 struct EchoActor {
     id: ActorId,
@@ -61,7 +61,12 @@ async fn ping_pong_runs_until_budget_or_predicate() {
 
     let mut scheduler = Scheduler::new(
         bus.clone(),
-        TickBudget { max_ticks: 20, max_events: 200, quiescence_ms: 500, drain_grace_ms: 200 },
+        TickBudget {
+            max_ticks: 20,
+            max_events: 200,
+            quiescence_ms: 500,
+            drain_grace_ms: 200,
+        },
     );
     scheduler.register(register(&bus, ping.clone(), pong.clone()).await);
     scheduler.register(register(&bus, pong.clone(), ping.clone()).await);
@@ -81,10 +86,17 @@ async fn ping_pong_runs_until_budget_or_predicate() {
     scheduler.run().await.unwrap();
 
     let events = log.snapshot().await;
-    assert!(events.len() >= 8, "expected at least 8 events, got {}", events.len());
+    assert!(
+        events.len() >= 8,
+        "expected at least 8 events, got {}",
+        events.len()
+    );
     let agent_count = events
         .iter()
         .filter(|e| matches!(e.payload, EventPayload::AgentMessage { .. }))
         .count();
-    assert!(agent_count >= 7, "expected at least 7 echo replies, got {agent_count}");
+    assert!(
+        agent_count >= 7,
+        "expected at least 7 echo replies, got {agent_count}"
+    );
 }

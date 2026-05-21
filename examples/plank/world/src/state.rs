@@ -116,9 +116,21 @@ impl PlankState {
                 .unwrap();
         }
         let articles = [
-            ("kb-1", "How refunds work", "Refunds are processed within 5 business days."),
-            ("kb-2", "Plan changes", "You can change plans at any time from settings."),
-            ("kb-3", "Escalation policy", "Tier-2 handles billing disputes over $200."),
+            (
+                "kb-1",
+                "How refunds work",
+                "Refunds are processed within 5 business days.",
+            ),
+            (
+                "kb-2",
+                "Plan changes",
+                "You can change plans at any time from settings.",
+            ),
+            (
+                "kb-3",
+                "Escalation policy",
+                "Tier-2 handles billing disputes over $200.",
+            ),
         ];
         for (id, title, body) in articles {
             s.conn
@@ -246,11 +258,7 @@ impl PlankState {
     /// Replace (or insert) the subscription row for `user_id`. Returns
     /// the prior plan (or None if there was no row before) so callers
     /// can emit a meaningful diff.
-    pub fn set_subscription(
-        &self,
-        user_id: &str,
-        plan: &str,
-    ) -> Result<Option<String>, ToolError> {
+    pub fn set_subscription(&self, user_id: &str, plan: &str) -> Result<Option<String>, ToolError> {
         let prior: Option<String> = self
             .conn
             .query_row(

@@ -10,6 +10,7 @@ pub mod resources;
 pub mod stage_sink;
 pub mod tools;
 
+pub use actors::{AgentActor, UserActor};
 pub use backend::{
     BackendError, ChatMessage, CompletionRequest, CompletionResponse, LLMBackend, ProposedToolCall,
     SharedBackend, ToolSchema, Usage,
@@ -19,10 +20,7 @@ pub use backends::anthropic::AnthropicBackend;
 pub use backends::mock::{MockBackend, MockScript, MockTurn};
 pub use backends::openai::OpenAIBackend;
 pub use backends::vllm::LocalAdapterBackend;
-pub use actors::{AgentActor, UserActor};
 pub use persona::{HiddenState, PromptedPersona};
 pub use resources::{ResourceKind, ResourceManager};
-pub use tools::{
-    DispatchResult, ProgressEmitter, ProgressEntry, Tool, ToolOutcome, ToolRegistry,
-};
-pub use stage_sink::{StageSink, StageConfig};
+pub use stage_sink::{StageConfig, StageSink};
+pub use tools::{DispatchResult, ProgressEmitter, ProgressEntry, Tool, ToolOutcome, ToolRegistry};

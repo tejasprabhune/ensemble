@@ -42,7 +42,11 @@ mod tests {
 
     #[test]
     fn unauthorized_anthropic_mentions_the_env_var() {
-        let msg = format_rejection(Provider::Anthropic, StatusCode::UNAUTHORIZED, "{\"error\": \"invalid\"}");
+        let msg = format_rejection(
+            Provider::Anthropic,
+            StatusCode::UNAUTHORIZED,
+            "{\"error\": \"invalid\"}",
+        );
         assert!(msg.contains("ANTHROPIC_API_KEY"));
         assert!(msg.contains("ensemble models list"));
     }

@@ -117,7 +117,10 @@ impl LLMBackend for LocalAdapterBackend {
 
         let resp = self
             .client
-            .post(format!("{}/chat/completions", self.base_url.trim_end_matches('/')))
+            .post(format!(
+                "{}/chat/completions",
+                self.base_url.trim_end_matches('/')
+            ))
             .json(&body)
             .send()
             .await

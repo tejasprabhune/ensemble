@@ -19,11 +19,7 @@ use crate::tools::ToolRegistry;
 /// model is in the pricing table) to the actor that issued the
 /// call. Backends that omit usage (the mock backend, or a real
 /// backend whose API response lacks the block) record nothing.
-async fn record_completion_cost(
-    bus: &Bus,
-    actor: &ActorId,
-    response: &CompletionResponse,
-) {
+async fn record_completion_cost(bus: &Bus, actor: &ActorId, response: &CompletionResponse) {
     let Some(usage) = response.usage.as_ref() else {
         return;
     };
@@ -32,8 +28,12 @@ async fn record_completion_cost(
             .await;
     }
     if usage.output_tokens > 0 {
-        bus.record_cost("tokens_out", usage.output_tokens as f64, Some(actor.clone()))
-            .await;
+        bus.record_cost(
+            "tokens_out",
+            usage.output_tokens as f64,
+            Some(actor.clone()),
+        )
+        .await;
     }
     if let Some(usd) = usage.usd {
         bus.record_cost("usd", usd, Some(actor.clone())).await;
@@ -85,8 +85,12 @@ impl UserActor {
 
 #[async_trait]
 impl Actor for UserActor {
-    fn id(&self) -> ActorId { self.id.clone() }
-    fn kind(&self) -> ActorKind { ActorKind::User }
+    fn id(&self) -> ActorId {
+        self.id.clone()
+    }
+    fn kind(&self) -> ActorKind {
+        ActorKind::User
+    }
 
     async fn step(&self, bus: &Bus, envelope: Envelope) -> Result<(), CoreError> {
         let from = envelope.from.clone();
@@ -131,7 +135,9 @@ impl Actor for UserActor {
             }
         };
         record_completion_cost(bus, &self.id, &resp).await;
-        self.history.lock().push(ChatMessage::assistant(resp.text.clone()));
+        self.history
+            .lock()
+            .push(ChatMessage::assistant(resp.text.clone()));
         if !resp.text.is_empty() {
             bus.send(
                 self.id.clone(),
@@ -202,10 +208,7 @@ impl AgentActor {
         self
     }
 
-    pub fn with_resources(
-        mut self,
-        resources: Arc<crate::resources::ResourceManager>,
-    ) -> Self {
+    pub fn with_resources(mut self, resources: Arc<crate::resources::ResourceManager>) -> Self {
         self.resources = Some(resources);
         self
     }
@@ -222,7 +225,10 @@ impl AgentActor {
         let all = self.tools.schemas();
         match &self.allowed_tools {
             None => all,
-            Some(allow) => all.into_iter().filter(|s| allow.contains(&s.name)).collect(),
+            Some(allow) => all
+                .into_iter()
+                .filter(|s| allow.contains(&s.name))
+                .collect(),
         }
     }
 
@@ -236,15 +242,24 @@ impl AgentActor {
 
 #[async_trait]
 impl Actor for AgentActor {
-    fn id(&self) -> ActorId { self.id.clone() }
-    fn kind(&self) -> ActorKind { ActorKind::Agent }
+    fn id(&self) -> ActorId {
+        self.id.clone()
+    }
+    fn kind(&self) -> ActorKind {
+        ActorKind::Agent
+    }
 
     async fn step(&self, bus: &Bus, envelope: Envelope) -> Result<(), CoreError> {
         let from = envelope.from.clone();
         let incoming = match envelope.message {
             Message::UserMessage { text } => text,
             Message::AgentMessage { text } => text,
-            Message::ToolResult { name, result, is_error, .. } => {
+            Message::ToolResult {
+                name,
+                result,
+                is_error,
+                ..
+            } => {
                 let prefix = if is_error { "tool error" } else { "tool" };
                 format!("({prefix} {name} returned {result})")
             }
@@ -338,7 +353,10 @@ impl Actor for AgentActor {
             }
 
             for call in resp.tool_calls {
-                let call_id = call.id.clone().unwrap_or_else(|| MessageId::new().to_string());
+                let call_id = call
+                    .id
+                    .clone()
+                    .unwrap_or_else(|| MessageId::new().to_string());
                 bus.append_event(
                     Some(self.id.clone()),
                     EventPayload::ToolCall {

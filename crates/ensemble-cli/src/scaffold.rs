@@ -17,12 +17,7 @@ use anyhow::{Context, Result};
 /// * `init <scenarios_dir> --world <existing>`: a scenarios package
 ///   bound to an already-registered world. Skips the world
 ///   boilerplate.
-pub fn init(
-    name: &str,
-    path: Option<&Path>,
-    world: Option<&str>,
-    with_rust: bool,
-) -> Result<()> {
+pub fn init(name: &str, path: Option<&Path>, world: Option<&str>, with_rust: bool) -> Result<()> {
     let root: PathBuf = match path {
         Some(p) => p.to_path_buf(),
         None => PathBuf::from(name),
