@@ -6,6 +6,15 @@ use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
+/// A synchronous sink that receives every event appended to an EventLog.
+///
+/// Implementations must be Send + Sync because EventLog is cloned across
+/// async tasks. The emit call is synchronous and non-blocking; implementations
+/// that do I/O should buffer internally and flush on a background task.
+pub trait EventSink: Send + Sync + 'static {
+    fn emit(&self, event: &Event);
+}
+
 use crate::ids::{ActorId, MessageId};
 
 pub type Tick = u64;
@@ -155,10 +164,21 @@ impl TraceFile {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct EventLog {
     inner: Arc<Mutex<Vec<Event>>>,
     sink: Arc<Mutex<Option<TraceFile>>>,
+    event_sink: Arc<std::sync::Mutex<Option<Arc<dyn EventSink>>>>,
+}
+
+impl Default for EventLog {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Vec::new())),
+            sink: Arc::new(Mutex::new(None)),
+            event_sink: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
 }
 
 impl EventLog {
@@ -174,6 +194,13 @@ impl EventLog {
         *self.sink.lock().await = sink;
     }
 
+    /// Attach (or detach) a synchronous EventSink. Called from the python
+    /// layer after StageSink::create succeeds. Uses std::sync::Mutex so
+    /// it does not require async context.
+    pub fn set_event_sink(&self, sink: Option<Arc<dyn EventSink>>) {
+        *self.event_sink.lock().expect("event_sink lock") = sink;
+    }
+
     pub async fn sink_path(&self) -> Option<PathBuf> {
         self.sink.lock().await.as_ref().map(|s| s.path().to_path_buf())
     }
@@ -183,6 +210,11 @@ impl EventLog {
         if let Some(sink) = self.sink.lock().await.clone() {
             if let Err(e) = sink.write_event(&event).await {
                 eprintln!("ensemble: trace sink write failed: {e}");
+            }
+        }
+        if let Ok(guard) = self.event_sink.lock() {
+            if let Some(ref es) = *guard {
+                es.emit(&event);
             }
         }
     }

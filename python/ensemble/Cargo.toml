@@ -18,7 +18,7 @@ extension-module = ["pyo3/extension-module"]
 
 [dependencies]
 ensemble-core = { path = "../../crates/ensemble-core" }
-ensemble-runtime = { path = "../../crates/ensemble-runtime" }
+ensemble-runtime = { path = "../../crates/ensemble-runtime", features = ["stage"] }
 async-trait = { workspace = true }
 pyo3 = { workspace = true }
 pyo3-async-runtimes = { workspace = true }
