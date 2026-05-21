@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.request
 import urllib.error
@@ -19,6 +20,49 @@ from .stage import (
 )
 
 
+def _use_color() -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+
+class _C:
+    """ANSI color codes approximating the Stage website palette."""
+
+    RESET  = "\033[0m"
+    BOLD   = "\033[1m"
+    DIM    = "\033[2m"
+    ACCENT = "\033[38;5;179m"   # warm amber  (#B8956A)
+    MUTED  = "\033[38;5;245m"   # gray        (#8A827A)
+    OK     = "\033[38;5;71m"    # green       (#5A9467)
+    ERR    = "\033[38;5;167m"   # red         (#C45A5A)
+    WARN   = "\033[38;5;178m"   # orange      (#C49A3A)
+
+    @classmethod
+    def disable(cls) -> None:
+        for attr in ("RESET", "BOLD", "DIM", "ACCENT", "MUTED", "OK", "ERR", "WARN"):
+            setattr(cls, attr, "")
+
+
+if not _use_color():
+    _C.disable()
+
+
+def _kv(key: str, value: str, width: int = 14) -> str:
+    return f"  {_C.MUTED}{key:<{width}}{_C.RESET}  {value}"
+
+
+def _status_badge(status: str) -> str:
+    s = status.lower()
+    if s == "completed":
+        return f"{_C.OK}completed{_C.RESET}"
+    if s == "running":
+        return f"{_C.ACCENT}running{_C.RESET}"
+    if s in ("failed", "cancelled"):
+        return f"{_C.ERR}{s}{_C.RESET}"
+    return f"{_C.MUTED}{s}{_C.RESET}"
+
+
 def _bearer_request(url: str, api_key: str, method: str = "GET", body: Optional[bytes] = None):
     """Make an authenticated HTTP request, return parsed JSON or raise."""
     req = urllib.request.Request(url, data=body, method=method)
@@ -30,11 +74,39 @@ def _bearer_request(url: str, api_key: str, method: str = "GET", body: Optional[
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         body_text = e.read().decode()
-        print(f"stage: HTTP {e.code}: {body_text}", file=sys.stderr)
+        _print_http_error(e.code, body_text, url)
         sys.exit(1)
     except urllib.error.URLError as e:
-        print(f"stage: network error: {e.reason}", file=sys.stderr)
+        print(f"{_C.ERR}stage: cannot reach server{_C.RESET} {_C.MUTED}({e.reason}){_C.RESET}", file=sys.stderr)
+        print(f"  Check that ENSEMBLE_STAGE_BASE_URL is correct and the server is reachable.", file=sys.stderr)
         sys.exit(1)
+
+
+def _print_http_error(code: int, body_text: str, url: str = "") -> None:
+    try:
+        detail = json.loads(body_text).get("error", {}).get("message", body_text)
+    except (json.JSONDecodeError, AttributeError):
+        detail = body_text.strip()
+
+    hints = {
+        401: "Your API key is missing or has been revoked. Run `ensemble stage login` to authenticate.",
+        403: (
+            "Your API key does not have permission for this operation. "
+            "Push-scoped keys can push runs, sweeps, and training metrics. "
+            "Run `ensemble stage login` to get a fresh key, or create an admin-scoped key at /me."
+        ),
+        404: "The resource was not found. Check that the org and project slugs are correct.",
+        409: "A resource with this identifier already exists.",
+    }
+    hint = hints.get(code, "")
+    print(f"{_C.ERR}stage: {code} {_http_status_name(code)}{_C.RESET}  {_C.MUTED}{detail}{_C.RESET}", file=sys.stderr)
+    if hint:
+        print(f"  {hint}", file=sys.stderr)
+
+
+def _http_status_name(code: int) -> str:
+    return {401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+            409: "Conflict", 422: "Unprocessable", 500: "Internal Server Error"}.get(code, "")
 
 
 def _load_credentials() -> tuple[str, str]:
@@ -108,18 +180,55 @@ def cmd_login(args) -> int:
 
     api_key = result.get("api_key", "")
     if not api_key:
-        print("stage: login timed out or was cancelled.", file=sys.stderr)
+        print(f"{_C.ERR}stage: login timed out or was cancelled.{_C.RESET}", file=sys.stderr)
         return 1
 
     user_login = ""
+    org_slug = ""
+    existing_projects: list = []
     try:
-        data = _bearer_request(f"{base_url}/v1/me", api_key)
-        user_login = data.get("github_login", "")
+        me = _bearer_request(f"{base_url}/v1/me", api_key)
+        user_login = me.get("github_login", "")
+        org_slug = me.get("default_org_slug", "")
     except SystemExit:
         pass
 
+    if org_slug:
+        try:
+            org_data = _bearer_request(f"{base_url}/v1/orgs/{org_slug}", api_key)
+            existing_projects = org_data.get("projects", [])
+        except SystemExit:
+            pass
+
     write_credentials(api_key, base_url=base_url, user_login=user_login)
-    print(f"Logged in as {user_login or '(unknown)'}. Credentials saved to {_CREDS_PATH}.")
+
+    name = f"{_C.BOLD}{_C.ACCENT}{user_login}{_C.RESET}" if user_login else f"{_C.MUTED}(unknown){_C.RESET}"
+    print(f"\n{_C.OK}Logged in{_C.RESET} as {name}")
+    print(_kv("org", org_slug or "(unknown)"))
+    print(_kv("credentials", str(_CREDS_PATH)))
+    if base_url and base_url != PROD_BASE_URL:
+        print(_kv("server", base_url))
+
+    print()
+    if existing_projects:
+        print(f"  {_C.MUTED}Your projects:{_C.RESET}")
+        for p in existing_projects[:5]:
+            slug = p.get("slug", "?")
+            print(f"    {_C.ACCENT}{org_slug}/{slug}{_C.RESET}")
+        print()
+        print(f"  To push runs to a project, set:")
+        print(f"    {_C.BOLD}export ENSEMBLE_STAGE_API_KEY={api_key}{_C.RESET}")
+        if existing_projects:
+            first = existing_projects[0].get("slug", "")
+            print(f"    {_C.BOLD}export ENSEMBLE_STAGE_PROJECT={org_slug}/{first}{_C.RESET}")
+    else:
+        print(f"  {_C.MUTED}No projects yet.{_C.RESET} Create one:")
+        print(f"    ensemble stage projects create {org_slug or 'your-org'}/my-project")
+        print()
+        print(f"  Then set:")
+        print(f"    {_C.BOLD}export ENSEMBLE_STAGE_API_KEY={api_key}{_C.RESET}")
+        print(f"    {_C.BOLD}export ENSEMBLE_STAGE_PROJECT={org_slug or 'your-org'}/my-project{_C.RESET}")
+
     return 0
 
 
@@ -127,9 +236,9 @@ def cmd_logout(_args) -> int:
     """Remove credentials from ~/.ensemble/stage.toml."""
     if _CREDS_PATH.exists():
         _CREDS_PATH.unlink()
-        print(f"Removed {_CREDS_PATH}.")
+        print(f"{_C.OK}Logged out.{_C.RESET} Removed {_C.MUTED}{_CREDS_PATH}{_C.RESET}")
     else:
-        print("Not logged in.")
+        print(f"{_C.MUTED}Not logged in.{_C.RESET}")
     return 0
 
 
@@ -140,11 +249,13 @@ def cmd_whoami(_args) -> int:
     login = data.get("github_login", "")
     email = data.get("email", "")
     org = data.get("default_org_slug", "")
-    print(f"Logged in as: {login}")
+    print(_kv("user", f"{_C.BOLD}{_C.ACCENT}{login}{_C.RESET}"))
     if email:
-        print(f"Email:        {email}")
+        print(_kv("email", email))
     if org:
-        print(f"Default org:  {org}")
+        print(_kv("org", org))
+    if base_url != PROD_BASE_URL:
+        print(_kv("server", base_url))
     return 0
 
 
@@ -159,10 +270,19 @@ def cmd_projects_list(_args) -> int:
     data = _bearer_request(f"{base_url}/v1/orgs/{org}", api_key)
     projects = data.get("projects", [])
     if not projects:
-        print(f"No projects in {org}.")
+        print(f"  {_C.MUTED}No projects in {org}.{_C.RESET}")
+        return 0
     for p in projects:
-        slug = p.get("slug", p.get("name", "?"))
-        print(f"  {org}/{slug}")
+        slug = p.get("slug", "?")
+        name = p.get("name", slug)
+        pub = "public" if p.get("public") else "private"
+        pub_fmt = f"{_C.MUTED}{pub}{_C.RESET}"
+        ref = f"{_C.ACCENT}{org}/{slug}{_C.RESET}"
+        label = f"  {ref}"
+        if name != slug:
+            label += f"  {_C.MUTED}{name}{_C.RESET}"
+        label += f"  {pub_fmt}"
+        print(label)
     return 0
 
 
@@ -176,9 +296,15 @@ def cmd_projects_create(args) -> int:
     org_slug, project_slug = ref.split("/", 1)
     body = json.dumps({"slug": project_slug, "name": project_slug, "public": False}).encode()
     data = _bearer_request(f"{base_url}/v1/projects/{org_slug}", api_key, method="POST", body=body)
-    print(f"Created project: {org_slug}/{data.get('project_slug', project_slug)}")
+    created_slug = data.get("project_slug", project_slug)
+    print(f"{_C.OK}Created{_C.RESET}  {_C.ACCENT}{org_slug}/{created_slug}{_C.RESET}")
+    url = data.get("url", f"{base_url}/{org_slug}/{created_slug}")
+    print(_kv("url", url))
     write_project_toml(ref, base_url=base_url)
-    print(f"Wrote .stage.toml in {Path.cwd()}")
+    print(_kv(".stage.toml", str(Path.cwd() / ".stage.toml")))
+    print()
+    print(f"  Set the project for this session:")
+    print(f"    {_C.BOLD}export ENSEMBLE_STAGE_PROJECT={org_slug}/{created_slug}{_C.RESET}")
     return 0
 
 
@@ -228,13 +354,14 @@ def cmd_push(args: argparse.Namespace) -> int:
 
         local_id = meta.get("run_id") or run_dir.name
         stage_run_id = meta.get("stage_run_id", "").strip()
-        print(f"  {local_id} ...", end=" ", flush=True)
+        short_id = local_id[:32] if len(local_id) > 32 else local_id
+        print(f"  {_C.MUTED}{short_id}{_C.RESET}", end="  ", flush=True)
 
         # Skip if already pushed (stage_run_id recorded in meta).
         if stage_run_id:
             try:
                 stage_api_call(cfg, "GET", f"/v1/runs/{stage_run_id}")
-                print("skipped (already on Stage)")
+                print(f"{_C.MUTED}skipped{_C.RESET}")
                 skipped += 1
                 continue
             except RuntimeError:
@@ -256,7 +383,7 @@ def cmd_push(args: argparse.Namespace) -> int:
                 },
             )
         except RuntimeError as e:
-            print(f"create-run failed: {e}")
+            print(f"{_C.ERR}failed{_C.RESET}  {_C.MUTED}create-run: {e}{_C.RESET}")
             failed += 1
             continue
 
@@ -322,13 +449,21 @@ def cmd_push(args: argparse.Namespace) -> int:
         except RuntimeError:
             pass
 
+        ev_ok = total_ev - ev_errors * 100
         if ev_errors:
-            print(f"pushed ({total_ev - ev_errors * 100}/{total_ev} events)")
+            print(f"{_C.WARN}pushed{_C.RESET}  {_C.MUTED}{ev_ok}/{total_ev} events{_C.RESET}")
         else:
-            print(f"pushed ({total_ev} events)")
+            print(f"{_C.OK}pushed{_C.RESET}  {_C.MUTED}{total_ev} events{_C.RESET}")
+        if stage_run_id:
+            stage_url = meta.get("stage_url", "")
+            if stage_url:
+                print(f"    {_C.MUTED}{stage_url}{_C.RESET}")
         pushed += 1
 
-    print(f"\n{pushed} pushed, {skipped} skipped, {failed} failed")
+    ok = f"{_C.OK}{pushed} pushed{_C.RESET}"
+    sk = f"{_C.MUTED}{skipped} skipped{_C.RESET}"
+    fa = f"{_C.ERR}{failed} failed{_C.RESET}" if failed else f"{_C.MUTED}0 failed{_C.RESET}"
+    print(f"\n  {ok}  {sk}  {fa}")
     return 0 if failed == 0 else 1
 
 
