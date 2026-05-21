@@ -74,6 +74,11 @@ enum Cmd {
         #[command(subcommand)]
         sub: TraceCmd,
     },
+    /// Inspect the LLM backends ensemble knows about.
+    Models {
+        #[command(subcommand)]
+        sub: ModelsCmd,
+    },
     /// Manage the registry of installed worlds at ~/.ensemble/worlds.toml.
     Worlds {
         #[command(subcommand)]
@@ -117,6 +122,13 @@ enum McpCmd {
         #[arg(long, default_value = "mock")]
         backend: String,
     },
+}
+
+#[derive(Subcommand)]
+enum ModelsCmd {
+    /// Print available backends, whether their keys are set, and the
+    /// model identifiers each backend knows about.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -182,10 +194,28 @@ fn main() -> Result<()> {
                 trace_serve::serve(&trace, port, site.as_deref())
             }
         },
+        Cmd::Models { sub } => models_subcommand(sub),
         Cmd::Worlds { sub } => worlds_subcommand(sub),
         Cmd::Mcp { sub } => mcp_subcommand(sub),
         Cmd::Train { persona, backend } => train(&persona, &backend),
     }
+}
+
+fn models_subcommand(sub: ModelsCmd) -> Result<()> {
+    let mut cmd = python_command(false);
+    cmd.args(["-m", "ensemble.cli_models"]);
+    match sub {
+        ModelsCmd::List => {
+            cmd.arg("list");
+        }
+    }
+    let status = cmd
+        .status()
+        .context("invoking python -m ensemble.cli_models; is python on PATH?")?;
+    if !status.success() {
+        return Err(anyhow!("models subcommand failed (exit {status})"));
+    }
+    Ok(())
 }
 
 fn worlds_subcommand(sub: WorldsCmd) -> Result<()> {
