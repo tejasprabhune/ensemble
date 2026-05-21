@@ -11,11 +11,14 @@ ENSEMBLE_STAGE_ENABLED=0 disables Stage even when fully configured.
 
 from __future__ import annotations
 
+import json
 import os
 import stat
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 
 PROD_BASE_URL = "https://stage.ensemble.sh"
@@ -174,3 +177,24 @@ def write_project_toml(project: str, base_url: str = "") -> None:
     if base_url and base_url != PROD_BASE_URL:
         lines.append(f'base_url = "{base_url}"\n')
     _PROJECT_TOML.write_text("".join(lines))
+
+
+def stage_api_call(
+    config: StageConfig,
+    method: str,
+    path: str,
+    body: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Make an authenticated request to the Stage API and return the parsed JSON body."""
+    url = f"{config.base_url.rstrip('/')}{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Authorization", f"Bearer {config.api_key}")
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:300]
+        raise RuntimeError(f"Stage {method} {path} returned {e.code}: {detail}") from e

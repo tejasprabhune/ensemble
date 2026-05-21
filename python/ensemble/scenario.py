@@ -657,10 +657,10 @@ class World:
         except AttributeError:
             return None
 
-    def init_stage_run(self, scenario_name: str) -> Optional[str]:
+    def init_stage_run(self, scenario_name: str, sweep_id: Optional[str] = None) -> Optional[str]:
         """Create the Stage run and attach the sink. Returns the run URL or None."""
         try:
-            return self._native.init_stage_run(scenario_name)
+            return self._native.init_stage_run(scenario_name, sweep_id or "")
         except AttributeError:
             return None
 

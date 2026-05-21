@@ -58,6 +58,7 @@ mod inner {
             scenario: &str,
             world: &str,
             backend: &str,
+            sweep_id: Option<String>,
         ) -> Result<(Arc<Self>, String)> {
             let org = config.org_slug().to_string();
             let proj = config.project_slug().to_string();
@@ -67,12 +68,15 @@ mod inner {
                 org,
                 proj
             );
-            let body = serde_json::json!({
+            let mut body = serde_json::json!({
                 "id": run_id,
                 "scenario": scenario,
                 "world": world,
                 "backend": backend,
             });
+            if let Some(ref sid) = sweep_id {
+                body["sweep_id"] = serde_json::Value::String(sid.clone());
+            }
             let api_key = config.api_key.clone();
 
             // Run the blocking HTTP call in a dedicated OS thread with its

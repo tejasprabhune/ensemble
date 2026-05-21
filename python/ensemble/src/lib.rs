@@ -332,7 +332,8 @@ impl World {
     /// Returns the Stage run URL on success, or None if Stage is not
     /// configured or the create-run HTTP call fails (caller continues
     /// without Stage in that case).
-    fn init_stage_run(&self, py: Python<'_>, scenario: &str) -> PyResult<Option<String>> {
+    #[pyo3(signature = (scenario, sweep_id = ""))]
+    fn init_stage_run(&self, py: Python<'_>, scenario: &str, sweep_id: &str) -> PyResult<Option<String>> {
         let (config, run_id, backend_kind, log) = {
             let inner = self.inner.lock();
             let cfg = match inner.stage_config.clone() {
@@ -343,6 +344,7 @@ impl World {
         };
         let world_name = self.inner.lock().name.clone();
         let scenario_owned = scenario.to_string();
+        let sweep_id_opt = if sweep_id.is_empty() { None } else { Some(sweep_id.to_string()) };
         let rt = global_runtime();
         // Release the GIL while blocking on the HTTP call so a Python-backed
         // mock server running on another thread can handle the request.
@@ -352,6 +354,7 @@ impl World {
             &scenario_owned,
             &world_name,
             backend_kind,
+            sweep_id_opt,
         )));
         match result {
             Ok((sink, run_url)) => {
