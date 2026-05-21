@@ -110,6 +110,11 @@ enum Cmd {
         #[arg(long, value_parser = ["modal", "skypilot", "local"], default_value = "modal")]
         backend: String,
     },
+    /// Stage observability: authentication and project management.
+    Stage {
+        #[command(subcommand)]
+        sub: StageCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -225,6 +230,35 @@ enum TraceCmd {
     },
 }
 
+#[derive(Subcommand)]
+enum StageCmd {
+    /// Authenticate with Stage via browser OAuth.
+    Login {
+        #[arg(long)]
+        base_url: Option<String>,
+    },
+    /// Remove saved Stage credentials.
+    Logout,
+    /// Print the authenticated user's info.
+    Whoami,
+    /// Project management subcommands.
+    Projects {
+        #[command(subcommand)]
+        sub: StageProjectsCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum StageProjectsCmd {
+    /// List accessible projects.
+    List,
+    /// Create a project and write .stage.toml in cwd.
+    Create {
+        /// org_slug/project_slug
+        project: String,
+    },
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
@@ -263,6 +297,7 @@ fn main() -> Result<()> {
         Cmd::Worlds { sub } => worlds_subcommand(sub),
         Cmd::Mcp { sub } => mcp_subcommand(sub),
         Cmd::Train { persona, backend } => train(&persona, &backend),
+        Cmd::Stage { sub } => stage_subcommand(sub),
     }
 }
 
@@ -467,6 +502,43 @@ fn mcp_subcommand(sub: McpCmd) -> Result<()> {
         .context("invoking uv run python -m ensemble.cli_mcp; is uv on PATH?")?;
     if !status.success() {
         return Err(anyhow!("mcp subcommand failed (exit {status})"));
+    }
+    Ok(())
+}
+
+fn stage_subcommand(sub: StageCmd) -> Result<()> {
+    let mut cmd = python_command(false);
+    cmd.args(["-m", "ensemble.cli_stage"]);
+    match sub {
+        StageCmd::Login { base_url } => {
+            cmd.arg("login");
+            if let Some(u) = base_url {
+                cmd.args(["--base-url", &u]);
+            }
+        }
+        StageCmd::Logout => {
+            cmd.arg("logout");
+        }
+        StageCmd::Whoami => {
+            cmd.arg("whoami");
+        }
+        StageCmd::Projects { sub: proj_sub } => {
+            cmd.arg("projects");
+            match proj_sub {
+                StageProjectsCmd::List => {
+                    cmd.arg("list");
+                }
+                StageProjectsCmd::Create { project } => {
+                    cmd.arg("create").arg(&project);
+                }
+            }
+        }
+    }
+    let status = cmd
+        .status()
+        .context("invoking python -m ensemble.cli_stage; is python on PATH?")?;
+    if !status.success() {
+        return Err(anyhow!("stage subcommand failed (exit {status})"));
     }
     Ok(())
 }

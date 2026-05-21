@@ -34,6 +34,7 @@ from typing import Any, Awaitable, Callable, ClassVar, Dict, List, Optional
 from ._native import World as _NativeWorld
 from .env import load_dotenv
 from .persona import PersonaResolver, load_persona, register_personas_dir
+from .stage import Stage, StageConfig
 from .world import (
     _PREDICATE_META_ATTR,
     _TOOL_META_ATTR,
@@ -400,6 +401,7 @@ class World:
         verbose: Optional[bool] = None,
         trace_path: Optional[str] = None,
         external_agent_id: Optional[str] = None,
+        stage: Optional[Stage] = None,
     ) -> None:
         if dotenv:
             path = ".env"
@@ -432,7 +434,14 @@ class World:
                     "and instantiate that instead."
                 )
 
-        self._native = _NativeWorld(resolved_name, backend=backend, base_url=base_url)
+        stage_cfg: Optional[StageConfig] = Stage.resolve(stage)
+        native_kwargs: Dict[str, Any] = dict(backend=backend, base_url=base_url)
+        if stage_cfg is not None:
+            native_kwargs["stage_api_key"] = stage_cfg.api_key
+            native_kwargs["stage_project"] = stage_cfg.project
+            native_kwargs["stage_base_url"] = stage_cfg.base_url
+        self._native = _NativeWorld(resolved_name, **native_kwargs)
+        self._stage_cfg = stage_cfg
         if trace_path:
             self._native.set_trace_path(str(trace_path))
         self.users: List[User] = []
@@ -639,6 +648,28 @@ class World:
     @property
     def run_id(self) -> str:
         return self._native.run_id
+
+    @property
+    def run_url(self) -> Optional[str]:
+        """The Stage run URL if Stage is active, otherwise None."""
+        try:
+            return self._native.run_url
+        except AttributeError:
+            return None
+
+    def init_stage_run(self, scenario_name: str) -> Optional[str]:
+        """Create the Stage run and attach the sink. Returns the run URL or None."""
+        try:
+            return self._native.init_stage_run(scenario_name)
+        except AttributeError:
+            return None
+
+    def finalize_stage(self, scores: Optional[Dict[str, Any]] = None) -> None:
+        """Flush the Stage sink and POST run status=completed."""
+        try:
+            self._native.finalize_stage(json.dumps(dict(scores) if scores else {}))
+        except AttributeError:
+            pass
 
     @property
     def backend(self) -> str:
@@ -1146,6 +1177,7 @@ def scenario(name: str, *, world: Optional[str] = None) -> Callable:
             trace_path: Optional[str] = None,
             external_agent_id: Optional[str] = None,
             on_world_constructed: Optional[Callable[["World"], None]] = None,
+            stage: Optional[Stage] = None,
         ) -> RunResult:
             resolved_world = world_name or world or "noop"
             world_obj = World(
@@ -1154,6 +1186,7 @@ def scenario(name: str, *, world: Optional[str] = None) -> Callable:
                 base_url=base_url,
                 trace_path=trace_path,
                 external_agent_id=external_agent_id,
+                stage=stage,
             )
             if on_world_constructed is not None:
                 on_world_constructed(world_obj)
@@ -1175,6 +1208,10 @@ def scenario(name: str, *, world: Optional[str] = None) -> Callable:
                 if scores is None:
                     scores = {}
                 _log_grader_scores(world_obj, name, scores)
+                try:
+                    world_obj.finalize_stage(scores)
+                except AttributeError:
+                    pass
                 trace = [json.loads(e) for e in world_obj._native.trace_events()]
                 return RunResult(
                     name=name,
@@ -1185,6 +1222,10 @@ def scenario(name: str, *, world: Optional[str] = None) -> Callable:
             else:
                 scores = await func(world_obj)
                 _log_grader_scores(world_obj, name, scores or {})
+                try:
+                    world_obj.finalize_stage(scores)
+                except AttributeError:
+                    pass
                 trace = [json.loads(e) for e in world_obj._native.trace_events()]
                 return RunResult(
                     name=name,

@@ -269,6 +269,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         trace_path = run_dir / "trace.jsonl"
         world_obj.set_trace_path(str(trace_path))
         print(f"Run id: {run_id}", file=sys.stderr)
+        run_url = world_obj.init_stage_run(args.scenario)
+        if run_url:
+            print(f"Stage:  {run_url}", file=sys.stderr)
         run_state["run_id"] = run_id
         run_state["run_dir"] = run_dir
         run_state["trace_path"] = trace_path
