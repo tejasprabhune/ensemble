@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble, training runs reference</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="../index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Get started</div>
+        <a href="../index.html">Overview</a>
+        <a href="../quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="../worlds.html">Writing a world</a>
+        <a href="../scenarios.html">Writing a scenario</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../personas.html">Personas</a>
+        <a href="../sweeps.html">Sweeps</a>
+        <a href="../observability.html">Observability</a>
+        <a href="../mcp.html">MCP</a>
+        <a href="../agora.html">Agora example</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="index.html">Reference home</a>
+        <a href="world-api.html">World API</a>
+        <a href="scenarios.html">Scenarios</a>
+        <a href="tools.html">Tools</a>
+        <a href="predicates.html">Predicates</a>
+        <a href="personas.html">Personas</a>
+        <a href="cli.html">CLI</a>
+        <a href="runtime.html">Runtime</a>
+        <a href="traces.html">Traces</a>
+        <a href="training.html" class="active">Training runs</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
+        <a href="stage.html">Stage</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+    <h1>Training runs</h1>
+    <p class="lead">
+      A training run is a persona fine-tuning job tracked by Stage. This
+      page covers how to start one, what Stage records during training,
+      and how to read the training detail page to evaluate whether the
+      run succeeded.
+    </p>
+
+    <section>
+      <h2>Starting a training run</h2>
+      <p>
+        Training is driven by the <code>ensemble train</code> command,
+        which takes a persona TOML path and a compute backend:
+      </p>
+<pre><code class="language-bash">ensemble train examples/agora/personas/frustrated_power_user.toml --backend modal</code></pre>
+      <p>
+        When <code>ENSEMBLE_STAGE_API_KEY</code> and
+        <code>ENSEMBLE_STAGE_PROJECT</code> are set, the training
+        pipeline creates a training run entity on Stage before the job
+        starts and prints the URL:
+      </p>
+<pre><code class="language-bash">Training run: https://ensemble-stage.fly.dev/myorg/myproject/training_runs/019b2c3d-...</code></pre>
+      <p>
+        The pipeline streams step-level metrics to Stage as training
+        progresses. Each flush is a batch of metric points sent to
+        <code>POST /v1/training_runs/{id}/metrics</code>. Flushes
+        happen on a 30-second background timer so individual training
+        steps are not gated on network I/O.
+      </p>
+      <p>
+        When training completes (or fails), the pipeline posts a final
+        status update with the <code>final_metrics</code> object and,
+        if an adapter was uploaded, the <code>artifact_uri</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>The persona TOML training block</h2>
+      <p>
+        Training configuration lives in the persona TOML under
+        <code>[persona.training]</code>. The full schema:
+      </p>
+<pre><code class="language-toml">[persona.training]
+base_model = "Qwen/Qwen2.5-7B-Instruct"  # required
+backend = "modal"                          # modal | skypilot | local
+dataset = "spec_only"                      # dataset generation strategy
+hf_namespace_env = "HF_USERNAME"           # env var holding the HF username
+adapter_name = "ensemble-agora-frustrated-power-user"  # HuggingFace adapter id
+serve_url = "http://127.0.0.1:8000/v1"    # vLLM endpoint for inference after training
+
+[persona.training.lora]
+r = 16                  # LoRA rank
+alpha = 32              # LoRA alpha (scaling factor = alpha/r)
+dropout = 0.05
+target_modules = ["q_proj", "v_proj"]
+
+[persona.training.dpo]
+beta = 0.1              # KL penalty strength; higher values stay closer to reference
+epochs = 1
+learning_rate = 5e-6
+batch_size = 4
+max_length = 2048       # maximum sequence length in tokens
+
+[persona.training.self_play]
+breaker_model = "claude-sonnet-4-5"  # the adversarial model that generates hard cases
+rollouts = 200           # number of self-play trajectories to generate
+break_judge = "claude-sonnet-4-5"    # model used to score trajectory outcomes</code></pre>
+      <p>
+        The <code>dataset</code> field controls how the preference
+        dataset is generated. <code>"spec_only"</code> derives pairs
+        from the persona specification without running the full
+        scenario. Other strategies (such as <code>"self_play"</code>)
+        run the <code>[persona.training.self_play]</code> block to
+        produce trajectories, then use the judge model to score chosen
+        vs. rejected.
+      </p>
+      <p>
+        The <code>adapter_name</code> becomes the HuggingFace
+        repository name under the namespace from
+        <code>hf_namespace_env</code>. After training completes, the
+        full HuggingFace URI is set as the training run's
+        <code>artifact_uri</code> on Stage.
+      </p>
+    </section>
+
+    <section>
+      <h2>Compute backends</h2>
+
+      <h3>modal (default)</h3>
+      <p>
+        Submits the training job to Modal cloud. Requires the
+        <code>modal</code> Python package (<code>uv pip install modal</code>)
+        and a Modal account configured via <code>modal token new</code>.
+        GPU allocation and the training image are defined in the
+        training package; the persona TOML controls only the
+        hyperparameters.
+      </p>
+      <p>
+        When <code>modal</code> is not installed, the pipeline writes
+        a <code>DRY_RUN.json</code> next to the checkpoint directory
+        showing what would have been submitted. Use this to validate
+        the config without spending credits.
+      </p>
+
+      <h3>skypilot</h3>
+      <p>
+        Writes a SkyPilot YAML and either launches it via
+        <code>sky launch</code> (if <code>sky</code> is on PATH) or
+        prints the command for you to run manually. Use for multi-cloud
+        training or when you need control over the cluster
+        configuration.
+      </p>
+
+      <h3>local</h3>
+      <p>
+        Runs the training loop in-process on the current machine.
+        Requires a GPU and the training dependencies installed
+        (<code>uv pip install 'ensemble-train[torch]'</code>). Writes
+        the adapter under <code>checkpoints/&lt;persona_name&gt;/</code>.
+        Suitable for small models or for debugging the training code.
+      </p>
+    </section>
+
+    <section>
+      <h2>Stage API endpoints for training runs</h2>
+      <p>
+        The following API calls are relevant to training runs. All
+        require a push-scoped API key unless noted.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/projects/{org}/{proj}/training_runs</code></td>
+            <td>Create a training run. Body: <code>persona_name</code>, <code>base_model</code>, <code>hyperparameters</code>.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/training_runs/{id}</code></td>
+            <td>Get run metadata including status, hyperparameters, final_metrics, artifact_uri.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/training_runs/{id}/metrics</code></td>
+            <td>Append step metrics. Body: <code>metrics</code> array of <code>{step, metric_name, value}</code>. Up to 1000 per request.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/training_runs/{id}/metrics</code></td>
+            <td>Get all metric points. Poll this endpoint to follow a live run.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/training_runs/{id}/status</code></td>
+            <td>Update status. Body: <code>status</code> (running|completed|failed|cancelled), optional <code>final_metrics</code> and <code>artifact_uri</code>.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/projects/{org}/{proj}/training_runs</code></td>
+            <td>List training runs, newest first.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        Duplicate <code>(step, metric_name)</code> pairs within the
+        same training run are silently ignored on append.
+      </p>
+    </section>
+
+    <section>
+      <h2>Reading the training detail page on Stage</h2>
+      <p>
+        The training detail page at
+        <code>/org/project/training_runs/&lt;id&gt;</code> is designed
+        to answer five questions after a run completes: did the loss go
+        down, did eval improve, is this run better than past runs for
+        this persona, did the adapter actually improve eval outcomes
+        versus the prompted baseline, and where is the artifact.
+      </p>
+
+      <h3>Header</h3>
+      <p>
+        The header shows the full training run UUID, status badge,
+        persona name, base model, and timestamps. When training
+        completes with an artifact, the artifact URI appears alongside
+        a copy button. The URI is the permanent HuggingFace or Modal
+        volume address for the adapter.
+      </p>
+
+      <h3>Loss curves</h3>
+      <p>
+        The first thing to check is whether the loss curves fell. The
+        page renders one SVG chart per metric name; <code>train_loss</code>
+        and <code>eval_loss</code> share a chart when both are present.
+        The x-axis is the training step; the y-axis is the metric
+        value.
+      </p>
+      <p>
+        The y-axis has a log-scale toggle. Linear scale shows absolute
+        changes; log scale shows proportional changes and makes early
+        large drops and late small refinements comparable in height.
+        The toggle state is preserved in the URL hash so you can share
+        a specific view.
+      </p>
+      <p>
+        Three annotations overlay the chart automatically:
+      </p>
+      <ul>
+        <li>A vertical line at the step with the lowest eval loss,
+          labeled "Best eval @ step N." This is the checkpoint most
+          likely to generalize. If this line is early in the run,
+          the model may have overfit after that point.</li>
+        <li>A marker at the last recorded eval point labeled with its
+          value. If the final eval is significantly worse than the
+          best eval, the model overfit in later steps.</li>
+        <li>A horizontal band labeled "Plateau" over any region where
+          the loss stayed within 1% for 20% or more of total steps.
+          A plateau indicates that further training on this
+          configuration will not improve the result; consider
+          adjusting the learning rate or switching to a different
+          checkpoint.</li>
+      </ul>
+      <p>
+        While training is in progress, the chart polls every five
+        seconds and appends new points without redrawing from scratch.
+      </p>
+
+      <h3>Hyperparameters and final metrics</h3>
+      <p>
+        Two side-by-side tables sit below the loss curves. The left
+        table lists hyperparameters: base model, learning rate, batch
+        size, epochs, LoRA rank (r), LoRA alpha, DPO beta, and any
+        other fields the training backend stored. The right table lists
+        final metrics: final train loss, final eval loss, best eval
+        loss and the step it occurred at, total steps, wall time, and
+        total cost.
+      </p>
+      <p>
+        Reading both tables together tells you what was trained and how
+        well it converged. Compare the best eval loss to the final
+        eval loss; a large gap suggests the training continued past the
+        optimal point.
+      </p>
+
+      <h3>Comparison to past training runs</h3>
+      <p>
+        The comparison chart overlays the current run's
+        <code>eval_loss</code> curve with the three or five most recent
+        prior training runs for the same persona name. The current run
+        is drawn opaque in the accent color; older runs are drawn at
+        half opacity in a muted color. A legend below the chart labels
+        each line with its training run ID (first eight characters),
+        date, and the key hyperparameter difference from the current
+        run, for example "lr=5e-6 vs current 1e-5."
+      </p>
+      <p>
+        Use this view to determine the effect of your hyperparameter
+        change. If the current run's eval loss converges lower or
+        faster than prior runs, the change helped. If the lines are
+        nearly identical, the hyperparameter does not matter much for
+        this persona. If the current run is worse, something
+        regressed.
+      </p>
+      <p>
+        If this is the first training run for this persona, the section
+        shows: "This is the first training run for this persona. The
+        comparison section will populate once additional runs exist."
+      </p>
+
+      <h3>Baseline comparison</h3>
+      <p>
+        This is the most important section on the page. It shows
+        whether the trained adapter actually improved eval outcomes
+        compared to the prompted baseline. Stage constructs this
+        comparison by finding eval runs in the same project that used
+        the adapter from this training run, then finding matching eval
+        runs that used the prompted version of the same persona on the
+        same scenario and model.
+      </p>
+      <p>
+        The result is a table sorted by absolute delta descending,
+        with one row per (scenario, model) pair:
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Column</th>
+            <th>What it shows</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Scenario</td>
+            <td>The scenario the eval runs executed.</td>
+          </tr>
+          <tr>
+            <td>Model</td>
+            <td>The model used for the agent (not the persona).</td>
+          </tr>
+          <tr>
+            <td>Baseline</td>
+            <td>Mean primary outcome score for prompted-persona eval runs.</td>
+          </tr>
+          <tr>
+            <td>Trained</td>
+            <td>Mean primary outcome score for trained-adapter eval runs.</td>
+          </tr>
+          <tr>
+            <td>Delta</td>
+            <td>Trained minus baseline. Green for positive, red for negative, intensity by magnitude.</td>
+          </tr>
+          <tr>
+            <td>p-value</td>
+            <td>Statistical significance when enough samples exist. Absent if insufficient data.</td>
+          </tr>
+          <tr>
+            <td>Compare</td>
+            <td>Link to the Stage comparison view for a representative run pair.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        A positive delta means the trained persona performed better on
+        that scenario and model combination than the prompted baseline.
+        A negative delta is a regression; investigate the specific run
+        pairs using the compare link.
+      </p>
+      <p>
+        The baseline comparison requires two things to work. First,
+        eval runs must record which adapter they used (the
+        <code>adapter_uri</code> metadata field). Second, matching
+        prompted-persona eval runs must exist in the same project. If
+        the linkage is not yet wired, the section says so and links to
+        the personas reference for how to close the loop.
+      </p>
+
+      <h3>Artifact details</h3>
+      <p>
+        A section at the bottom shows the artifact URI, a copy button,
+        and the artifact size. A code snippet shows how to add the
+        adapter to the persona TOML and run an eval scenario against it:
+      </p>
+<pre><code class="language-toml"># In the persona TOML
+[persona.training]
+adapter_name = "your-hf-username/ensemble-agora-frustrated-power-user"
+serve_url = "http://your-vllm-host:8000/v1"</code></pre>
+<pre><code class="language-bash">ensemble run agora.refund_storm --backend auto</code></pre>
+      <p>
+        If training is still in progress, the section shows "Training
+        in progress." If training failed without producing an artifact,
+        it shows "Training failed; no artifact produced."
+      </p>
+
+      <h3>Preference dataset preview</h3>
+      <p>
+        When the training run's metadata includes a reference to the
+        preference dataset used for DPO, a collapsible section shows
+        the pair count and three example pairs with chosen and rejected
+        responses side by side. This gives you a feel for what signal
+        the model trained on without having to fetch the dataset
+        separately. If the dataset reference was not recorded, this
+        section is hidden.
+      </p>
+    </section>
+
+    <section>
+      <h2>Closing the eval loop</h2>
+      <p>
+        The baseline comparison on the training detail page is the
+        payoff of the post-training loop, but it requires all three
+        steps to be wired together correctly.
+      </p>
+      <ol>
+        <li>
+          <strong>Train.</strong> <code>ensemble train
+          persona.toml</code> with Stage configured creates a training
+          run and uploads the adapter to HuggingFace.
+          <code>artifact_uri</code> is set on the training run entity
+          when the upload completes.
+        </li>
+        <li>
+          <strong>Configure the persona to use the adapter.</strong>
+          Set <code>persona.training.serve_url</code> to your vLLM
+          endpoint and <code>adapter_name</code> to the HuggingFace
+          adapter id. Restart the vLLM server with
+          <code>--lora-modules adapter_name=hf-user/adapter-repo</code>.
+        </li>
+        <li>
+          <strong>Run eval scenarios with the trained persona.</strong>
+          <code>ensemble run agora.refund_storm</code> routes user
+          actors with <code>mode = "trained"</code> through the adapter
+          automatically. The eval runs land on Stage in the same
+          project.
+        </li>
+        <li>
+          <strong>Run the same scenarios with the prompted persona.</strong>
+          Temporarily set <code>mode = "prompted"</code> in the persona
+          TOML (or use a copy of the file with mode changed) and run
+          the same scenarios. These form the baseline.
+        </li>
+        <li>
+          <strong>Link the eval runs to the adapter.</strong> Stage
+          finds trained eval runs by matching the run's
+          <code>adapter_uri</code> metadata field to the training run's
+          <code>artifact_uri</code>. Ensure the ensemble integration
+          records this field when creating the run.
+        </li>
+      </ol>
+      <p>
+        When all five steps are complete, the baseline comparison table
+        on the training detail page populates automatically.
+      </p>
+    </section>
+
+    <footer class="site">
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>

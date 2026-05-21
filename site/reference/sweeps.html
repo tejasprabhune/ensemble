@@ -39,6 +39,7 @@
         <a href="cli.html">CLI</a>
         <a href="runtime.html">Runtime</a>
         <a href="traces.html">Traces</a>
+        <a href="training.html">Training runs</a>
         <a href="sweeps.html" class="active">Sweeps</a>
         <a href="observability.html">Observability</a>
         <a href="stage.html">Stage</a>
@@ -233,6 +234,158 @@ preset = ["fast", "balanced", "thorough"]</code></pre>
       <p>
         If Stage is not configured, the sweep runs locally with no
         change to behavior.
+      </p>
+    </section>
+
+    <section id="reading-the-sweep-detail-page-on-stage">
+      <h2>Reading the sweep detail page on Stage</h2>
+      <p>
+        The sweep detail page at
+        <code>/org/project/sweeps/&lt;id&gt;</code> answers five
+        questions a researcher needs to make decisions after a sweep:
+        did it complete, which configurations won, where is the
+        variance, what did it cost, and what should I look at next.
+        The sections below describe what each part of the page shows
+        and how to interpret it.
+      </p>
+
+      <h3>KPI strip</h3>
+      <p>
+        Directly below the sweep header is a row of six cells: total
+        runs, completed, failed, running, total cost, and mean outcome.
+        Numbers use the monospace font. The completed, failed, and
+        running cells include a percentage of the total as a sub-label,
+        so you can see at a glance whether the sweep is half done or
+        nearly done without counting. The failed count turns red if any
+        runs failed, which makes a partial failure visible without
+        reading the matrix.
+      </p>
+      <p>
+        The mean outcome cell shows the mean of the primary outcome
+        score across completed runs, plus a standard error (mean
+        &plusmn; se). A high standard error relative to the mean means
+        the signal is noisy and you probably need more trials per cell
+        before drawing conclusions. A low standard error means the
+        result is stable.
+      </p>
+      <p>
+        While the sweep is in progress (status "running"), the KPI
+        strip polls every two seconds. The page stops polling when the
+        sweep reaches a terminal state.
+      </p>
+
+      <h3>Matrix view</h3>
+      <p>
+        The matrix is the core visualization. It is a table whose rows
+        and columns correspond to two sweep axes, defaulting to the two
+        axes with the most distinct values. Use the "Rows" and "Cols"
+        dropdowns above the matrix to switch which axes appear in each
+        dimension. Any axes not shown in the matrix appear in the
+        per-axis breakdown section instead.
+      </p>
+      <p>
+        Each cell in the matrix shows up to three pieces of
+        information:
+      </p>
+      <ul>
+        <li>A row of small colored squares, one per run, showing each
+          run's status: green for completed, red for failed, amber for
+          running (pulsing), and gray for not yet started. If a cell
+          has more than six runs, the first six are shown and a "+N"
+          indicator counts the rest.</li>
+        <li>The mean primary outcome score in monospace type. When the
+          cell has no completed runs, a dash appears instead.</li>
+        <li>A tiny horizontal box plot glyph when the "Show variance"
+          toggle is on and the cell has two or more runs. The box
+          marks the interquartile range, the center line marks the
+          median, and the caps mark the minimum and maximum. A wide
+          box means the result varies significantly across trials of
+          the same configuration. A narrow box means the result is
+          stable.</li>
+      </ul>
+      <p>
+        Cell background color shifts from a green tint for cells where
+        all runs completed successfully to a red tint for cells where
+        all runs failed. Mixed cells fall between those extremes. The
+        tint is subtle enough not to interfere with the score text.
+      </p>
+      <p>
+        Hovering a cell shows a tooltip with the per-run breakdown: run
+        ID prefix, status, score, and cost for each run. Clicking a
+        single-run cell opens that run's detail page. Clicking a
+        multi-run cell scrolls the page to the flat runs list and
+        filters it to those runs.
+      </p>
+      <p>
+        When the sweep has more than 200 cells the matrix may be wide.
+        It scrolls horizontally; the row and column headers stick to
+        the left and top edges as you scroll.
+      </p>
+
+      <h3>Cost over time chart</h3>
+      <p>
+        Below the matrix is a line chart of cumulative USD spend over
+        wall-clock time. The x-axis runs from the first run's start
+        time to the last run's end time (or to "now" while the sweep is
+        in progress). Each point on the line represents one run
+        completing; the dot is green for a successful run and red for a
+        failed one. The slope of the line tells you your burn rate. A
+        sudden flat segment means runs completed cheaply or for free;
+        a steep jump means a single expensive run landed.
+      </p>
+      <p>
+        If no runs recorded cost data, the section shows a brief
+        message to that effect. Cost data is recorded when a run
+        completes with a <code>total_cost.usd</code> field in its
+        status update.
+      </p>
+
+      <h3>Per-axis breakdown</h3>
+      <p>
+        To the right of the cost chart is a compact table for each
+        axis that is not currently assigned to the matrix rows or
+        columns. Each table lists the axis's distinct values with the
+        number of runs for that value, the mean outcome score, and the
+        total cost. Clicking a row in any of these tables filters the
+        flat runs list below to only runs matching that axis value.
+      </p>
+      <p>
+        The per-axis breakdown is where you discover that one axis does
+        not matter. If "backend" shows identical mean scores across all
+        values, the choice of backend is not a significant factor for
+        this scenario. If "persona" shows a wide range, the scenario is
+        sensitive to persona choice and you should investigate the
+        outlier personas in the runs list.
+      </p>
+      <p>
+        When all axes are assigned to the matrix rows and columns, this
+        section reads "All axes are shown in the matrix above."
+      </p>
+
+      <h3>Flat runs list</h3>
+      <p>
+        At the bottom of the page is a table of all runs in the sweep:
+        ID, scenario, world, model, status, outcome score, cost, and
+        duration. Each ID is a link to the run's detail page.
+      </p>
+      <p>
+        Clicking a matrix cell or a per-axis breakdown row applies a
+        filter to this list and shows a banner above the table
+        identifying the active filter. Clicking "Clear filter" returns
+        to the unfiltered view. This is how you move from "the
+        anthropic/enterprise_audit cell looks weak" to "here are the
+        specific runs in that cell."
+      </p>
+
+      <h3>Actions</h3>
+      <p>
+        The action row above the KPI strip has three buttons. "Share"
+        copies the current URL to the clipboard; the URL is already a
+        permanent link. "Compare two runs" opens a picker where you
+        select two runs from this sweep by their ID and opens the
+        Stage comparison view. "Cancel sweep" appears only when the
+        sweep status is "running"; clicking it asks for confirmation
+        before posting the cancel request.
       </p>
     </section>
 

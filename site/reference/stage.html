@@ -39,6 +39,7 @@
         <a href="cli.html">CLI</a>
         <a href="runtime.html">Runtime</a>
         <a href="traces.html">Traces</a>
+        <a href="training.html">Training runs</a>
         <a href="sweeps.html">Sweeps</a>
         <a href="observability.html">Observability</a>
         <a href="stage.html" class="active">Stage</a>
@@ -266,17 +267,27 @@ world = World("agora", stage=stage)</code></pre>
 # Sweep id: 019a1b2c-...
 # Stage:    https://ensemble-stage.fly.dev/myorg/myproject/sweeps/019a1b2c-...</code></pre>
       <p>
-        The sweep detail page shows a matrix view with one row per cell.
-        Each row shows the cell's flag and environment variable
-        combinations, whether the cell completed or failed, and the
-        grader scores for that cell. Clicking a row opens the run detail
-        page for that specific cell.
+        The sweep detail page has several sections. A KPI strip at the
+        top shows run counts, completion percentage, total cost, and
+        mean outcome with standard error. It polls every two seconds
+        while the sweep is running. Below the KPI strip is a matrix
+        view with axis dropdowns (for choosing which dimensions appear
+        as rows and columns), a variance toggle, and cells that each
+        show a status indicator, mean score, and a box plot glyph. A
+        cost-over-time line chart shows cumulative USD spend as runs
+        complete. A per-axis breakdown table covers axes not shown in
+        the matrix. At the bottom, a flat runs list is filterable by
+        matrix cell or by axis value.
       </p>
       <p>
-        Cells that were skipped because a prior run already existed
-        appear as "skipped" in the matrix. Passing
-        <code>--no-resume</code> forces all cells to re-run and updates
-        their rows in the matrix.
+        The action row at the top of the page lets you share the sweep
+        URL, open a comparison picker for two runs in the sweep, or
+        cancel the sweep if it is still running.
+      </p>
+      <p>
+        See <a href="sweeps.html#reading-the-sweep-detail-page-on-stage">Reading
+        the sweep detail page on Stage</a> for a complete description
+        of how to interpret each section.
       </p>
     </section>
 
@@ -289,19 +300,34 @@ world = World("agora", stage=stage)</code></pre>
         startup.
       </p>
 <pre><code class="language-bash">ensemble train examples/agora/personas/frustrated_power_user.toml --backend modal
-# Training run: https://ensemble-stage.fly.dev/myorg/myproject/training/019b2c3d-...</code></pre>
+# Training run: https://ensemble-stage.fly.dev/myorg/myproject/training_runs/019b2c3d-...</code></pre>
       <p>
-        The training run detail page shows a chart for each metric that
-        was streamed: loss, reward, KL divergence, and any custom
-        metrics the training backend reported. The x-axis is the
-        training step. The chart updates live while training is in
-        progress and freezes when the run completes or fails.
+        The training detail page shows loss curves for each metric
+        (train_loss and eval_loss share a chart; others are separate),
+        with annotations for the best eval checkpoint and any training
+        plateau. A log-scale toggle switches the y-axis. The page polls
+        every five seconds while training is running.
+      </p>
+      <p>
+        Below the charts are two side-by-side tables: hyperparameters
+        (learning rate, batch size, LoRA rank, DPO beta, etc.) and
+        final metrics (best eval loss, total steps, wall time, cost).
+        A comparison section overlays the current run's loss curve with
+        the most recent prior training runs for the same persona.
+        A baseline comparison table shows whether the trained adapter
+        improved eval outcomes relative to the prompted persona on the
+        same scenarios and models.
       </p>
       <p>
         Metric flushing uses a background thread with a 30-second timer
         so individual training steps are not blocked by network I/O.
         If the training process exits uncleanly, buffered metrics are
         flushed at process teardown.
+      </p>
+      <p>
+        See <a href="personas.html#reading-the-training-detail-page-on-stage">Reading
+        the training detail page on Stage</a> in the personas reference
+        for a full description of the baseline comparison mechanism.
       </p>
     </section>
 

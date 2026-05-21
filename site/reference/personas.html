@@ -39,6 +39,7 @@
         <a href="cli.html">CLI</a>
         <a href="runtime.html">Runtime</a>
         <a href="traces.html">Traces</a>
+        <a href="training.html">Training runs</a>
         <a href="sweeps.html">Sweeps</a>
         <a href="observability.html">Observability</a>
         <a href="stage.html">Stage</a>
@@ -345,6 +346,177 @@ alice = world.spawn_user(id="alice", persona="frustrated_power_user")</code></pr
           </p>
         </li>
       </ol>
+    </section>
+
+    <section id="reading-the-training-detail-page-on-stage">
+      <h2>Reading the training detail page on Stage</h2>
+      <p>
+        When <code>ensemble train</code> runs with Stage configured, it
+        creates a training run entity and streams step-level metrics as
+        training progresses. The training detail page at
+        <code>/org/project/training_runs/&lt;id&gt;</code> answers five
+        questions: did the loss go down, did eval improve, is this run
+        better than past training runs for this persona, did using this
+        adapter actually improve eval outcomes versus the prompted
+        baseline, and where is the artifact.
+      </p>
+
+      <h3>Header</h3>
+      <p>
+        The header shows the full training run ID, status badge,
+        persona name, base model, timestamps, and, once training
+        completes, the artifact URI with a copy button. The artifact
+        URI is the HuggingFace path or Modal volume path where the
+        adapter was uploaded.
+      </p>
+
+      <h3>Loss curves</h3>
+      <p>
+        The main visualization is one SVG line chart per metric name.
+        Metrics with compatible scales (typically
+        <code>train_loss</code> and <code>eval_loss</code>) share a
+        single chart; others each get their own. The x-axis is the
+        training step; the y-axis is the metric value. A log-scale
+        toggle in the chart header switches between linear and log
+        scale (the choice is preserved in the URL hash so you can
+        share a log-scale view).
+      </p>
+      <p>
+        Three automatic annotations overlay the chart. A vertical line
+        at the step with the lowest eval loss, labeled "Best eval @
+        step N," marks the checkpoint you most likely want to deploy.
+        A marker at the last recorded eval point labels the final value.
+        If the loss has been within a 1% band for the last 20% of
+        total steps, a horizontal band labeled "Plateau" overlays that
+        region, indicating diminishing returns from further training.
+      </p>
+      <p>
+        If the training run is still in progress, the chart polls every
+        five seconds and appends new points in place. Polling stops
+        when the run reaches a terminal state.
+      </p>
+      <p>
+        If no metrics exist yet (training just started), the page shows
+        "Training in progress, waiting for the first metric report."
+        If the run completed without any metrics (indicating a broken
+        training job), the page shows an error indicator and links to
+        the artifact URI if one was set.
+      </p>
+
+      <h3>Hyperparameters and final metrics</h3>
+      <p>
+        Two side-by-side tables sit below the loss curves. The left
+        table lists the hyperparameters from the training run record:
+        base model, learning rate, batch size, epochs, LoRA rank, DPO
+        beta, and any other fields the training backend recorded. The
+        right table lists the final metrics: final train loss, final
+        eval loss, best eval, total steps, wall time, and total cost.
+        These two tables together tell you what was trained and how
+        well it converged.
+      </p>
+
+      <h3>Comparison to past training runs</h3>
+      <p>
+        Below the metrics tables is a chart overlaying the current
+        run's loss curve with the three or five most recent training
+        runs for the same persona. The current run is drawn in the
+        accent color at full opacity; older runs are drawn in a muted
+        color at half opacity. A legend below the chart labels each
+        line with its training run ID, date, and the key
+        hyperparameter difference from the current run (for example,
+        "lr=5e-6 vs current 1e-5").
+      </p>
+      <p>
+        This view answers the "is this run better than past runs?"
+        question. If the current run's eval loss converges lower or
+        faster than previous runs, the hyperparameter change you made
+        was beneficial. If all lines converge to roughly the same
+        value, the hyperparameter does not matter much for this
+        persona. If the current run's loss is higher, something
+        regressed.
+      </p>
+      <p>
+        If this is the first training run for this persona, the section
+        reads: "This is the first training run for this persona. The
+        comparison section will populate once additional runs exist."
+      </p>
+
+      <h3>Baseline comparison</h3>
+      <p>
+        This is the most important section on the page. It answers the
+        question: did using this trained adapter actually improve eval
+        outcomes compared to the prompted baseline?
+      </p>
+      <p>
+        Stage finds this answer by looking at eval runs in the same
+        project that used the adapter produced by this training run,
+        then finding matching baseline runs that used the same scenario
+        and model but the prompted version of the same persona. The
+        result is a table with one row per (scenario, model) pair:
+      </p>
+      <ul>
+        <li>Scenario and model</li>
+        <li>Mean outcome for baseline runs</li>
+        <li>Mean outcome for trained runs</li>
+        <li>Delta (trained minus baseline), colored green for
+          improvement and red for regression, with intensity
+          proportional to magnitude</li>
+        <li>p-value when enough samples exist for a significance
+          test</li>
+        <li>A link to open the Stage comparison view for a
+          representative pair</li>
+      </ul>
+      <p>
+        The table is sorted by absolute delta descending, so the
+        largest improvements and regressions appear at the top. This
+        surface is the payoff of the full post-training loop: you
+        train, you eval, and Stage shows you whether the training
+        moved the needle.
+      </p>
+      <p>
+        If no baseline runs exist for this scenario and model (meaning
+        the persona has only ever been used in trained form, never in
+        prompted form), each row notes "No prompted baseline available
+        for this scenario and model." Adding prompted-persona eval runs
+        with the same scenario and model will populate the table
+        retroactively.
+      </p>
+      <p>
+        If the linkage between eval runs and the adapter URI has not
+        been recorded (eval runs need to store which adapter they used),
+        the section shows a message to that effect. See
+        <a href="#trained-persona-auto-wiring">trained persona
+        auto-wiring</a> for the adapter_uri field that must be set on
+        the eval run to close this loop.
+      </p>
+
+      <h3>Artifact details</h3>
+      <p>
+        A section at the bottom of the page shows the artifact URI,
+        a copy button, and the artifact size if known. It also shows a
+        code snippet for adding the adapter to a persona TOML and
+        running an eval scenario with it:
+      </p>
+<pre><code class="language-toml">[persona.training]
+adapter_name = "ensemble-agora-frustrated-power-user"
+serve_url = "http://your-vllm-host:8000/v1"</code></pre>
+<pre><code class="language-bash">ensemble run agora.refund_storm --backend auto</code></pre>
+      <p>
+        If training is still in progress or failed without an artifact,
+        the section shows the appropriate state rather than a broken
+        URI.
+      </p>
+
+      <h3>Preference dataset preview</h3>
+      <p>
+        If the training run's metadata references a preference dataset
+        (the DPO pairs used for training), a small collapsible section
+        shows the number of preference pairs and a sample of three
+        pairs with the chosen and rejected responses side by side. This
+        is research context that helps you understand what signal the
+        model was trained on. If the dataset reference was not recorded
+        (common for early training runs), this section is hidden.
+      </p>
     </section>
 
     <footer class="site">
