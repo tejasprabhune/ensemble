@@ -31,6 +31,12 @@ enum Cmd {
         /// registered world (rather than creating a fresh world).
         #[arg(long)]
         world: Option<String>,
+        /// Scaffold the heavyweight shape with a Rust state crate. Default
+        /// is the pure-Python world: one module, one scenario, runnable
+        /// in one command. Reach for --with-rust when the world needs
+        /// typed state with snapshot/restore semantics.
+        #[arg(long = "with-rust")]
+        with_rust: bool,
     },
     /// Run a registered scenario and write the trace to ./traces/.
     Run {
@@ -151,8 +157,8 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Init { name, path, world } => {
-            scaffold::init(&name, path.as_deref(), world.as_deref())
+        Cmd::Init { name, path, world, with_rust } => {
+            scaffold::init(&name, path.as_deref(), world.as_deref(), with_rust)
         }
         Cmd::Run {
             scenario,

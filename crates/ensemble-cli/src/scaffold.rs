@@ -3,14 +3,26 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// Scaffold a new project. Two modes:
+/// Scaffold a new project. Three shapes:
 ///
-/// * `init <name>` creates a fresh world (rust crate skeleton + scenarios
-///   dir + personas dir + world.toml manifest).
-/// * `init --world <existing> <scenario_dir>` skips the world boilerplate
-///   and just lays down a scenarios package that points at an
-///   already-registered world.
-pub fn init(name: &str, path: Option<&Path>, world: Option<&str>) -> Result<()> {
+/// * `init <name>` (default): a pure-Python world. One module file,
+///   a `world.toml`, a runnable smoke scenario, no Rust crate. The
+///   common case for researchers writing a new world; the rust path
+///   is the upgrade, not the starting point.
+/// * `init <name> --with-rust`: the heavyweight shape with a Rust
+///   crate, a `WorldState` skeleton, and the same Python plugin.
+///   Reach for this when the world needs typed state with
+///   snapshot/restore semantics, or when the tool dispatch must
+///   live in compiled code.
+/// * `init <scenarios_dir> --world <existing>`: a scenarios package
+///   bound to an already-registered world. Skips the world
+///   boilerplate.
+pub fn init(
+    name: &str,
+    path: Option<&Path>,
+    world: Option<&str>,
+    with_rust: bool,
+) -> Result<()> {
     let root: PathBuf = match path {
         Some(p) => p.to_path_buf(),
         None => PathBuf::from(name),
@@ -28,8 +40,23 @@ pub fn init(name: &str, path: Option<&Path>, world: Option<&str>) -> Result<()> 
         return Ok(());
     }
 
-    scaffold_full_world(&root, name)?;
-    println!("scaffolded {name} at {}", root.display());
+    if with_rust {
+        scaffold_full_world_with_rust(&root, name)?;
+        println!(
+            "scaffolded {name} (with rust state) at {}\n\
+             next: cd {} && ensemble run {name}.smoke",
+            root.display(),
+            root.display()
+        );
+    } else {
+        scaffold_pure_python_world(&root, name)?;
+        println!(
+            "scaffolded {name} at {}\n\
+             next: cd {} && ensemble run {name}.smoke",
+            root.display(),
+            root.display()
+        );
+    }
     Ok(())
 }
 
@@ -42,26 +69,117 @@ fn scaffold_scenarios_dir(root: &Path, name: &str, world: &str) -> Result<()> {
     fs::write(
         root.join("scenarios/smoke.py"),
         format!(
-            "\"\"\"A smoke scenario for the {world} world.\"\"\"\n\nimport {world}  # noqa: F401  \
-             registers the world with ensemble\nfrom ensemble import scenario\n\n\n\
-             @scenario(\"{name}.smoke\", world=\"{world}\")\nasync def smoke(world):\n    \
-             alice = world.spawn_user(id=\"alice\", model=\"user-model\")\n    rep = \
-             world.spawn_agent(id=\"rep\", model=\"agent-model\")\n    alice.say(\"rep\", \
-             \"hello\")\n    yield world.until(world.turn_count > 4)\n    yield {{\"ok\": 1.0}}\n"
-        ),
-    )?;
-    fs::write(
-        root.join("scenarios.toml"),
-        format!(
-            "[scenario.smoke]\nworld = \"{world}\"\nduration_turns = 4\n\n\
-             [[scenario.smoke.agents]]\nid = \"rep\"\nmodel = \"agent-model\"\ntools = []\n\n\
-             [scenario.smoke.graders]\nok = \"any_event\"\n"
+            "\"\"\"A smoke scenario for the {world} world.\"\"\"\n\n\
+             import {world}  # noqa: F401  registers the world with ensemble\n\
+             from ensemble import scenario\n\n\n\
+             @scenario(\"{name}.smoke\", world=\"{world}\")\n\
+             async def smoke(world):\n    \
+             rep = world.spawn_agent(tools=[])\n    \
+             world.opener(\"hello\", to=rep.id)\n    \
+             yield world.until(world.turn_count > 4)\n    \
+             yield {{\"ok\": 1.0}}\n"
         ),
     )?;
     Ok(())
 }
 
-fn scaffold_full_world(root: &Path, name: &str) -> Result<()> {
+/// Pure-Python world scaffold: one module file with the tool, one
+/// scenarios file, a world.toml, no Rust crate. Runnable immediately
+/// after `ensemble init <name>` because B2 lets `ensemble run`
+/// discover `world.toml` in the cwd.
+fn scaffold_pure_python_world(root: &Path, name: &str) -> Result<()> {
+    fs::create_dir_all(root.join("scenarios"))?;
+
+    fs::write(
+        root.join("world.toml"),
+        format!(
+            "[world]\n\
+             name = \"{name}\"\n\
+             python_package = \"{name}\"\n\
+             default_agent_model = \"claude-sonnet-4-5\"\n"
+        ),
+    )?;
+
+    fs::write(
+        root.join(format!("{name}.py")),
+        format!(
+            "\"\"\"The {name} world.\n\n\
+             A single-file Python world. Importing this module registers it\n\
+             with ensemble (the scenarios file does that for you). Add tools by\n\
+             decorating plain functions with @tool: the name, description, and\n\
+             JSON-Schema parameters come from the function itself.\n\
+             \"\"\"\n\n\
+             from ensemble import register_world, tool\n\n\n\
+             @tool\n\
+             def echo(text: str) -> str:\n    \
+             \"\"\"Return the text back. Replace me with a real tool.\"\"\"\n    \
+             return text\n\n\n\
+             register_world(\n    \
+             \"{name}\",\n    \
+             tools=[echo],\n    \
+             default_agent_model=\"claude-sonnet-4-5\",\n\
+             )\n"
+        ),
+    )?;
+
+    fs::write(
+        root.join("scenarios/__init__.py"),
+        "from . import smoke  # noqa: F401\n",
+    )?;
+
+    fs::write(
+        root.join("scenarios/smoke.py"),
+        format!(
+            "\"\"\"A runnable smoke scenario for the {name} world.\n\n\
+             Run with: ensemble run {name}.smoke\n\
+             \"\"\"\n\n\
+             import {name}  # noqa: F401  registers the world\n\
+             from ensemble import scenario\n\n\n\
+             @scenario(\"{name}.smoke\", world=\"{name}\")\n\
+             async def smoke(world):\n    \
+             rep = world.spawn_agent(tools=[\"echo\"])\n    \
+             world.opener(\"say hi back\", to=rep.id)\n    \
+             yield world.until(world.turn_count > 4)\n    \
+             yield {{\"ok\": 1.0}}\n"
+        ),
+    )?;
+
+    fs::write(
+        root.join("README.md"),
+        format!(
+            "# {name}\n\n\
+             A new ensemble world. The smoke scenario runs against the\n\
+             deterministic mock backend with no setup:\n\n\
+             ```\n\
+             cd {name}\n\
+             ensemble run {name}.smoke\n\
+             ensemble trace view traces/{name}_smoke.jsonl\n\
+             ```\n\n\
+             ## Adding a real tool\n\n\
+             Edit `{name}.py`. Tools are plain Python functions with type\n\
+             hints; the decorator derives the JSON-Schema parameters,\n\
+             description, and name from the function itself:\n\n\
+             ```python\n\
+             @tool\n\
+             def lookup_user(user_id: str) -> dict:\n    \
+             \"Return the user record by id.\"\n    \
+             return db[user_id]\n\
+             ```\n\n\
+             Then add it to the `tools=[...]` list in `register_world(...)`\n\
+             and reference it from a scenario's `spawn_agent(tools=[...])`.\n\n\
+             ## Upgrading to a Rust state core\n\n\
+             If your world needs typed state with snapshot/restore semantics,\n\
+             regenerate the scaffold with `ensemble init <new-name> --with-rust`\n\
+             and port over your Python tools.\n",
+        ),
+    )?;
+
+    Ok(())
+}
+
+/// Heavyweight scaffold with a Rust crate. The old default, now
+/// reached via --with-rust.
+fn scaffold_full_world_with_rust(root: &Path, name: &str) -> Result<()> {
     fs::create_dir_all(root.join("world/src"))?;
     fs::create_dir_all(root.join(name))?;
     fs::create_dir_all(root.join("scenarios"))?;
@@ -71,7 +189,8 @@ fn scaffold_full_world(root: &Path, name: &str) -> Result<()> {
         root.join("world.toml"),
         format!(
             "[world]\nname = \"{name}\"\npython_package = \"{name}\"\nrust_crate = \"world\"\n\
-             personas_dir = \"personas\"\n\n[[world.default_personas]]\nname = \"example\"\n"
+             personas_dir = \"personas\"\ndefault_agent_model = \"claude-sonnet-4-5\"\n\n\
+             [[world.default_personas]]\nname = \"example\"\n"
         ),
     )?;
     fs::write(
@@ -118,20 +237,15 @@ fn scaffold_full_world(root: &Path, name: &str) -> Result<()> {
     fs::write(
         root.join("scenarios/smoke.py"),
         format!(
-            "\"\"\"A smoke scenario for the {name} world.\"\"\"\n\nimport {name}  # noqa: F401  \
-             registers the world\nfrom ensemble import scenario\n\n\n\
-             @scenario(\"{name}.smoke\", world=\"{name}\")\nasync def smoke(world):\n    \
-             alice = world.spawn_user(id=\"alice\")\n    rep = world.spawn_agent(id=\"rep\")\n    \
-             alice.say(\"rep\", \"hello\")\n    yield world.until(world.turn_count > 4)\n    \
+            "\"\"\"A smoke scenario for the {name} world.\"\"\"\n\n\
+             import {name}  # noqa: F401  registers the world\n\
+             from ensemble import scenario\n\n\n\
+             @scenario(\"{name}.smoke\", world=\"{name}\")\n\
+             async def smoke(world):\n    \
+             rep = world.spawn_agent(tools=[])\n    \
+             world.opener(\"hello\", to=rep.id)\n    \
+             yield world.until(world.turn_count > 4)\n    \
              yield {{\"ok\": 1.0}}\n"
-        ),
-    )?;
-    fs::write(
-        root.join("scenarios.toml"),
-        format!(
-            "[scenario.smoke]\nworld = \"{name}\"\nduration_turns = 4\n\n\
-             [[scenario.smoke.agents]]\nid = \"rep\"\nmodel = \"agent-model\"\ntools = []\n\n\
-             [scenario.smoke.graders]\nok = \"any_event\"\n"
         ),
     )?;
     fs::write(
@@ -143,9 +257,9 @@ fn scaffold_full_world(root: &Path, name: &str) -> Result<()> {
     fs::write(
         root.join("README.md"),
         format!(
-            "# {name}\n\nA new world scaffolded by `ensemble init`. Implement `WorldState` in \
+            "# {name}\n\nA new world scaffolded by `ensemble init --with-rust`. Implement `WorldState` in \
              `world/src/lib.rs`, register tools/predicates in `{name}/__init__.py`, then:\n\n```\n\
-             ensemble worlds add {name} .\nensemble run {name}.smoke --world {name}\n```\n"
+             ensemble run {name}.smoke\n```\n"
         ),
     )?;
     Ok(())
