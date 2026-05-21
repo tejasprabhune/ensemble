@@ -258,15 +258,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
     )
 
-    print(
-        json.dumps(
-            {
-                "scenario": args.scenario,
-                "scores": result.scores,
-                "trace_path": str(trace_path),
-            }
-        )
-    )
+    summary: dict = {
+        "scenario": args.scenario,
+        "scores": result.scores,
+        "trace_path": str(trace_path),
+    }
+    if result.costs:
+        # Only include costs when there is something to report. The
+        # mock backend records nothing, so the line stays clean for
+        # smoke runs but real-backend runs surface tokens (and USD
+        # when the model is in the pricing table) without the user
+        # having to read the trace.
+        summary["costs"] = result.costs
+    print(json.dumps(summary))
     return 0
 
 

@@ -232,6 +232,7 @@ class RunResult:
     name: str
     scores: Dict[str, float] = field(default_factory=dict)
     trace: List[Dict[str, Any]] = field(default_factory=list)
+    costs: Dict[str, float] = field(default_factory=dict)
 
 
 class PredicateError(KeyError):
@@ -1070,6 +1071,27 @@ class World:
     ) -> None:
         self._native.record_cost(unit, float(amount), actor)
 
+    def cost_summary(self) -> Dict[str, float]:
+        """Aggregate per-unit cost totals across the run by walking
+        the trace's Cost events. Each backend reports
+        ``tokens_in``/``tokens_out`` per LLM call, plus ``usd`` when
+        the model is in the pricing table; manual ``record_cost``
+        calls show up under whatever unit the scenario chose.
+
+        Useful for the CLI summary line and for graders that want a
+        budget-aware score without subscribing to the cost ledger
+        directly."""
+        totals: Dict[str, float] = {}
+        for ev in self.trace():
+            payload = ev.get("payload") or {}
+            if payload.get("kind") != "cost":
+                continue
+            unit = payload.get("unit")
+            running = payload.get("running_total")
+            if isinstance(unit, str) and isinstance(running, (int, float)):
+                totals[unit] = float(running)
+        return totals
+
 
 class SimulationRun:
     def __init__(self, world: "World") -> None:
@@ -1150,13 +1172,21 @@ def scenario(name: str, *, world: Optional[str] = None) -> Callable:
                     scores = {}
                 _log_grader_scores(world_obj, name, scores)
                 trace = [json.loads(e) for e in world_obj._native.trace_events()]
-                return RunResult(name=name, scores=dict(scores), trace=trace)
+                return RunResult(
+                    name=name,
+                    scores=dict(scores),
+                    trace=trace,
+                    costs=world_obj.cost_summary(),
+                )
             else:
                 scores = await func(world_obj)
                 _log_grader_scores(world_obj, name, scores or {})
                 trace = [json.loads(e) for e in world_obj._native.trace_events()]
                 return RunResult(
-                    name=name, scores=dict(scores or {}), trace=trace
+                    name=name,
+                    scores=dict(scores or {}),
+                    trace=trace,
+                    costs=world_obj.cost_summary(),
                 )
 
         wrapper.__scenario_name__ = name  # type: ignore[attr-defined]
