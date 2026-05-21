@@ -156,8 +156,8 @@ def cmd_projects_list(_args) -> int:
     if not org:
         print("stage: no default org found. Use 'ensemble stage whoami' to debug.", file=sys.stderr)
         return 1
-    data = _bearer_request(f"{base_url}/v1/projects/{org}", api_key)
-    projects = data if isinstance(data, list) else data.get("projects", [])
+    data = _bearer_request(f"{base_url}/v1/orgs/{org}", api_key)
+    projects = data.get("projects", [])
     if not projects:
         print(f"No projects in {org}.")
     for p in projects:
@@ -174,9 +174,9 @@ def cmd_projects_create(args) -> int:
         print(f"stage: project must be 'org_slug/project_slug', got {ref!r}", file=sys.stderr)
         return 1
     org_slug, project_slug = ref.split("/", 1)
-    body = json.dumps({"slug": project_slug}).encode()
+    body = json.dumps({"slug": project_slug, "name": project_slug, "public": False}).encode()
     data = _bearer_request(f"{base_url}/v1/projects/{org_slug}", api_key, method="POST", body=body)
-    print(f"Created project: {org_slug}/{data.get('slug', project_slug)}")
+    print(f"Created project: {org_slug}/{data.get('project_slug', project_slug)}")
     write_project_toml(ref, base_url=base_url)
     print(f"Wrote .stage.toml in {Path.cwd()}")
     return 0
@@ -226,35 +226,32 @@ def cmd_push(args: argparse.Namespace) -> int:
             except (json.JSONDecodeError, OSError):
                 pass
 
-        run_id = meta.get("run_id") or run_dir.name
-        print(f"  checking {run_id} ...", end=" ", flush=True)
+        local_id = meta.get("run_id") or run_dir.name
+        stage_run_id = meta.get("stage_run_id", "").strip()
+        print(f"  {local_id} ...", end=" ", flush=True)
 
-        # Skip if already on Stage.
-        try:
-            stage_api_call(cfg, "GET", f"/v1/runs/{run_id}")
-            print("skipped (already on Stage)")
-            skipped += 1
-            continue
-        except RuntimeError as e:
-            if "404" not in str(e):
-                print(f"error checking Stage: {e}")
-                failed += 1
+        # Skip if already pushed (stage_run_id recorded in meta).
+        if stage_run_id:
+            try:
+                stage_api_call(cfg, "GET", f"/v1/runs/{stage_run_id}")
+                print("skipped (already on Stage)")
+                skipped += 1
                 continue
+            except RuntimeError:
+                pass  # not found; push it
 
-        # Create the run on Stage.
+        # Create the run on Stage (server generates the UUID).
         try:
-            stage_api_call(
+            created = stage_api_call(
                 cfg, "POST",
                 f"/v1/projects/{cfg.org_slug}/{cfg.project_slug}/runs",
                 {
-                    "id": run_id,
                     "scenario": meta.get("scenario", ""),
                     "world": meta.get("world", ""),
                     "backend": meta.get("backend", ""),
                     "metadata": {
-                        k: meta[k]
-                        for k in ("started_at", "finished_at", "duration_s")
-                        if k in meta
+                        **{k: meta[k] for k in ("started_at", "finished_at", "duration_s") if k in meta},
+                        "local_run_id": local_id,
                     },
                 },
             )
@@ -263,15 +260,17 @@ def cmd_push(args: argparse.Namespace) -> int:
             failed += 1
             continue
 
+        stage_run_id = created.get("id", "")
+        if stage_run_id and meta_path.exists():
+            try:
+                meta["stage_run_id"] = stage_run_id
+                meta["stage_url"] = created.get("url", "")
+                meta_path.write_text(json.dumps(meta, indent=2))
+            except OSError:
+                pass
+
         # Stream events in batches of 100.
         events_text = trace_path.read_text(errors="replace")
-        raw_events = [
-            json.loads(line)
-            for line in events_text.splitlines()
-            if line.strip()
-            for _ in [None]  # single-pass try/except workaround
-        ]
-        # Re-parse with proper error handling.
         raw_events = []
         for line in events_text.splitlines():
             line = line.strip()
@@ -303,18 +302,23 @@ def cmd_push(args: argparse.Namespace) -> int:
             if not batch:
                 break
             try:
-                stage_api_call(cfg, "POST", f"/v1/runs/{run_id}/events", {"events": batch})
+                stage_api_call(cfg, "POST", f"/v1/runs/{stage_run_id}/events", {"events": batch})
             except RuntimeError:
                 ev_errors += 1
 
         # Mark completed.
         scores = meta.get("scores") or {}
-        outcome = {"scores": scores} if scores else None
+        outcome = scores if scores else None
         status_body: dict = {"status": "completed"}
         if outcome:
             status_body["outcome"] = outcome
+        costs = meta.get("costs") or {}
+        if costs.get("usd"):
+            status_body["total_cost"] = {"usd": costs["usd"]}
+        if meta.get("duration_s"):
+            status_body["wall_time_ms"] = int(meta["duration_s"] * 1000)
         try:
-            stage_api_call(cfg, "POST", f"/v1/runs/{run_id}/status", status_body)
+            stage_api_call(cfg, "POST", f"/v1/runs/{stage_run_id}/status", status_body)
         except RuntimeError:
             pass
 
