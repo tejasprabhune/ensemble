@@ -7,6 +7,7 @@ pub mod backends;
 pub mod persona;
 pub mod pricing;
 pub mod resources;
+pub mod stage_sink;
 pub mod tools;
 
 pub use backend::{
@@ -24,3 +25,4 @@ pub use resources::{ResourceKind, ResourceManager};
 pub use tools::{
     DispatchResult, ProgressEmitter, ProgressEntry, Tool, ToolOutcome, ToolRegistry,
 };
+pub use stage_sink::{StageSink, StageConfig};

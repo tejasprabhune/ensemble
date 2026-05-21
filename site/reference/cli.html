@@ -41,6 +41,7 @@
         <a href="traces.html">Traces</a>
         <a href="sweeps.html">Sweeps</a>
         <a href="observability.html">Observability</a>
+        <a href="stage.html">Stage</a>
       </div>
     </nav>
   </aside>
@@ -337,24 +338,31 @@ ensemble trace view site/trace.jsonl --site site --port 8765
       <h3>runs list</h3>
 <pre><code class="language-bash">ensemble runs list [--scenario NAME] [--limit N]</code></pre>
       <p>
-        Prints recent runs as a table sorted oldest-first.
+        Prints recent runs as a table sorted newest-first. When Stage
+        is configured, local and Stage runs are merged: same run id
+        from both sources collapses to one row with
+        <code>location=local+stage</code>. The
+        <code>location</code> column shows <code>local</code>,
+        <code>stage</code>, or <code>local+stage</code>.
         <code>--scenario</code> filters; <code>--limit</code>
-        truncates to the last N rows.
+        truncates to the first N rows (default 50).
       </p>
 
       <h3>runs show</h3>
 <pre><code class="language-bash">ensemble runs show &lt;run_id_or_prefix&gt;</code></pre>
       <p>
-        Prints one run's meta as pretty-printed JSON. The argument
-        can be any unique prefix of the run id.
+        Prints one run's meta as pretty-printed JSON. Resolves locally
+        first (with prefix matching), then falls back to Stage if the
+        run is not found locally.
       </p>
 
       <h3>runs compare</h3>
 <pre><code class="language-bash">ensemble runs compare &lt;a_id_or_prefix&gt; &lt;b_id_or_prefix&gt;</code></pre>
       <p>
         Diffs two runs' scores side by side. Each metric shows the
-        A value, the B value, and the signed delta. Costs are
-        dumped unmodified at the bottom.
+        A value, the B value, and the signed delta. When both runs are
+        Stage-only, also prints a Stage comparison URL. Each run is
+        resolved locally first, then from Stage.
       </p>
 
       <h3>runs export</h3>
@@ -512,6 +520,70 @@ ensemble mcp serve --world plank \
       </p>
       <p>Example:</p>
 <pre><code class="language-bash">ensemble train examples/plank/personas/frustrated_power_user.toml --backend modal</code></pre>
+    </section>
+
+    <section>
+      <h2>ensemble stage</h2>
+      <p>
+        Subcommands for the Stage cloud observability backend. All
+        shell to <code>python -m ensemble.cli_stage</code>. See the
+        <a href="stage.html">Stage reference</a> for configuration
+        and credential setup.
+      </p>
+
+      <h3>stage login</h3>
+<pre><code class="language-bash">ensemble stage login [--base-url URL]</code></pre>
+      <p>
+        Opens a browser to the GitHub OAuth flow on the Stage server.
+        Listens on a random high port for the callback, receives the
+        API key, and writes it to
+        <code>~/.ensemble/stage.toml</code> with 0600 permissions.
+        <code>--base-url</code> targets a self-hosted instance.
+      </p>
+
+      <h3>stage logout</h3>
+<pre><code class="language-bash">ensemble stage logout</code></pre>
+      <p>
+        Removes the API key from <code>~/.ensemble/stage.toml</code>.
+        The file itself is not deleted; only the
+        <code>api_key</code> field is cleared.
+      </p>
+
+      <h3>stage whoami</h3>
+<pre><code class="language-bash">ensemble stage whoami</code></pre>
+      <p>
+        Calls <code>GET /v1/me</code> and prints the authenticated
+        user's GitHub login and default organization. Use this to
+        confirm that credentials are valid before running a sweep.
+      </p>
+
+      <h3>stage projects list</h3>
+<pre><code class="language-bash">ensemble stage projects list</code></pre>
+      <p>Lists the Stage projects the current user has access to.</p>
+
+      <h3>stage projects create</h3>
+<pre><code class="language-bash">ensemble stage projects create &lt;org_slug&gt;/&lt;project_slug&gt;</code></pre>
+      <p>
+        Creates a Stage project (requires admin-scope API key or web
+        session). Writes <code>.stage.toml</code> in the current
+        directory referencing the new project. If
+        <code>.stage.toml</code> already exists, the command asks
+        before overwriting.
+      </p>
+
+      <h3>stage push</h3>
+<pre><code class="language-bash">ensemble stage push &lt;path&gt;</code></pre>
+      <p>
+        Bulk-pushes local traces to Stage. <code>&lt;path&gt;</code>
+        may be a trace directory, a <code>trace.jsonl</code> file, a
+        parent directory that is searched recursively, or a glob
+        pattern. Runs already present on Stage (by run id) are
+        skipped. Reports a count at the end:
+        <em>N pushed, M skipped, K failed</em>.
+      </p>
+<pre><code class="language-bash">ensemble stage push traces/
+ensemble stage push "traces/*/trace.jsonl"
+ensemble stage push traces/019542a3-4e7b-7000-8e1d-3f9a1c2d5e6f/</code></pre>
     </section>
 
     <footer class="site">

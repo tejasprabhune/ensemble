@@ -11,6 +11,7 @@ from typing import List, Optional
 
 from .self_play import PreferencePair
 from .spec import PersonaSpec
+from .stage_reporter import StageTrainingReporter
 
 
 @dataclass
@@ -21,7 +22,12 @@ class TrainedAdapter:
     pushed_to_hub: Optional[str] = None
 
 
-def train(spec: PersonaSpec, pairs: List[PreferencePair], output_dir: Path) -> TrainedAdapter:
+def train(
+    spec: PersonaSpec,
+    pairs: List[PreferencePair],
+    output_dir: Path,
+    stage_reporter: Optional[StageTrainingReporter] = None,
+) -> TrainedAdapter:
     """Train a LoRA adapter via TRL's DPOTrainer. Imports torch /
     transformers / trl / peft lazily; raises if they are not
     installed. The caller chooses where to write the artifacts."""
@@ -68,11 +74,28 @@ def train(spec: PersonaSpec, pairs: List[PreferencePair], output_dir: Path) -> T
         learning_rate=float(spec.training.dpo.get("learning_rate", 5e-6)),
         max_length=int(spec.training.dpo.get("max_length", 2048)),
     )
+    callbacks = []
+    if stage_reporter is not None:
+        try:
+            from transformers import TrainerCallback, TrainerControl, TrainerState
+
+            reporter_ref = stage_reporter
+
+            class _StageCallback(TrainerCallback):
+                def on_log(self, args, state: TrainerState, control: TrainerControl, logs=None, **kwargs):
+                    if logs:
+                        reporter_ref.emit_metrics(state.global_step, logs)
+
+            callbacks.append(_StageCallback())
+        except ImportError:
+            pass
+
     trainer = DPOTrainer(
         model=model,
         args=dpo_cfg,
         tokenizer=tokenizer,
         train_dataset=dataset,
+        callbacks=callbacks or None,
     )
     trainer.train()
     trainer.save_model(str(output_dir))

@@ -149,6 +149,7 @@ async def _run_cell(
     env: Dict[str, str],
     cell_root: Path,
     sem: asyncio.Semaphore,
+    stage_sweep_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Spawn one scenario invocation as a subprocess. Returns the
     parsed JSON summary the cli_run entry point prints, plus the
@@ -175,6 +176,8 @@ async def _run_cell(
 
         child_env = os.environ.copy()
         child_env.update(env)
+        if stage_sweep_id:
+            child_env["ENSEMBLE_STAGE_SWEEP_ID"] = stage_sweep_id
 
         proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -212,6 +215,7 @@ async def _run_sweep(
     cfg: SweepConfig,
     resume: bool,
     on_cell_complete,
+    stage_sweep_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     cells = _expand_cells(cfg)
     sem = asyncio.Semaphore(cfg.max_parallel)
@@ -226,7 +230,10 @@ async def _run_sweep(
             continue
 
         async def run_one(flags=flags, env=env, cell_root=cell_root, cid=cid):
-            meta = await _run_cell(cfg, flags, env, cell_root, sem)
+            meta = await _run_cell(
+                cfg, flags, env, cell_root, sem,
+                stage_sweep_id=stage_sweep_id,
+            )
             on_cell_complete(cid, meta, skipped=False)
             return meta
 
@@ -249,6 +256,25 @@ def run(args: argparse.Namespace) -> int:
     cfg = _load_sweep(args.config)
     cfg.traces_dir.mkdir(parents=True, exist_ok=True)
 
+    # Stage sweep coordination: create a parent sweep entity before
+    # running cells so each child run can reference it.
+    stage_sweep_id: Optional[str] = None
+    _stage_cfg = None
+    try:
+        from .stage import Stage, stage_api_call  # noqa: WPS433
+        _stage_cfg = Stage.resolve()
+        if _stage_cfg is not None:
+            resp = stage_api_call(
+                _stage_cfg,
+                "POST",
+                f"/v1/projects/{_stage_cfg.org_slug}/{_stage_cfg.project_slug}/sweeps",
+                {"config": cfg.raw},
+            )
+            stage_sweep_id = resp["id"]
+            print(f"Sweep:  {resp['url']}", file=sys.stderr)
+    except Exception as e:
+        print(f"warning: Stage sweep create failed: {e}; continuing locally", file=sys.stderr)
+
     completed: List[Dict[str, Any]] = []
 
     def on_cell_complete(cid: str, meta: Dict[str, Any], skipped: bool) -> None:
@@ -258,7 +284,29 @@ def run(args: argparse.Namespace) -> int:
         print(f"[{status}] {cid}  scores: {score_summary}", file=sys.stderr)
         completed.append(meta)
 
-    asyncio.run(_run_sweep(cfg, resume=not args.no_resume, on_cell_complete=on_cell_complete))
+    asyncio.run(
+        _run_sweep(
+            cfg,
+            resume=not args.no_resume,
+            on_cell_complete=on_cell_complete,
+            stage_sweep_id=stage_sweep_id,
+        )
+    )
+
+    # Update sweep status on Stage once all cells have finished.
+    if stage_sweep_id and _stage_cfg is not None:
+        failed_count = sum(1 for m in completed if m.get("exit_code") not in (0, None))
+        final_status = "completed" if failed_count == 0 else "failed"
+        try:
+            from .stage import stage_api_call  # noqa: WPS433
+            stage_api_call(
+                _stage_cfg,
+                "POST",
+                f"/v1/sweeps/{stage_sweep_id}/status",
+                {"status": final_status},
+            )
+        except Exception as e:
+            print(f"warning: Stage sweep status update failed: {e}", file=sys.stderr)
 
     index_path = _write_index(cfg.traces_dir, completed)
     summary = {

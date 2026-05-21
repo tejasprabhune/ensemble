@@ -41,6 +41,7 @@
         <a href="traces.html">Traces</a>
         <a href="sweeps.html" class="active">Sweeps</a>
         <a href="observability.html">Observability</a>
+        <a href="stage.html">Stage</a>
       </div>
     </nav>
   </aside>
@@ -212,6 +213,26 @@ preset = ["fast", "balanced", "thorough"]</code></pre>
         trades schema simplicity for the loss of axis-level
         reporting; an explicit zip operator may land later if the
         audit's next round finds it load-bearing.
+      </p>
+    </section>
+
+    <section>
+      <h2>Stage coordination</h2>
+      <p>
+        When Stage is configured, <code>ensemble sweep run</code>
+        creates a parent sweep entity on Stage before launching any
+        cells and prints the sweep URL to stderr:
+      </p>
+<pre><code class="language-bash">Sweep:  https://stage.ensemble.sh/myorg/popcornbench/sweeps/019542b0-...</code></pre>
+      <p>
+        Each child run is created on Stage with a reference to the
+        parent sweep id, so Stage can group them and track aggregate
+        progress. When the entire sweep finishes (or fails), the sweep
+        entity is marked with its terminal status.
+      </p>
+      <p>
+        If Stage is not configured, the sweep runs locally with no
+        change to behavior.
       </p>
     </section>
 

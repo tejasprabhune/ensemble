@@ -1,6 +1,7 @@
 """Ensemble: multi-user, multi-agent RL environment framework."""
 
 from ._native import __version__
+from .stage import Stage
 from .scenario import (
     Agent,
     Opener,
@@ -37,6 +38,7 @@ from .world_manifest import ManifestError, WorldManifest, load_manifest as load_
 
 __all__ = [
     "Agent",
+    "Stage",
     "ManifestError",
     "Opener",
     "PersonaResolver",

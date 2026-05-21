@@ -4,11 +4,16 @@ Reads the per-run index at traces/runs.jsonl (and each run's
 meta.json) to support cross-run observability: listing, showing,
 comparing, and exporting runs without making the researcher walk
 the traces directory by hand.
+
+When Stage is configured, runs list and show also consult the
+Stage server and merge the results. A run seen in both sources
+collapses to a single row with location=local+stage.
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import sys
 from pathlib import Path
@@ -40,26 +45,124 @@ def _format_scores(scores: Dict[str, Any]) -> str:
 def _format_iso(ts: Optional[float]) -> str:
     if ts is None:
         return "-"
-    import datetime as _dt
     return _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _parse_iso(s: Optional[str]) -> Optional[float]:
+    if not s:
+        return None
+    try:
+        dt = _dt.datetime.fromisoformat(s.rstrip("Z"))
+        return dt.replace(tzinfo=_dt.timezone.utc).timestamp()
+    except (ValueError, AttributeError):
+        return None
+
+
+def _fetch_stage_runs(limit: int = 50) -> List[Dict[str, Any]]:
+    """Fetch runs from Stage if configured. Returns [] when Stage is off
+    or the request fails."""
+    try:
+        from .stage import Stage, stage_api_call  # noqa: WPS433
+        cfg = Stage.resolve()
+        if cfg is None:
+            return []
+        path = (
+            f"/v1/projects/{cfg.org_slug}/{cfg.project_slug}/runs"
+            f"?limit={limit}&sort=created_at:desc"
+        )
+        resp = stage_api_call(cfg, "GET", path)
+        rows = []
+        for r in resp.get("runs", []):
+            rows.append({
+                "run_id":      r.get("id", ""),
+                "scenario":    r.get("scenario", ""),
+                "world":       r.get("world", ""),
+                "backend":     r.get("backend", ""),
+                "status":      r.get("status", ""),
+                "started_at":  _parse_iso(r.get("started_at")),
+                "finished_at": _parse_iso(r.get("ended_at")),
+                "duration_s":  (r.get("wall_time_ms") or 0) / 1000,
+                "scores":      (r.get("outcome") or {}).get("scores") or {},
+                "costs":       {},
+                "location":    "stage",
+                "_stage_url":  r.get("url", ""),
+            })
+        return rows
+    except Exception:
+        return []
+
+
+def _fetch_stage_run(run_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch a single run from Stage by id. Returns None on any failure."""
+    try:
+        from .stage import Stage, stage_api_call  # noqa: WPS433
+        cfg = Stage.resolve()
+        if cfg is None:
+            return None
+        r = stage_api_call(cfg, "GET", f"/v1/runs/{run_id}")
+        return {
+            "run_id":      r.get("id", run_id),
+            "scenario":    r.get("scenario", ""),
+            "world":       r.get("world", ""),
+            "backend":     r.get("backend", ""),
+            "status":      r.get("status", ""),
+            "started_at":  _parse_iso(r.get("started_at")),
+            "finished_at": _parse_iso(r.get("ended_at")),
+            "duration_s":  (r.get("wall_time_ms") or 0) / 1000,
+            "scores":      (r.get("outcome") or {}).get("scores") or {},
+            "costs":       (r.get("total_cost") or {}),
+            "location":    "stage",
+            "_stage_url":  r.get("url", ""),
+        }
+    except Exception:
+        return None
+
+
+def _merge_runs(local: List[Dict], stage: List[Dict]) -> List[Dict]:
+    """Merge local and Stage run lists. Same run_id collapses to one row
+    with location=local+stage, preserving all local fields and adding
+    the Stage URL."""
+    by_id: Dict[str, Dict] = {}
+    for row in local:
+        rid = row.get("run_id", "")
+        row = dict(row, location="local")
+        by_id[rid] = row
+    for row in stage:
+        rid = row.get("run_id", "")
+        if rid in by_id:
+            by_id[rid]["location"] = "local+stage"
+            by_id[rid].setdefault("_stage_url", row.get("_stage_url", ""))
+        else:
+            by_id[rid] = row
+    merged = list(by_id.values())
+    merged.sort(key=lambda r: r.get("started_at") or 0, reverse=True)
+    return merged
+
+
 def cmd_list(args: argparse.Namespace) -> int:
-    rows = _load_index(args.traces_dir)
+    local = _load_index(args.traces_dir)
+    limit = args.limit or 50
+    stage = _fetch_stage_runs(limit=limit)
+    rows = _merge_runs(local, stage)
+
     if args.scenario:
         rows = [r for r in rows if r.get("scenario") == args.scenario]
-    if args.limit is not None:
-        rows = rows[-args.limit:]
+    rows = rows[:limit]
     if not rows:
         print("no runs", file=sys.stderr)
         return 0
 
-    print(f"{'run_id':<55}  {'scenario':<32}  {'when':<19}  scores")
+    id_w, sc_w = 38, 30
+    print(
+        f"{'run_id':<{id_w}}  {'location':<12}  {'scenario':<{sc_w}}  "
+        f"{'when':<19}  scores"
+    )
     print("-" * 130)
     for r in rows:
         print(
-            f"{r.get('run_id', '?'):<55}  "
-            f"{(r.get('scenario') or '?')[:32]:<32}  "
+            f"{(r.get('run_id') or '?')[:id_w]:<{id_w}}  "
+            f"{(r.get('location') or 'local'):<12}  "
+            f"{(r.get('scenario') or '?')[:sc_w]:<{sc_w}}  "
             f"{_format_iso(r.get('finished_at')):<19}  "
             f"{_format_scores(r.get('scores') or {})}"
         )
@@ -67,16 +170,15 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def _find_run(traces_dir: Path, run_id: str) -> Optional[Dict[str, Any]]:
-    """Look the run up in the index, falling back to a prefix match
-    on the run id so the user does not have to type the whole
-    timestamp+hash string."""
+    """Look the run up locally, then fall back to Stage. Supports prefix
+    matching for local runs."""
     rows = _load_index(traces_dir)
     exact = [r for r in rows if r.get("run_id") == run_id]
     if exact:
-        return exact[0]
+        return dict(exact[0], location="local")
     prefix = [r for r in rows if (r.get("run_id") or "").startswith(run_id)]
     if len(prefix) == 1:
-        return prefix[0]
+        return dict(prefix[0], location="local")
     if len(prefix) > 1:
         print(
             f"ambiguous run id {run_id!r}; matches: "
@@ -84,7 +186,8 @@ def _find_run(traces_dir: Path, run_id: str) -> Optional[Dict[str, Any]]:
             file=sys.stderr,
         )
         return None
-    return None
+    # Not found locally; try Stage.
+    return _fetch_stage_run(run_id)
 
 
 def cmd_show(args: argparse.Namespace) -> int:
@@ -99,10 +202,26 @@ def cmd_show(args: argparse.Namespace) -> int:
 def cmd_compare(args: argparse.Namespace) -> int:
     a = _find_run(args.traces_dir, args.a)
     b = _find_run(args.traces_dir, args.b)
-    if a is None or b is None:
+    if a is None:
+        print(f"no run matches {args.a!r}", file=sys.stderr)
         return 2
-    print(f"A: {a['run_id']}  scenario={a.get('scenario')}  when={_format_iso(a.get('finished_at'))}")
-    print(f"B: {b['run_id']}  scenario={b.get('scenario')}  when={_format_iso(b.get('finished_at'))}")
+    if b is None:
+        print(f"no run matches {args.b!r}", file=sys.stderr)
+        return 2
+
+    loc_a = a.get("location", "local")
+    loc_b = b.get("location", "local")
+
+    # Both remote: print Stage comparison URL if available.
+    if loc_a == "stage" and loc_b == "stage":
+        url_a = a.get("_stage_url", "")
+        if url_a:
+            base = url_a.rsplit("/runs/", 1)[0] if "/runs/" in url_a else ""
+            if base:
+                print(f"Compare on Stage: {base}/compare?a={a['run_id']}&b={b['run_id']}")
+
+    print(f"A: {a['run_id']}  location={loc_a}  scenario={a.get('scenario')}  when={_format_iso(a.get('finished_at'))}")
+    print(f"B: {b['run_id']}  location={loc_b}  scenario={b.get('scenario')}  when={_format_iso(b.get('finished_at'))}")
     print()
     print(f"{'metric':<32}  {'A':>14}  {'B':>14}  delta")
     print("-" * 80)
@@ -128,8 +247,6 @@ def cmd_export(args: argparse.Namespace) -> int:
         print(json.dumps(rows, indent=2))
         return 0
     if args.format == "csv":
-        # Flatten scores into one column per metric so the CSV is
-        # easy to load into pandas without re-parsing JSON.
         import csv
         all_score_keys = sorted({
             k for r in rows for k in (r.get("scores") or {})

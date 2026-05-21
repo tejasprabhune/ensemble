@@ -1,6 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+use uuid::Uuid;
+
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -10,15 +12,15 @@ use pyo3::types::PyList;
 
 use ensemble_core::actor::ActorHandle;
 use ensemble_core::bus::{Bus, Message, Recipient};
-use ensemble_core::event::{EventLog, EventPayload, TraceFile};
+use ensemble_core::event::{EventLog, EventPayload, EventSink, TraceFile};
 use ensemble_core::ids::{ActorId, MessageId};
 use ensemble_core::predicate::{PredicateCtx, PredicateRegistry};
 use ensemble_core::scheduler::{Scheduler, StopReason, TickBudget};
 use ensemble_core::until::{turn_count_exceeds, Until, UntilCtx};
 use ensemble_runtime::{
     resources::ResourceManager, AgentActor, AnthropicBackend, HiddenState, LocalAdapterBackend,
-    MockBackend, MockScript, MockTurn, OpenAIBackend, PromptedPersona, SharedBackend, Tool,
-    ToolOutcome, ToolRegistry, UserActor,
+    MockBackend, MockScript, MockTurn, OpenAIBackend, PromptedPersona, SharedBackend, StageConfig,
+    StageSink, Tool, ToolOutcome, ToolRegistry, UserActor,
 };
 use ensemble_core::error::ToolError;
 
@@ -42,6 +44,10 @@ fn empty_world_bundle() -> WorldBundle {
 /// `run()` time (wired up in a later commit).
 pub(crate) struct WorldInner {
     pub(crate) name: String,
+    /// UUID v7 generated at construction. Stable for the lifetime of
+    /// the world and used as the trace directory name and the Stage
+    /// run identifier.
+    pub(crate) run_id: Uuid,
     pub(crate) bus: Bus,
     pub(crate) log: EventLog,
     pub(crate) backend: SharedBackend,
@@ -59,6 +65,9 @@ pub(crate) struct WorldInner {
     /// Per-agent message queues for externally driven slots, keyed by
     /// agent id. Populated when `register_external_agent` is called.
     pub(crate) external_inboxes: HashMap<ActorId, ExternalAgentInbox>,
+    pub(crate) stage_config: Option<StageConfig>,
+    pub(crate) stage_sink: Option<Arc<StageSink>>,
+    pub(crate) stage_run_url: Option<String>,
 }
 
 #[derive(Clone)]
@@ -214,13 +223,17 @@ impl World {
     /// `"auto"` (pick the first backend whose API key is in the env,
     /// fall back to mock).
     #[new]
-    #[pyo3(signature = (name=None, backend=None, base_url=None))]
+    #[pyo3(signature = (name=None, backend=None, base_url=None, stage_api_key=None, stage_project=None, stage_base_url=None))]
     fn new(
         name: Option<&str>,
         backend: Option<&str>,
         base_url: Option<&str>,
+        stage_api_key: Option<&str>,
+        stage_project: Option<&str>,
+        stage_base_url: Option<&str>,
     ) -> PyResult<Self> {
         let name = name.unwrap_or("noop").to_string();
+        let run_id = Uuid::now_v7();
         // Worlds are no longer registered in rust; the python layer
         // owns the plugin registry and calls register_tool /
         // register_predicate to populate this world after construction.
@@ -254,9 +267,23 @@ impl World {
             }
         }
         let resources = Arc::new(ensemble_runtime::resources::shared(&name));
+        let stage_config = match (stage_api_key, stage_project) {
+            (Some(key), Some(project)) => {
+                let base = stage_base_url
+                    .unwrap_or("https://stage.ensemble.sh")
+                    .to_string();
+                Some(StageConfig {
+                    api_key: key.to_string(),
+                    project: project.to_string(),
+                    base_url: base,
+                })
+            }
+            _ => None,
+        };
         Ok(Self {
             inner: Arc::new(Mutex::new(WorldInner {
                 name,
+                run_id,
                 bus,
                 log,
                 backend,
@@ -271,6 +298,9 @@ impl World {
                 bg_task: None,
                 registered_inboxes: vec![],
                 external_inboxes: HashMap::new(),
+                stage_config,
+                stage_sink: None,
+                stage_run_url: None,
             })),
         })
     }
@@ -285,6 +315,76 @@ impl World {
     #[getter]
     fn name(&self) -> String {
         self.inner.lock().name.clone()
+    }
+
+    #[getter]
+    fn run_id(&self) -> String {
+        self.inner.lock().run_id.to_string()
+    }
+
+    /// The Stage run URL, set after `init_stage_run` succeeds.
+    #[getter]
+    fn run_url(&self) -> Option<String> {
+        self.inner.lock().stage_run_url.clone()
+    }
+
+    /// Create the Stage run and attach the StageSink to the EventLog.
+    /// Returns the Stage run URL on success, or None if Stage is not
+    /// configured or the create-run HTTP call fails (caller continues
+    /// without Stage in that case).
+    #[pyo3(signature = (scenario, sweep_id = ""))]
+    fn init_stage_run(&self, py: Python<'_>, scenario: &str, sweep_id: &str) -> PyResult<Option<String>> {
+        let (config, run_id, backend_kind, log) = {
+            let inner = self.inner.lock();
+            let cfg = match inner.stage_config.clone() {
+                Some(c) => c,
+                None => return Ok(None),
+            };
+            (cfg, inner.run_id.to_string(), inner.backend_kind, inner.log.clone())
+        };
+        let world_name = self.inner.lock().name.clone();
+        let scenario_owned = scenario.to_string();
+        let sweep_id_opt = if sweep_id.is_empty() { None } else { Some(sweep_id.to_string()) };
+        let rt = global_runtime();
+        // Release the GIL while blocking on the HTTP call so a Python-backed
+        // mock server running on another thread can handle the request.
+        let result = py.detach(|| rt.block_on(StageSink::create(
+            config,
+            run_id,
+            &scenario_owned,
+            &world_name,
+            backend_kind,
+            sweep_id_opt,
+        )));
+        match result {
+            Ok((sink, run_url)) => {
+                log.set_event_sink(Some(sink.clone() as Arc<dyn EventSink>));
+                let mut inner = self.inner.lock();
+                inner.stage_sink = Some(sink);
+                inner.stage_run_url = Some(run_url.clone());
+                Ok(Some(run_url))
+            }
+            Err(e) => {
+                eprintln!("stage: failed to create run, continuing without Stage: {e}");
+                Ok(None)
+            }
+        }
+    }
+
+    /// Flush remaining events and POST run status=completed to Stage.
+    fn finalize_stage(&self, py: Python<'_>, _scores_json: &str) -> PyResult<()> {
+        let sink = self.inner.lock().stage_sink.clone();
+        let Some(sink) = sink else {
+            return Ok(());
+        };
+        let rt = global_runtime();
+        // Release the GIL so the background flush task can complete its
+        // HTTP calls to Stage (which may be a Python mock in tests).
+        let failed = py.detach(|| rt.block_on(sink.shutdown_async()));
+        if failed > 0 {
+            eprintln!("stage: {failed} events failed to flush before shutdown");
+        }
+        Ok(())
     }
 
     /// Count of actors registered on this world.
