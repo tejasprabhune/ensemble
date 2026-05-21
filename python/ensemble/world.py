@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import typing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Union
@@ -290,53 +291,166 @@ def _wrap_tool_fn(
     )
 
 
+_PRIMITIVE_TYPE_TO_SCHEMA: Dict[type, Dict[str, Any]] = {
+    str: {"type": "string"},
+    int: {"type": "integer"},
+    float: {"type": "number"},
+    bool: {"type": "boolean"},
+    bytes: {"type": "string"},
+    list: {"type": "array"},
+    dict: {"type": "object"},
+}
+
+_SCHEMA_SKIP_PARAMS = {"self", "cls", "emit_progress"}
+
+
+def _annotation_to_schema(ann: Any) -> Dict[str, Any]:
+    """Translate a Python type annotation into a small JSON-Schema
+    fragment. Recognises primitives, ``Optional[T]``, ``List[T]``,
+    ``Dict[K, V]``, and ``Literal[...]``. Falls back to an empty
+    schema for anything else, which the runtime treats as "any
+    JSON value"; explicit ``parameters=...`` overrides the
+    inferred shape for tools whose inputs do not fit this set."""
+    if ann is inspect.Parameter.empty or ann is Any:
+        return {}
+    origin = typing.get_origin(ann)
+    args = typing.get_args(ann)
+    if origin is typing.Union:
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            return _annotation_to_schema(non_none[0])
+        return {"anyOf": [_annotation_to_schema(a) for a in non_none]}
+    if origin in (list, typing.List):
+        item_schema = _annotation_to_schema(args[0]) if args else {}
+        return {"type": "array", "items": item_schema}
+    if origin in (dict, typing.Dict):
+        return {"type": "object"}
+    if origin is typing.Literal:
+        return {"enum": list(args)}
+    if isinstance(ann, type) and ann in _PRIMITIVE_TYPE_TO_SCHEMA:
+        return dict(_PRIMITIVE_TYPE_TO_SCHEMA[ann])
+    return {}
+
+
+def _infer_tool_metadata(
+    fn: Callable[..., Any],
+) -> "tuple[str, str, Dict[str, Any]]":
+    """Derive (name, description, JSON-Schema parameters) from a
+    plain function. Used by the bare ``@tool`` form and to fill in
+    fields the kwarg form left unset."""
+    name = getattr(fn, "__name__", None) or "tool"
+    raw_doc = inspect.getdoc(fn) or ""
+    description = raw_doc.strip().split("\n\n", 1)[0].strip() or name
+
+    properties: Dict[str, Any] = {}
+    required: List[str] = []
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        sig = None
+    if sig is not None:
+        try:
+            hints = typing.get_type_hints(fn)
+        except Exception:
+            hints = {}
+        for pname, param in sig.parameters.items():
+            if pname in _SCHEMA_SKIP_PARAMS:
+                continue
+            if param.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
+                continue
+            ann = hints.get(pname, param.annotation)
+            schema = _annotation_to_schema(ann)
+            properties[pname] = schema
+            if param.default is inspect.Parameter.empty:
+                required.append(pname)
+
+    parameters: Dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+    }
+    if required:
+        parameters["required"] = required
+    return name, description, parameters
+
+
 def tool(*args: Any, **kwargs: Any) -> Any:
     """Wrap a python function as a PluginTool, or mark it for later
     materialisation by a ``World`` subclass.
 
-    The four-argument factory form is the original surface and still
-    works for top-level use:
+    Three shapes, in order of preference for new code:
 
-    ```python
-    # ktbench/__init__.py
-    register_world("ktbench", tools=[
-        tool("submit_kernel", "Submit the kernel.", schema, submit_fn),
-    ])
-    ```
+    1. Bare decorator. Name comes from the function, description
+       from the docstring, parameters from the type hints. Use this
+       for tools whose inputs are typed primitives, lists, dicts,
+       or ``Optional[T]``:
 
-    The decorator-factory form is the new idiomatic shape. It works at
-    module level and on a ``World`` subclass method:
+       ```python
+       @tool
+       def lookup_user(user_id: str) -> dict:
+           "Return the user record by id."
+           return db[user_id]
+       ```
 
-    ```python
-    # popcornbench/world.py
-    class PopcornWorld(World):
-        @tool(
-            name="submit_kernel",
-            description="Submit the kernel for static checks and run.",
-            parameters={"type": "object", ...},
-        )
-        def submit_kernel(self, src: str):
-            return self.runner.check_and_run(src)
-    ```
+    2. Decorator with overrides. Pass any subset of ``name``,
+       ``description``, ``parameters``; the rest are inferred. Use
+       when you want a tool name that differs from the function
+       name, or a parameters schema the inference cannot produce:
 
-    Both forms accept the optional ``timeout_ms``, ``resources``,
+       ```python
+       @tool(description="Submit the kernel and run it.")
+       def submit(src: str): ...
+       ```
+
+    3. Four-argument factory, for cases where you have the schema
+       in hand and want to build a ``PluginTool`` eagerly:
+
+       ```python
+       register_world("ktbench", tools=[
+           tool("submit_kernel", "Submit and run.", schema, submit_fn),
+       ])
+       ```
+
+    All forms accept the optional ``timeout_ms``, ``resources``,
     ``sandbox``, and ``sandbox_world`` keyword arguments.
     """
+
+    # Bare decorator form: @tool above a function, no parens.
+    if len(args) == 1 and callable(args[0]) and not kwargs:
+        fn = args[0]
+        name, description, parameters = _infer_tool_metadata(fn)
+        setattr(
+            fn,
+            _TOOL_META_ATTR,
+            {
+                "name": name,
+                "description": description,
+                "parameters": parameters,
+                "timeout_ms": None,
+                "resources": None,
+                "sandbox": False,
+                "sandbox_world": None,
+            },
+        )
+        return fn
 
     # Factory form: tool(name, description, parameters, fn[, **opts])
     if len(args) == 4 and callable(args[3]):
         name, description, parameters, fn = args
         return _wrap_tool_fn(name, description, parameters, fn, **kwargs)
 
-    # Decorator-factory form: tool(name=..., description=..., parameters=...)
-    # All three required keys may come either as kwargs or positionals.
-    name = kwargs.pop("name", None) if "name" in kwargs else (args[0] if len(args) > 0 else None)
-    description = (
+    # Decorator-factory form: tool(name=..., description=..., parameters=...).
+    # All three may come as kwargs or positionals; any missing piece is
+    # inferred from the wrapped function at decoration time.
+    name_override = kwargs.pop("name", None) if "name" in kwargs else (args[0] if len(args) > 0 else None)
+    description_override = (
         kwargs.pop("description", None)
         if "description" in kwargs
         else (args[1] if len(args) > 1 else None)
     )
-    parameters = (
+    parameters_override = (
         kwargs.pop("parameters", None)
         if "parameters" in kwargs
         else (args[2] if len(args) > 2 else None)
@@ -347,21 +461,16 @@ def tool(*args: Any, **kwargs: Any) -> Any:
     sandbox_world = kwargs.pop("sandbox_world", None)
     if kwargs:
         raise TypeError(f"tool() got unexpected kwargs: {sorted(kwargs)}")
-    if name is None or description is None or parameters is None:
-        raise TypeError(
-            "tool(...) needs name, description, and parameters; pass them as "
-            "keyword arguments to the decorator factory, or use the four-arg "
-            "factory tool(name, description, parameters, fn)."
-        )
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        inferred_name, inferred_desc, inferred_params = _infer_tool_metadata(fn)
         setattr(
             fn,
             _TOOL_META_ATTR,
             {
-                "name": name,
-                "description": description,
-                "parameters": parameters,
+                "name": name_override or inferred_name,
+                "description": description_override or inferred_desc,
+                "parameters": parameters_override or inferred_params,
                 "timeout_ms": timeout_ms,
                 "resources": resources,
                 "sandbox": sandbox,
