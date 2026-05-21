@@ -184,6 +184,46 @@ costs:
     </section>
 
     <section>
+      <h2>Local traces and Stage</h2>
+      <p>
+        The local CLI is the right tool for iteration on a single
+        machine: run a scenario, open the trace in the viewer, diff
+        two runs. No network required, no account needed, works
+        offline. Stage extends this into a shared, persistent store
+        that multiple machines and researchers write to concurrently.
+      </p>
+      <p>
+        They are complementary. Every event goes to the local JSONL
+        file first. When Stage is configured, the same events are
+        forwarded in parallel over an asynchronous buffered
+        connection. If Stage is unreachable, the local trace is
+        complete and unaffected.
+      </p>
+      <p>
+        A rough decision guide:
+      </p>
+      <ul>
+        <li>Developing a new scenario or grader: use local only.
+          The viewer, <code>runs list</code>, and
+          <code>runs compare</code> all work without Stage.</li>
+        <li>Running a sweep across multiple machines or sharing
+          results with collaborators: add Stage. Set two env vars
+          and every run appears in the merged
+          <code>runs list</code> view.</li>
+        <li>Building a persistent history that outlives the working
+          directory (e.g., a CI job): Stage stores runs durably;
+          local traces live only as long as the disk they are on.</li>
+      </ul>
+      <p>
+        When Stage is configured, <code>ensemble runs list</code>
+        merges local and Stage results. A run seen in both sources
+        shows <code>location=local+stage</code>; a run seen only in
+        Stage (from another machine or a retroactive push) shows
+        <code>location=stage</code>. Same run id, one row.
+      </p>
+    </section>
+
+    <section>
       <h2>Filtering and ad-hoc analysis</h2>
       <p>
         The index format is intentionally flat JSONL so a researcher

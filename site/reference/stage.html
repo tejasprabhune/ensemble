@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble, stage reference</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="../index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Get started</div>
+        <a href="../index.html">Overview</a>
+        <a href="../quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="../worlds.html">Writing a world</a>
+        <a href="../scenarios.html">Writing a scenario</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../personas.html">Personas</a>
+        <a href="../sweeps.html">Sweeps</a>
+        <a href="../observability.html">Observability</a>
+        <a href="../mcp.html">MCP</a>
+        <a href="../plank.html">Plank example</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="index.html">Reference home</a>
+        <a href="world-api.html">World API</a>
+        <a href="scenarios.html">Scenarios</a>
+        <a href="tools.html">Tools</a>
+        <a href="predicates.html">Predicates</a>
+        <a href="personas.html">Personas</a>
+        <a href="cli.html">CLI</a>
+        <a href="runtime.html">Runtime</a>
+        <a href="traces.html">Traces</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
+        <a href="stage.html" class="active">Stage</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+    <h1>Stage</h1>
+    <p class="lead">
+      Stage is ensemble's cloud observability backend. It stores run
+      histories, sweep results, and training metrics so you can share
+      them with teammates, compare runs across machines, and revisit
+      results long after the local files have been cleaned up. It is
+      entirely optional: ensemble always writes a local JSONL trace,
+      and Stage receives the same events in parallel.
+    </p>
+
+    <section>
+      <h2>When to use Stage</h2>
+      <p>
+        The local trace file is the right choice for iteration on a
+        single machine. You can open it in the viewer, diff two runs
+        with <code>ensemble runs compare</code>, and build your grader
+        against it. You do not need Stage for any of that.
+      </p>
+      <p>
+        Use Stage when you want any of the following:
+      </p>
+      <ul>
+        <li>Share a run URL with a colleague who does not have the
+          trace file on their machine.</li>
+        <li>See a merged history of runs across multiple machines or
+          researchers in a single <code>ensemble runs list</code>
+          view.</li>
+        <li>Track sweep results and training metrics in a persistent
+          store that outlives the working directory.</li>
+        <li>Push older local traces that accumulated before Stage
+          was set up.</li>
+      </ul>
+      <p>
+        Stage and local traces are complementary, not competing. Every
+        event goes to the local JSONL file first; Stage receives them
+        in parallel over an asynchronous buffered connection. If Stage
+        is unreachable, the local trace is unaffected.
+      </p>
+    </section>
+
+    <section>
+      <h2>Authentication</h2>
+      <p>
+        Stage uses GitHub OAuth for identity. Run
+        <code>ensemble stage login</code> to open a browser to the
+        GitHub authorization page. After you authorize, the server
+        redirects back to a local listener on a random high port and
+        writes the resulting API key to
+        <code>~/.ensemble/stage.toml</code> with 0600 permissions.
+      </p>
+<pre><code class="language-bash">ensemble stage login
+# Opens browser, waits for callback, writes ~/.ensemble/stage.toml
+
+ensemble stage whoami
+# github_login: tejasprabhune
+# default_org: tejasprabhune</code></pre>
+      <p>
+        The API key lives only in the credentials file on your machine.
+        It is never written to the project's <code>.stage.toml</code>
+        or committed to version control.
+      </p>
+      <p>
+        To revoke access, run <code>ensemble stage logout</code> or
+        delete the key from the Stage web UI under Settings.
+      </p>
+    </section>
+
+    <section>
+      <h2>Configuration</h2>
+      <p>
+        Configuration follows a three-level precedence:
+      </p>
+      <ol>
+        <li>An explicit <code>Stage(...)</code> object passed to
+          <code>World()</code>.</li>
+        <li>Environment variables:
+          <code>ENSEMBLE_STAGE_API_KEY</code>,
+          <code>ENSEMBLE_STAGE_PROJECT</code>,
+          <code>ENSEMBLE_STAGE_BASE_URL</code> (optional),
+          <code>ENSEMBLE_STAGE_ENABLED</code> (set to
+          <code>0</code> to disable).</li>
+        <li>Config files: the API key comes from
+          <code>~/.ensemble/stage.toml</code> under
+          <code>[credentials]</code>; the project slug comes from
+          <code>.stage.toml</code> in the working directory under
+          <code>[stage]</code>.</li>
+      </ol>
+      <p>
+        The common case is to set two environment variables and let the
+        rest happen automatically:
+      </p>
+<pre><code class="language-bash">export ENSEMBLE_STAGE_API_KEY=stage_sk_...
+export ENSEMBLE_STAGE_PROJECT=myorg/popcornbench
+ensemble run plank.refund_storm</code></pre>
+      <p>
+        For a project where everyone should target the same Stage
+        project, write <code>.stage.toml</code> at the repository root
+        and commit it:
+      </p>
+<pre><code class="language-toml">[stage]
+project = "myorg/popcornbench"</code></pre>
+      <p>
+        Each developer still needs
+        <code>ENSEMBLE_STAGE_API_KEY</code> or a personal credentials
+        file; the project file only records which Stage project to
+        target.
+      </p>
+      <p>
+        To disable Stage for one command while it is otherwise
+        configured, set <code>ENSEMBLE_STAGE_ENABLED=0</code>:
+      </p>
+<pre><code class="language-bash">ENSEMBLE_STAGE_ENABLED=0 ensemble run plank.refund_storm</code></pre>
+      <p>
+        To configure Stage explicitly in Python:
+      </p>
+<pre><code class="language-python">from ensemble.stage import Stage
+from ensemble import World
+
+stage = Stage(project="myorg/popcornbench", api_key="stage_sk_...")
+world = World("plank", stage=stage)</code></pre>
+    </section>
+
+    <section>
+      <h2>Projects</h2>
+      <p>
+        Every run belongs to a Stage project of the form
+        <code>org_slug/project_slug</code>. Create a project from the
+        CLI:
+      </p>
+<pre><code class="language-bash">ensemble stage projects create myorg/popcornbench</code></pre>
+      <p>
+        This calls the Stage API and writes
+        <code>.stage.toml</code> in the current directory referencing
+        the new project. Subsequent commands in the same directory pick
+        up the project automatically.
+      </p>
+      <p>
+        To list projects you have access to:
+      </p>
+<pre><code class="language-bash">ensemble stage projects list</code></pre>
+    </section>
+
+    <section>
+      <h2>Runs, sweeps, and training runs</h2>
+      <p>
+        Stage tracks three entity types, each with its own URL and
+        status lifecycle.
+      </p>
+      <p>
+        <strong>Runs.</strong> When Stage is configured,
+        <code>ensemble run</code> creates a run entity before the
+        scenario starts and prints its URL to stderr:
+      </p>
+<pre><code class="language-bash">Run id: 019542a3-4e7b-7000-8e1d-3f9a1c2d5e6f
+Stage:  https://stage.ensemble.sh/myorg/popcornbench/runs/019542a3-...</code></pre>
+      <p>
+        Events stream to Stage throughout the run in the background.
+        The local trace file receives every event first; Stage receives
+        them asynchronously in batches of up to 100. When the scenario
+        ends, remaining events are flushed with a five-second timeout
+        and the run is marked completed. If Stage is unreachable, a
+        warning with an event count and a
+        <code>ensemble stage push</code> hint is printed, and the local
+        trace is complete regardless.
+      </p>
+      <p>
+        <strong>Sweeps.</strong> <code>ensemble sweep run</code>
+        creates a parent sweep entity on Stage before launching cells.
+        Each child run includes the sweep's id, so Stage can group
+        them. The sweep URL is printed at startup and the final status
+        is posted when all cells finish.
+      </p>
+      <p>
+        <strong>Training runs.</strong> <code>ensemble train</code>
+        creates a training run entity and streams step metrics during
+        training. The training run URL is printed at startup. Metric
+        flushing uses a background thread with a 30-second timer so
+        individual training steps are not blocked by network I/O.
+      </p>
+    </section>
+
+    <section>
+      <h2>Bulk push</h2>
+      <p>
+        Traces that accumulated before Stage was configured can be
+        pushed retroactively. The push command reads each run's
+        <code>meta.json</code>, checks whether that run id is already
+        on Stage, and skips it if so. Idempotent: running push twice
+        on the same directory is safe.
+      </p>
+<pre><code class="language-bash"># Push every trace under traces/:
+ensemble stage push traces/
+
+# Push one specific run directory:
+ensemble stage push traces/019542a3-4e7b-7000-8e1d-3f9a1c2d5e6f/
+
+# Push using a glob pattern:
+ensemble stage push "traces/*/trace.jsonl"</code></pre>
+      <p>
+        Push reports a count at the end:
+        <code>N pushed, M skipped, K failed</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>Troubleshooting</h2>
+      <p>
+        <strong>Stage push failures.</strong> If events fail to reach
+        Stage during a run, the last line of output includes a count
+        and an <code>ensemble stage push</code> hint with the trace
+        path. The run is still locally complete. Run push afterwards to
+        retroactively send the events.
+      </p>
+      <p>
+        <strong>Credential errors.</strong> If
+        <code>ensemble stage whoami</code> returns an unauthorized
+        error, the stored key may have been revoked. Run
+        <code>ensemble stage logout</code> then
+        <code>ensemble stage login</code> to get a fresh key.
+      </p>
+      <p>
+        <strong>Wrong project.</strong> If runs are appearing in the
+        wrong Stage project, check <code>.stage.toml</code> in the
+        current directory and the
+        <code>ENSEMBLE_STAGE_PROJECT</code> environment variable.
+        Explicit Stage config in Python beats both.
+      </p>
+      <p>
+        <strong>Self-hosted Stage.</strong> Set
+        <code>ENSEMBLE_STAGE_BASE_URL</code> to your instance's URL.
+        The same variable can go in <code>~/.ensemble/stage.toml</code>
+        under <code>[credentials].base_url</code> or in the project's
+        <code>.stage.toml</code> under <code>[stage].base_url</code>.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

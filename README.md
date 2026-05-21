@@ -87,6 +87,40 @@ uv run python examples/plank/bake_trace.py
   --backend modal
 ```
 
+## Stage
+
+Stage is the optional cloud observability backend. Set two environment
+variables and every run, sweep, and training job streams its events to
+Stage in parallel with the local trace:
+
+```sh
+export ENSEMBLE_STAGE_API_KEY=stage_sk_...
+export ENSEMBLE_STAGE_PROJECT=myorg/popcornbench
+
+# Runs now print a Stage URL alongside the run id:
+./target/debug/ensemble run plank.refund_storm
+# Run id: 019542a3-4e7b-7000-8e1d-3f9a1c2d5e6f
+# Stage:  https://stage.ensemble.sh/myorg/popcornbench/runs/019542a3-...
+
+# ensemble runs list merges local and Stage results:
+./target/debug/ensemble runs list
+
+# Push older local traces retroactively:
+./target/debug/ensemble stage push traces/
+```
+
+To authenticate for the first time:
+
+```sh
+./target/debug/ensemble stage login   # opens browser, writes ~/.ensemble/stage.toml
+./target/debug/ensemble stage whoami  # confirm setup
+```
+
+Stage is entirely optional. Local JSONL traces are always written first
+and are complete whether or not Stage is reachable. See
+[docs/reference/stage](https://tejasprabhune.github.io/ensemble/reference/stage.html)
+for the full configuration reference.
+
 ## Test
 
 ```sh
