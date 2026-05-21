@@ -1,0 +1,70 @@
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/**"
+      - "scripts/render_reference.py"
+      - "examples/plank/bake_trace.py"
+      - "python/ensemble/**"
+      - "crates/**"
+      - "examples/plank/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one in-flight Pages build. Cancel any superseded run
+# so a quick second push does not deploy stale content.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.x"
+
+      - name: uv sync (builds the ensemble + plank extensions)
+        run: uv sync
+
+      - name: bake the deterministic refund_storm trace
+        run: uv run python examples/plank/bake_trace.py
+
+      - name: render docs/reference/*.md -> site/reference/*.html
+        run: uv run python scripts/render_reference.py
+
+      - uses: actions/configure-pages@v5
+
+      - name: upload site/ as Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
