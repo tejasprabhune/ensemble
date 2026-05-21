@@ -3,6 +3,7 @@
 from ._native import __version__
 from .scenario import (
     Agent,
+    Opener,
     PredicateError,
     RunResult,
     Until,
@@ -37,6 +38,7 @@ from .world_manifest import ManifestError, WorldManifest, load_manifest as load_
 __all__ = [
     "Agent",
     "ManifestError",
+    "Opener",
     "PersonaResolver",
     "PersonaSpec",
     "PluginPredicate",

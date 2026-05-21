@@ -321,6 +321,39 @@ class Agent:
         return f"<Agent id={self.id!r}>"
 
 
+class Opener:
+    """Handle returned by ``world.opener(...)``. Carries the seed
+    actor's id and a ``say`` method for emitting further seed
+    messages. Use this for scenarios that have no persona-driven
+    user: the agent receives one (or a few) seed messages and then
+    runs silently until ``world.until_done(...)`` or another stop
+    condition fires.
+
+    Internally the opener is a non-interactive user, but it is not
+    appended to ``world.users`` and the trace event is ``kickoff``
+    rather than ``user_spawned``, so graders that iterate
+    ``world.users`` and viewers that render personas do not see a
+    ghost-user for the opener slot."""
+
+    def __init__(self, actor_id: str, world: "World") -> None:
+        self.id = actor_id
+        self._world = world
+
+    def say(self, target: str, text: str) -> None:
+        """Emit another seed message. Useful for staged kickoffs that
+        deliver a problem statement and then an example."""
+        native_user = self._world._opener_natives.get(self.id)
+        if native_user is None:
+            raise RuntimeError(f"opener {self.id!r} has no native handle")
+        native_user.say(target, text)
+        self._world.log_event("opener_message", {
+            "actor_id": self.id, "to": target, "text": text,
+        })
+
+    def __repr__(self) -> str:
+        return f"<Opener id={self.id!r}>"
+
+
 class _ExternalAgent:
     """Stand-in for an agent slot whose turns are driven by a
     connected external client (an MCP-aware tool). Implements the
@@ -440,6 +473,11 @@ class World:
         self._next_user_index: int = 1
         self._next_agent_index: int = 1
         self._next_opener_index: int = 1
+
+        # Native user handles backing opener actors. Kept off
+        # world.users so graders that walk users do not see the
+        # opener slot as a real user.
+        self._opener_natives: Dict[str, Any] = {}
 
         if definition is not None:
             self._apply_definition(definition)
@@ -758,6 +796,108 @@ class World:
             "params": params,
         })
         return a
+
+    def opener(self, message: str, *, to: str) -> Opener:
+        """Send a seed message to an agent without spawning a user.
+
+        Use this for the agent-iterates-silently shape: the agent
+        receives an opening problem statement and then runs on its
+        own (using its tools) until a stop condition fires.
+        Internally the opener is a non-interactive user backed by
+        the same scheduler plumbing, but it does not appear in
+        ``world.users`` and the trace event is ``kickoff``, so a
+        scenario that has no real user does not leak a ghost user
+        into graders or the viewer.
+
+        Pair with ``world.until_done(...)`` or
+        ``world.until_agent_emits(...)`` for the stop condition.
+
+        ```python
+        opener = world.opener("rename foo to bar in this file", to="rep")
+        yield world.until_done(actor_id="rep")
+        ```
+        """
+        opener_id = f"opener-{self._next_opener_index}"
+        self._next_opener_index += 1
+        native = self._native.spawn_user(
+            id=opener_id,
+            persona=None,
+            hidden_goal=None,
+            model="opener",
+            system_prompt=None,
+            hidden_state_json=None,
+            vllm_base_url=None,
+            vllm_adapter=None,
+            interactive=False,
+        )
+        self._opener_natives[opener_id] = native
+        native.say(to, message)
+        self.log_event("kickoff", {
+            "actor_id": opener_id, "to": to, "message": message,
+        })
+        return Opener(opener_id, self)
+
+    def until_agent_emits(
+        self,
+        actor_id: Optional[str] = None,
+        *,
+        contains: Optional[str] = None,
+        equals: Optional[str] = None,
+        regex: Optional[str] = None,
+    ) -> Until:
+        """Halt when ``actor_id`` emits a message matching the
+        criterion. Exactly one of ``contains``, ``equals``, or
+        ``regex`` must be supplied. When ``actor_id`` is None, the
+        condition matches any agent.
+
+        Internally registers a per-instance predicate that walks
+        the trace looking for an ``agent_message`` event whose text
+        matches; returns an ``Until`` that references it. Each call
+        registers a fresh predicate so multiple stop conditions on
+        the same world do not collide."""
+        provided = [c for c in (contains, equals, regex) if c is not None]
+        if len(provided) != 1:
+            raise TypeError(
+                "until_agent_emits needs exactly one of contains=, "
+                "equals=, or regex="
+            )
+        import re as _re
+        import uuid as _uuid
+        pname = f"_until_emits_{_uuid.uuid4().hex[:8]}"
+        compiled = _re.compile(regex) if regex else None
+
+        def check(trace: List[Dict[str, Any]], _args: Dict[str, Any]) -> bool:
+            for ev in trace:
+                payload = ev.get("payload") or {}
+                if payload.get("kind") != "agent_message":
+                    continue
+                if actor_id is not None and ev.get("actor") != actor_id:
+                    continue
+                text = payload.get("text", "") or ""
+                if contains is not None and contains in text:
+                    return True
+                if equals is not None and text.strip() == equals:
+                    return True
+                if compiled is not None and compiled.search(text):
+                    return True
+            return False
+
+        from .world import _wrap_predicate_fn
+        self._register_native_predicate(_wrap_predicate_fn(pname, check))
+        return until_predicate(pname)
+
+    def until_done(
+        self,
+        actor_id: Optional[str] = None,
+        *,
+        signal: str = "DONE",
+    ) -> Until:
+        """Halt when ``actor_id`` (or any agent, if None) emits a
+        message containing ``signal``. Shorthand for
+        ``until_agent_emits(actor_id, contains=signal)``. The
+        default signal matches the convention agents adopt when
+        prompted to declare completion with a sentinel word."""
+        return self.until_agent_emits(actor_id, contains=signal)
 
     def _spawn_external_agent(self, id: str, tools: List[str]) -> "_ExternalAgent":
         self._native.register_external_agent(id, tools)
