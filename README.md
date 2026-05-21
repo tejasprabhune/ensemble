@@ -32,9 +32,15 @@ tests/                python integration tests
 # Python side: build the extension and install the workspace.
 uv sync
 
-# Rust CLI: builds the `ensemble` binary into ./target/debug/ensemble.
-cargo build -p ensemble-cli
+# Rust CLI: installs the `ensemble` binary onto ~/.cargo/bin so it
+# lands on your PATH. Re-run this command whenever you pull new
+# changes; the install replaces whatever was previously on PATH.
+cargo install --path crates/ensemble-cli
 ```
+
+If you prefer not to install to PATH, `cargo build -p ensemble-cli`
+puts the binary at `./target/debug/ensemble`; use that path explicitly
+in place of bare `ensemble` in every command below.
 
 `uv sync` builds the `ensemble` extension module via maturin, installs
 the `plank` example package, and installs the `ensemble-train` training

@@ -64,7 +64,8 @@ fn scaffold_scenarios_dir(root: &Path, name: &str, world: &str) -> Result<()> {
     fs::create_dir_all(root.join("scenarios"))?;
     fs::write(
         root.join("scenarios/__init__.py"),
-        "from . import smoke  # noqa: F401\n",
+        "# Scenarios are auto-discovered: every *.py file in this dir is\n\
+         # imported when `ensemble run` loads the world.\n",
     )?;
     fs::write(
         root.join("scenarios/smoke.py"),
@@ -124,7 +125,10 @@ fn scaffold_pure_python_world(root: &Path, name: &str) -> Result<()> {
 
     fs::write(
         root.join("scenarios/__init__.py"),
-        "from . import smoke  # noqa: F401\n",
+        "# Scenarios are auto-discovered: every *.py file in this dir is\n\
+         # imported when `ensemble run` loads the world. Drop a new\n\
+         # file here and `ensemble run <world>.<scenario_name>` picks\n\
+         # it up without you editing this __init__.\n",
     )?;
 
     fs::write(
@@ -232,7 +236,8 @@ fn scaffold_full_world_with_rust(root: &Path, name: &str) -> Result<()> {
     )?;
     fs::write(
         root.join("scenarios/__init__.py"),
-        "from . import smoke  # noqa: F401\n",
+        "# Scenarios are auto-discovered: every *.py file in this dir is\n\
+         # imported when `ensemble run` loads the world.\n",
     )?;
     fs::write(
         root.join("scenarios/smoke.py"),

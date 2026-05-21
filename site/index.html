@@ -78,10 +78,10 @@
         snapshot and restore semantics.
       </p>
 <pre><code class="language-bash">uv sync
-cargo build -p ensemble-cli
-./target/debug/ensemble init my_world
+cargo install --path crates/ensemble-cli
+ensemble init my_world
 cd my_world
-./target/debug/ensemble run my_world.smoke</code></pre>
+ensemble run my_world.smoke</code></pre>
       <p>
         The <a href="quickstart.html">Quickstart</a> walks the rest of
         the way: pointing at a real model, looking at the trace,

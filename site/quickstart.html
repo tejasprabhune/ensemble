@@ -63,13 +63,24 @@
       </p>
 <pre><code class="language-bash"># from the repo root
 uv sync
-cargo build -p ensemble-cli</code></pre>
+cargo install --path crates/ensemble-cli</code></pre>
       <p>
         <code>uv sync</code> builds the Python extension via maturin
-        and installs the workspace. <code>cargo build -p
-        ensemble-cli</code> produces the <code>ensemble</code> binary
-        at <code>./target/debug/ensemble</code>. Put it on your
-        <code>PATH</code> or use the full path in the commands below.
+        and installs the workspace. <code>cargo install</code> drops
+        the <code>ensemble</code> binary into
+        <code>~/.cargo/bin</code> so it lands on your
+        <code>PATH</code>; the commands below all assume bare
+        <code>ensemble</code> resolves. Re-run
+        <code>cargo install</code> after pulling new changes so the
+        binary on <code>PATH</code> matches the workspace; if you
+        already had an older <code>ensemble</code> installed, the
+        install replaces it.
+      </p>
+      <p class="muted">
+        Prefer not to install to <code>PATH</code>?
+        <code>cargo build -p ensemble-cli</code> puts the binary at
+        <code>./target/debug/ensemble</code>; substitute that path
+        for bare <code>ensemble</code> in everything below.
       </p>
     </section>
 

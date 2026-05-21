@@ -95,23 +95,22 @@ def _add_package_dir(p: Path) -> None:
 
 def _import_scenarios_package(package_dir: Optional[Path]) -> None:
     """Make the scenarios in the supplied directory visible to the
-    @scenario decorator's global registry. The directory is expected to
-    contain either a ``scenarios/`` subpackage or a flat set of
-    scenario modules under a ``scenarios`` name.
+    @scenario decorator's global registry. The directory is expected
+    to contain a ``scenarios/`` subpackage with one module per
+    scenario.
 
-    Tries the conventional package import first. If a ``scenarios``
-    directory exists with no ``__init__.py``, walks the directory and
-    imports each ``*.py`` module by file path so a freshly-cloned
-    scenario project without the boilerplate ``__init__`` still
-    registers its scenarios.
-    """
+    Two-step import. First try the conventional package import so any
+    ``__init__.py`` side effects fire (plank lists its scenarios
+    there). Then walk the directory and import any module the
+    ``__init__`` did not list, so dropping a new ``scenarios/foo.py``
+    is enough to register a new scenario without editing the
+    ``__init__``."""
     if package_dir is None:
         return
     _add_package_dir(package_dir)
     scenarios_root = package_dir.resolve() / "scenarios"
     try:
         importlib.import_module("scenarios")
-        return
     except ImportError as primary:
         if not scenarios_root.is_dir():
             print(
@@ -120,23 +119,28 @@ def _import_scenarios_package(package_dir: Optional[Path]) -> None:
             )
             return
 
-    # Fallback: import every scenario module by file path. This covers
-    # the "I forgot to write scenarios/__init__.py" papercut without
-    # us having to materialise one on disk.
+    if not scenarios_root.is_dir():
+        return
+
     import importlib.util as _util  # noqa: WPS433  (local import keeps the cli startup cheap)
 
     for module_path in sorted(scenarios_root.glob("*.py")):
         if module_path.name.startswith("_"):
             continue
-        spec = _util.spec_from_file_location(
-            f"scenarios.{module_path.stem}", module_path
-        )
+        mod_name = f"scenarios.{module_path.stem}"
+        if mod_name in sys.modules:
+            # The package's __init__ already imported it; do not
+            # double-execute the module body.
+            continue
+        spec = _util.spec_from_file_location(mod_name, module_path)
         if spec is None or spec.loader is None:
             continue
         module = _util.module_from_spec(spec)
+        sys.modules[mod_name] = module
         try:
             spec.loader.exec_module(module)
         except Exception as e:
+            del sys.modules[mod_name]
             print(
                 f"warning: failed to import {module_path}: {e}",
                 file=sys.stderr,

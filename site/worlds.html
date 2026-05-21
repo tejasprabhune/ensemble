@@ -115,25 +115,16 @@ def open_ticket(user_id: str, subject: str) -> dict:
 
 register_world("my_world", tools=[lookup_user, open_ticket])</code></pre>
       <p>
-        For stateful worlds that prefer encapsulation, subclass
-        <code>World</code> and decorate methods. The framework binds
-        <code>self</code>; <code>setup</code> runs once at
-        construction:
+        For stateful worlds, the factory form above scales fine:
+        capture the state in closures or module-level dicts as
+        shown. The framework also supports a
+        <code>class MyWorld(World)</code> subclass form for
+        scenarios that construct the world themselves rather than
+        going through <code>@scenario(..., world="name")</code>; the
+        <a href="reference/world-api.html">World API reference</a>
+        covers it. The factory form is the recommended path for
+        scenarios using the standard decorator.
       </p>
-<pre><code class="language-python">from ensemble import World, tool
-
-
-class MyWorld(World):
-    world_name = "my_world"
-
-    def setup(self):
-        self.db = load_db()
-        self.tickets = {}
-
-    @tool
-    def lookup_user(self, user_id: str) -> dict:
-        """Return the user record by id."""
-        return self.db.get(user_id, {"error": "unknown user"})</code></pre>
     </section>
 
     <section>
