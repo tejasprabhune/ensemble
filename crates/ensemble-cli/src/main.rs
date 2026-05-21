@@ -226,19 +226,19 @@ fn run_scenario(
     traces_dir: Option<&std::path::Path>,
     no_sync: bool,
 ) -> Result<()> {
-    // Default to the bundled plank scenarios when the caller did not
-    // specify a package dir, so the README's quick-start works
-    // out-of-the-box from a fresh clone.
-    let pd: PathBuf = package_dir
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("examples/plank"));
-
+    // Package-dir discovery lives in python (cli_run.py): it picks the
+    // cwd if a world.toml is there, falls back to the worlds registry
+    // entry, and finally to examples/plank for the README quickstart.
+    // The CLI only forwards an explicit --package-dir.
     let mut cmd = python_command(no_sync);
     cmd.args(["-m", "ensemble.cli_run"])
-        .args(["--scenario", scenario])
-        .args(["--world", world.unwrap_or("plank")])
-        .args(["--package-dir"])
-        .arg(&pd);
+        .args(["--scenario", scenario]);
+    if let Some(w) = world {
+        cmd.args(["--world", w]);
+    }
+    if let Some(pd) = package_dir {
+        cmd.args(["--package-dir"]).arg(pd);
+    }
     if let Some(m) = manifest {
         cmd.args(["--manifest"]).arg(m);
     }

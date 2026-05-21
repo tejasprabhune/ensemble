@@ -28,7 +28,43 @@ from pathlib import Path
 from typing import List, Optional
 
 from .worlds_registry import find_world
-from .world_manifest import ManifestError
+from .world_manifest import ManifestError, load_manifest as _load_world_manifest
+
+
+def _autodiscover_cwd_world() -> Optional[tuple[str, Path]]:
+    """If the cwd contains a ``world.toml``, parse it, add the cwd to
+    sys.path, and import the declared python package so
+    ``register_world`` fires. Returns ``(world_name, cwd)`` so the
+    caller can plug them in as defaults; returns ``None`` when no
+    manifest is found or the manifest cannot be loaded.
+
+    Lets ``ensemble run my_world.smoke`` work straight after
+    ``ensemble init my_world && cd my_world`` without the explicit
+    ``ensemble worlds add`` step the audit called out."""
+    cwd = Path.cwd()
+    manifest_path = cwd / "world.toml"
+    if not manifest_path.exists():
+        return None
+    try:
+        manifest = _load_world_manifest(manifest_path)
+    except ManifestError as e:
+        print(f"warning: ignoring world.toml in cwd: {e}", file=sys.stderr)
+        return None
+    _add_package_dir(cwd)
+    try:
+        importlib.import_module(manifest.python_package)
+    except ImportError as e:
+        print(
+            f"warning: world.toml in cwd names python_package "
+            f"{manifest.python_package!r} but importing it failed: {e}",
+            file=sys.stderr,
+        )
+        return None
+    print(
+        f"ensemble: auto-registered world {manifest.name!r} from ./world.toml",
+        file=sys.stderr,
+    )
+    return (manifest.name, cwd)
 
 
 def _add_package_dir(p: Path) -> None:
@@ -152,11 +188,38 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # Resolve the world first so register_world fires before we import
-    # the scenarios package (scenarios that say `import plank` will
-    # short-circuit since plank is already in sys.modules).
-    world_root = _resolve_world(args.world)
-    package_dir = args.package_dir or world_root
+    world_name = args.world
+    package_dir: Optional[Path] = args.package_dir
+
+    # Auto-discover a world.toml in the cwd when the caller did not
+    # pass --package-dir. This is what makes
+    # `ensemble init my_world && cd my_world && ensemble run my_world.smoke`
+    # work in one step.
+    if package_dir is None:
+        auto = _autodiscover_cwd_world()
+        if auto is not None:
+            auto_name, auto_dir = auto
+            if world_name is None:
+                world_name = auto_name
+            package_dir = auto_dir
+
+    # Registry lookup: needed when the world lives outside the cwd or
+    # when the scenario was started with an explicit --world that does
+    # not match the cwd's manifest. Skip when auto-discovery already
+    # imported the package, since _resolve_world would try to import
+    # it a second time.
+    if world_name and (package_dir is None or world_name != getattr(args, "world", world_name)):
+        world_root = _resolve_world(world_name)
+        if package_dir is None:
+            package_dir = world_root
+
+    # Final fallback: the README quickstart runs from the repo root with
+    # no flags; examples/plank is the bundled world there.
+    if package_dir is None and Path("examples/plank/world.toml").is_file():
+        package_dir = Path("examples/plank")
+        if world_name is None:
+            world_name = "plank"
+
     _import_scenarios_package(package_dir)
 
     # Imported here so the manifest-derived scenarios share the same
@@ -189,7 +252,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     result = asyncio.run(
         _REGISTRY[args.scenario](
-            args.world,
+            world_name,
             backend=args.backend,
             trace_path=str(trace_path),
         )
