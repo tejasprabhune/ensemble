@@ -1,18 +1,144 @@
 # Tools
 
-This page documents how to declare a tool a world's agents can
-call. It covers the ``PluginTool`` dataclass at the bottom of the
-stack, the ``tool()`` helper that wraps a plain python function for
-the common case (in both factory and decorator forms), the
-JSON-string envelope the runtime expects, the four optional
-capabilities a tool can opt into (resource locks, timeouts,
-progress emission, cost annotations), and the sandboxed-dispatch
-contract.
+A tool is a python function the agent can call. This page covers
+the three shapes of the `@tool` decorator, the JSON-Schema
+inference rules, the return-envelope contract, and the four
+optional capabilities a tool can opt into: resource locks,
+timeouts, progress emission, and cost annotations. The last
+section covers sandboxed dispatch.
+
+Reach for this page when you are adding a tool, choosing between
+the decorator shapes, or wiring a tool's optional capability.
+
+## The common case: bare `@tool`
+
+In the common case the decorator infers everything from the
+function. The name comes from the function's `__name__`, the
+description from the first paragraph of the docstring, and the
+JSON-Schema `parameters` from the type hints. Tools whose inputs
+are typed primitives, lists, dicts, or `Optional[T]` should reach
+for this form first:
+
+```python
+from ensemble import register_world, tool
+
+
+@tool
+def lookup_user(user_id: str) -> dict:
+    """Return the user record by id."""
+    return {"id": user_id, "name": "Alice", "plan": "team"}
+
+
+@tool
+def search_kb(query: str, tags: list[str] | None = None) -> list:
+    """Search the knowledge base. Tags filter the returned items."""
+    return kb.search(query, tags or [])
+
+
+register_world("my_world", tools=[lookup_user, search_kb])
+```
+
+The inferred schema for `search_kb` here is:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {"type": "string"},
+    "tags": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["query"]
+}
+```
+
+Parameters with no default become `required`. `Optional[T]` and
+default-`None` parameters do not. `Literal["a", "b"]` becomes
+`{"enum": ["a", "b"]}`. Unknown types become an empty schema
+fragment, which the runtime treats as "any JSON value"; reach for
+the override form when you want a tighter schema than inference
+can produce.
+
+## Decorator with overrides
+
+When you want to keep inference for most fields but override one
+or two (a tool name that differs from the function name, a
+description that is not the docstring's first paragraph, a hand-
+written schema):
+
+```python
+@tool(description="Submit the kernel for static checks and run.")
+def submit(src: str):
+    return runner.check_and_run(src)
+```
+
+Any of `name`, `description`, `parameters`, `timeout_ms`,
+`resources`, `sandbox`, `sandbox_world` may be passed. Fields you
+omit are inferred from the function.
+
+## Four-argument factory
+
+For tools whose schema is already in hand and you want a
+`PluginTool` built eagerly (inside a `register_world(tools=[...])`
+call, for example):
+
+```python
+register_world("my_world", tools=[
+    tool(
+        "submit_kernel",
+        "Submit the kernel and run it.",
+        {"type": "object", "properties": {"src": {"type": "string"}},
+         "required": ["src"]},
+        submit_kernel_fn,
+    ),
+])
+```
+
+This form does no inference: every field is explicit. It is the
+right call when the schema is generated from somewhere else (a
+shared spec, a server's tool list) or when the function does not
+have type hints.
+
+## `World` subclass methods
+
+Decorated methods on a `World` subclass work the same way. The
+subclass walker picks them up at construction time and binds them
+to `self`. The bare form is fine because the walker skips `self`
+during schema inference:
+
+```python
+from ensemble import World, tool
+
+
+class MyWorld(World):
+    def setup(self):
+        self.db = Db()
+
+    @tool
+    def lookup_user(self, user_id: str) -> dict:
+        """Return the user record by id."""
+        return {"ok": True, "data": self.db.lookup_user(user_id)}
+```
+
+## Return envelope
+
+The wrapper accepts three return shapes:
+
+- A dict, sent as the tool's effect.
+- A `(effect, diff)` tuple. The diff is emitted as a `state_diff`
+  event alongside the `tool_result`.
+- A dict that contains one or more of `effect`, `diff`, `costs`,
+  `progress`. This is the structured-envelope form, used when the
+  tool wants to annotate cost or emit progress without using the
+  `emit_progress` injection path.
+
+Argument routing tries `fn(**args)` first and falls back to
+`fn(args)` if the function rejects keyword expansion. A function
+that declares an `emit_progress` parameter receives a callable for
+progress reporting; see the [progress section](#progress).
 
 ## PluginTool
 
-``PluginTool`` is the dataclass ``register_world`` accepts. Every
-plugin tool eventually lands as one of these:
+Underneath the decorators, every tool is a `PluginTool`:
 
 ```python
 @dataclass
@@ -27,212 +153,72 @@ class PluginTool:
     sandbox_world: Optional[str] = None
 ```
 
-- ``name`` is what the model sees and what ``register_tool`` keys
-  the registry by.
-- ``description`` is the LLM-facing hint. Both Anthropic and
-  OpenAI forward it to the model verbatim.
-- ``parameters`` is the JSON Schema for the tool's argument
-  object. The runtime does not enforce the schema; it forwards it
-  to the model so the model produces compliant args.
-- ``fn`` is the callable the runtime dispatches to. Most authors
-  do not write ``fn`` directly; they write a plain python function
-  and let ``tool(...)`` wrap it.
-- ``timeout_ms``, ``resources``, ``sandbox``, and ``sandbox_world``
-  are documented in their own sections below.
-
-## tool() helper
-
-``tool`` works as both a factory and a decorator factory. The
-factory form remains the legacy entry point:
-
-```python
-# my_world/__init__.py
-from ensemble import register_world, tool
-
-
-def lookup_user(user_id: str):
-    user = db.lookup_user(user_id)
-    return {"ok": True, "data": user}
-
-
-register_world(
-    "my_world",
-    tools=[
-        tool(
-            name="lookup_user",
-            description="Look up a user by id.",
-            parameters={
-                "type": "object",
-                "properties": {"user_id": {"type": "string"}},
-                "required": ["user_id"],
-            },
-            fn=lookup_user,
-        ),
-    ],
-)
-```
-
-The decorator-factory form works both at module level and on a
-``World`` subclass method. The decorated function is otherwise
-unchanged from the caller's perspective; the metadata lives on
-``fn._ensemble_tool_meta`` for the runtime to consume:
-
-```python
-# my_world/__init__.py
-from ensemble import register_world, tool
-
-
-@tool(
-    name="lookup_user",
-    description="Look up a user by id.",
-    parameters={
-        "type": "object",
-        "properties": {"user_id": {"type": "string"}},
-        "required": ["user_id"],
-    },
-    timeout_ms=2000,
-)
-def lookup_user(user_id: str):
-    return {"ok": True, "data": db.lookup_user(user_id)}
-
-
-register_world("my_world", tools=[lookup_user])
-```
-
-```python
-# my_world/world.py
-from ensemble import World, tool
-
-
-class MyWorld(World):
-    def setup(self):
-        self.db = Db()
-
-    @tool(
-        name="lookup_user",
-        description="Look up a user by id.",
-        parameters={
-            "type": "object",
-            "properties": {"user_id": {"type": "string"}},
-            "required": ["user_id"],
-        },
-    )
-    def lookup_user(self, user_id: str):
-        return {"ok": True, "data": self.db.lookup_user(user_id)}
-```
-
-The wrapper accepts three return shapes:
-
-- A dict, sent as the tool's effect.
-- A ``(effect, diff)`` tuple. The diff is emitted as a
-  ``state_diff`` event alongside the ``tool_result``.
-- A dict that contains one or more of ``effect``, ``diff``,
-  ``costs``, ``progress``. This is the structured-envelope form,
-  used when the tool wants to annotate cost or emit progress
-  without using the ``emit_progress`` injection path.
-
-Argument routing tries ``fn(**args)`` first and falls back to
-``fn(args)`` if the function rejects keyword expansion. A function
-that declares an ``emit_progress`` parameter receives a callable
-for progress reporting; see the [progress section](#progress).
-
-## Effect, diff, costs, progress envelope
-
-The raw ``fn`` callable a ``PluginTool`` carries takes one string
-(the JSON of the args dict) and returns one string (the JSON of
-the result envelope). The envelope schema:
-
-```json
-{
-  "effect": <any JSON>,
-  "diff":    <any JSON, optional>,
-  "costs":   {"<unit>": <number>, ...},
-  "progress": [{"fraction": 0..1, "message": "..."}],
-  "is_error": <bool, optional; the MCP path uses this>
-}
-```
-
-The runtime forwards ``effect`` to the calling agent as the tool's
-return value. It emits a ``state_diff`` event when ``diff`` is
-present, a ``cost`` event per unit in ``costs``, and a ``progress``
-event per entry in ``progress`` (flushed in order, ahead of the
-trailing ``tool_result``). Any other keys are ignored.
+Most authors never construct this directly; the decorators build
+it from the wrapped function.
 
 ## Resources
 
 ```python
-@tool(..., resources=["billing_db"])
-def lookup(...): ...
+@tool(resources=["billing_db"])
+def lookup(user_id: str) -> dict: ...
 ```
 
-Each name in ``resources`` is a permit the runtime acquires before
+Each name in `resources` is a permit the runtime acquires before
 the closure runs and releases when it returns. Two dispatches
 that share a name serialise through the world's
-``ResourceManager``; unrelated names run in parallel. Resources
+`ResourceManager`; unrelated names run in parallel. Resources
 can be declared up front via
-``register_world(..., resources={"billing_db": 1})`` (the
+`register_world(..., resources={"billing_db": 1})` (the
 [world api reference](world-api.md#worldtoml-manifest-schema)
 covers the manifest form). A name a tool references but no one
 declared is created lazily as an exclusive lock on first use.
 
-A ``Shared{permits = N}`` resource lets up to ``N`` concurrent
-dispatches hold a permit simultaneously, which is the right shape
-for a connection pool or a GPU lane shared across tools.
+A `{permits = N}` resource lets up to N concurrent dispatches
+hold a permit simultaneously, which is the right shape for a
+connection pool or a GPU lane shared across tools.
 
 ## Timeouts
 
 ```python
-@tool(..., timeout_ms=2000)
+@tool(timeout_ms=2000)
 def slow(...): ...
 ```
 
 Caps a single dispatch at the given duration. When the timeout
-fires the runtime emits a ``tool_timeout`` event, the calling
-agent sees a tool error, and the scenario continues. The closure
-runs on the tokio blocking pool; the timeout is applied around
-the ``spawn_blocking`` future, so a closure that ignores the
-deadline still leaks until it completes, but the agent moves on.
+fires the runtime emits a `tool_timeout` event, the calling agent
+sees a tool error, and the scenario continues. The closure runs
+on the tokio blocking pool; the timeout is applied around the
+`spawn_blocking` future, so a closure that ignores the deadline
+still leaks until it completes, but the agent moves on.
 
-Pair ``timeout_ms`` with progress emission for long-running work
-so the trace is observable while the dispatch is in flight.
+Pair `timeout_ms` with progress emission for long-running work so
+the trace is observable while the dispatch is in flight.
 
 ## Progress
 
-A python tool that declares an ``emit_progress`` parameter
-receives a callable; each invocation records one
-``(fraction, message)`` pair that the runtime flushes to the
-trace as a ``progress`` event right before the trailing
-``tool_result``. The helper inspects the function's signature, so
-a tool that does not need progress reporting simply omits the
-parameter.
+A python tool that declares an `emit_progress` parameter receives
+a callable; each invocation records one `(fraction, message)`
+pair that the runtime flushes to the trace as a `progress` event
+right before the trailing `tool_result`. The helper inspects the
+function's signature, so a tool that does not need progress
+reporting simply omits the parameter:
 
 ```python
-@tool(
-    name="reconcile_billing",
-    description="Walk a user's billing history.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "user_id": {"type": "string"},
-            "months": {"type": "integer"},
-        },
-        "required": ["user_id", "months"],
-    },
-)
-def reconcile(user_id: str, months: int, emit_progress):
+@tool
+def reconcile_billing(user_id: str, months: int, emit_progress) -> dict:
+    """Walk a user's billing history month by month."""
     for i in range(1, months + 1):
         emit_progress(i / months, f"scanned month {i}/{months}")
         ...
     return {"ok": True, "months_reconciled": months}
 ```
 
-The structured-envelope form (``return {"progress": [...]}``) is
+The structured-envelope form (`return {"progress": [...]}`) is
 still supported for tools that compute progress in bulk.
 
 ## Costs
 
-Tools annotate cost by returning a ``costs`` dict in their
-envelope:
+Tools annotate cost by returning a `costs` dict in their envelope:
 
 ```python
 def heavy_op(...):
@@ -243,29 +229,31 @@ def heavy_op(...):
     }
 ```
 
-Units are open strings. Each entry becomes one ``cost`` event on
+Units are open strings. Each entry becomes one `cost` event on
 the trace, attributed to the calling actor; the runtime maintains
 a running total per unit (both world-wide and per-actor). A
-budget declared via ``world.set_budget(unit, amount, actor=...)``
-halts the scheduler with ``StopReason::BudgetExceeded`` when a
+budget declared via `world.set_budget(unit, amount, actor=...)`
+halts the scheduler with `StopReason::BudgetExceeded` when a
 recorded cost would push the total past the cap.
 
-LLM backends also annotate cost on their own behalf. Each
-completion records ``tokens_in``, ``tokens_out``, and (when the
-model is in ``crates/ensemble-runtime/pricing.toml``) ``usd``
-against the actor that issued the call. The
-[runtime reference](runtime.md#usage-and-cost-annotation) covers
-the pricing table.
+LLM backends annotate cost on their own behalf. Each completion
+records `tokens_in`, `tokens_out`, and (when the model is in
+`crates/ensemble-runtime/pricing.toml`) `usd` against the actor
+that issued the call. The aggregated totals surface on
+`RunResult.costs`, `world.cost_summary()`, and the CLI's stdout
+summary line for any run that recorded a cost. See the
+[runtime reference](runtime.md#usage-and-cost-annotation) for the
+pricing table.
 
 ## Sandboxed tools
 
 ```python
-@tool(..., sandbox=True)
+@tool(sandbox=True)
 def compile_kernel(src: str): ...
 ```
 
 A sandboxed tool runs each dispatch in a fresh
-``python -m ensemble.tool_worker`` subprocess. The worker imports
+`python -m ensemble.tool_worker` subprocess. The worker imports
 the world's python package (which re-registers all of the world's
 tools, building per-instance state from scratch), looks up the
 named tool, calls it once with the supplied JSON args, prints the
@@ -281,16 +269,16 @@ binary library that occasionally segfaults. State the parent's
 closures held is not shared with the worker, so a sandboxed tool
 must encode its entire input in its JSON args and its entire
 output in its JSON return; for configuration the worker needs to
-read, use ``world.shared_state`` (which the runtime serialises
-into ``ENSEMBLE_SHARED_STATE`` on every dispatch). See the
+read, use `world.shared_state` (which the runtime serialises into
+`ENSEMBLE_SHARED_STATE` on every dispatch). See the
 [sandbox contract](world-api.md#sandbox-contract) on the
 world-api page for the full cross-boundary table.
 
-``sandbox_world`` is the world name the worker imports to
+`sandbox_world` is the world name the worker imports to
 re-register the tool. The wrapper fills it in automatically at
-``World(name)`` construction time, so authors rarely set it
+`World(name)` construction time, so authors rarely set it
 themselves. Worlds that live outside the worlds registry should
-also set ``python_package`` and ``package_dir`` on
-``register_world`` so the worker resolves the same package the
-parent loaded; subclass-form worlds derive these automatically
-from ``type(self).__module__``.
+also set `python_package` and `package_dir` on `register_world`
+so the worker resolves the same package the parent loaded;
+subclass-form worlds derive these automatically from
+`type(self).__module__`.

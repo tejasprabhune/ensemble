@@ -9,15 +9,22 @@ release build lands at `./target/release/ensemble`.
 ## ensemble init
 
 ```
-ensemble init <name> [--path PATH] [--world EXISTING_WORLD]
+ensemble init <name> [--path PATH] [--world EXISTING_WORLD] [--with-rust]
 ```
 
-Scaffolds a new project skeleton. Two modes: with no `--world`,
-creates a fresh world (a rust crate, a python package, a
-scenarios directory, a personas directory, a `world.toml`
-manifest, and a smoke scenario). With `--world EXISTING_WORLD`,
-creates just a scenarios package bound to an already-registered
-world, skipping the world boilerplate.
+Scaffolds a new project skeleton. Three shapes:
+
+- Default (`ensemble init <name>`): a pure-Python world. One module
+  file with an example `@tool`, a `world.toml`, a runnable smoke
+  scenario, and a README. No Rust crate. The result runs
+  immediately under `ensemble run <name>.smoke` because
+  `ensemble run` auto-discovers a `world.toml` in the cwd.
+- Heavyweight (`--with-rust`): adds a Rust crate skeleton with a
+  `WorldState` impl, a `Cargo.toml`, a `personas/` directory, and
+  a typed scenarios entry. Reach for this when the world needs
+  typed state with snapshot/restore semantics.
+- Bound scenarios (`--world EXISTING_WORLD`): a scenarios package
+  bound to an already-registered world. Skips the world boilerplate.
 
 Arguments:
 
@@ -32,15 +39,21 @@ Arguments:
   directory bound to `EXISTING_WORLD` rather than creating a new
   world. The scaffolded scenario imports `EXISTING_WORLD` at
   module top so the world plugin registers itself.
+- `--with-rust`: scaffold the heavyweight shape with a Rust state
+  crate. Mutually exclusive with `--world`.
 
 Side effects: creates the directory tree and writes the files.
-Prints the resulting root path to stdout.
+Prints the resulting root path plus the suggested next command.
 
 Example:
 
 ```bash
 ensemble init my_world
-# scaffolds my_world/world/, my_world/my_world/, my_world/scenarios/, etc.
+# scaffolds my_world.py, my_world/world.toml, my_world/scenarios/, README.md
+# next: cd my_world && ensemble run my_world.smoke
+
+ensemble init my_world --with-rust
+# heavyweight scaffold with a Rust crate
 
 ensemble init smoke_only --world plank
 # scaffolds smoke_only/scenarios/ pointing at the already-installed plank
@@ -53,14 +66,22 @@ ensemble run <scenario> [--world W] [--manifest M] [--package-dir D]
                         [--backend B] [--traces-dir TD] [--no-sync]
 ```
 
-Runs a registered scenario and writes the trace to
-``./traces/<scenario>.jsonl``. By default the CLI shells to
+Runs a registered scenario and writes the trace into a per-run
+directory at ``./traces/<run_id>/``. By default the CLI shells to
 ``uv run python -m ensemble.cli_run`` so the host project's
 lockfile is honoured; ``--no-sync`` (or the ``ENSEMBLE_NO_SYNC``
 env var) bypasses uv and uses the active python interpreter
 directly. The bypass matters when the host's ``pyproject.toml``
 has a yanked dependency or a stale lockfile that would crash uv
 before the scenario even started.
+
+World discovery happens in three stages: an explicit
+``--package-dir`` always wins, otherwise the python entry point
+looks for a ``world.toml`` in the cwd and auto-registers it (the
+audit's two-step ceremony fix), and finally the worlds registry
+at ``~/.ensemble/worlds.toml`` is consulted. The ``examples/plank``
+directory is the final fallback for the README quickstart from
+the repo root.
 
 Arguments:
 
@@ -69,39 +90,43 @@ Arguments:
   manifest.
 - ``--world W``: the world the scenario constructs. Resolves
   through the worlds registry at ``~/.ensemble/worlds.toml``.
-  Defaults to ``"plank"`` so the README's quick start works
-  without flags; passing the scenario's declared world is the
-  usual case.
+  Defaults to whatever the cwd's ``world.toml`` declares, then to
+  the scenario's ``@scenario(..., world=...)`` declaration.
 - ``--manifest M``: optional path to a ``scenarios.toml`` file the
   loader registers before lookup.
 - ``--package-dir D``: directory holding the ``scenarios/`` python
-  package to import. Defaults to the registered world's directory.
-  The loader tolerates a missing ``scenarios/__init__.py`` and
-  walks the directory to import each ``*.py`` module by file path,
-  so a freshly-cloned scenario project without the boilerplate
-  ``__init__`` still registers its scenarios.
+  package to import. Defaults to the auto-discovered cwd or the
+  registered world's directory. The loader tolerates a missing
+  ``scenarios/__init__.py`` and walks the directory to import each
+  ``*.py`` module by file path.
 - ``--backend B``: ``mock`` | ``anthropic`` | ``openai`` | ``vllm``
   | ``auto``. Forwarded to the python entry point and printed as
-  a system note before any LLM round trip so a silent
-  ``mock``-fallback is visible up front.
-- ``--traces-dir TD``: where to write the trace JSONL. Defaults to
+  a system note before any LLM round trip. When the resolved
+  backend is ``mock`` and the user did not explicitly request it,
+  a loud bracketed banner names the consequence (canned
+  deterministic stubs) and the fix.
+- ``--traces-dir TD``: where to write the per-run dir. Defaults to
   ``./traces``.
 - ``--no-sync``: skip ``uv run`` and use the active python (or the
   one in ``VIRTUAL_ENV/bin/python`` when set). Use when the host
   project's lockfile is broken or when you want to invoke the
   scenario from a venv that already has ``ensemble`` installed.
 
-Side effects: writes ``<traces-dir>/<safe_scenario_name>.jsonl``
-(creating the directory if missing); unlinks any prior file at
-the same path so each run starts fresh. Prints a single JSON line
-on stdout containing the scenario name, the grader scores, and
-the trace path.
+Side effects: creates ``<traces-dir>/<run_id>/`` containing
+``trace.jsonl`` and ``meta.json``; appends a row to
+``<traces-dir>/runs.jsonl``; creates a symlink at
+``<traces-dir>/<safe_scenario_name>.jsonl`` pointing at the
+latest run's trace. Prints a single JSON line on stdout
+containing the scenario, the run id, the grader scores, and the
+trace path. ``costs={...}`` is included when the run recorded
+any cost.
 
 Example:
 
 ```bash
-ensemble run plank.refund_storm --world plank
-# {"scenario": "plank.refund_storm", "scores": {...}, "trace_path": "traces/plank_refund_storm.jsonl"}
+ensemble run my_world.smoke
+# {"scenario":"my_world.smoke","run_id":"20260520T143022_my_world_smoke_a1b2c3d4",
+#  "scores":{"ok":1.0},"trace_path":"traces/20260520T143022_my_world_smoke_a1b2c3d4/trace.jsonl"}
 ```
 
 ## ensemble trace view
@@ -136,6 +161,139 @@ ensemble trace view traces/plank_refund_storm.jsonl
 ensemble trace view site/trace.jsonl --site site --port 8765
 # serving ./site/ on http://127.0.0.1:8765 with the file as the live trace
 ```
+
+## ensemble trace compare
+
+```
+ensemble trace compare <a> <b> [--port PORT] [--site SITE_DIR]
+```
+
+Serves a two-column browser view of two traces. Each column
+renders one trace's message events (agent and user messages,
+tool calls, tool results, system notes) as a chronological feed;
+a sync-scroll toggle ties the columns by tick so equivalent
+moments in both runs sit at the same vertical position. The
+compare assets ship embedded, so the command works offline.
+
+Pair with `ensemble runs compare` to first pick the two runs you
+want to inspect, then open them visually.
+
+Example:
+
+```bash
+ensemble trace compare \
+  traces/20260520T1430_.../trace.jsonl \
+  traces/20260520T1442_.../trace.jsonl
+```
+
+## ensemble models
+
+Inspects the LLM backends ensemble knows about. Shells to
+`uv run python -m ensemble.cli_models`.
+
+### models list
+
+```
+ensemble models list
+```
+
+Prints a block per backend (`anthropic`, `openai`, `vllm`,
+`mock`) with whether the relevant environment variable is set
+and the model identifiers each backend accepts. The Anthropic
+and OpenAI model lists come from the runtime crate's
+`pricing.toml`, so the printed list is the authoritative set of
+models the runtime can attribute USD cost to. vLLM model names
+depend on what the endpoint serves; the section reports the
+configured base URL.
+
+Example:
+
+```bash
+ensemble models list
+# [anthropic] ...   models: claude-sonnet-4-5, claude-opus-4-7, ...
+# [openai]    ...   models: gpt-5, gpt-4o, ...
+# [vllm]      ...   ENSEMBLE_VLLM_BASE_URL: not set
+# [mock]      ...   no key required
+```
+
+## ensemble sweep
+
+Runs the same scenario across a cartesian product of CLI flags
+and environment variables. Shells to
+`uv run python -m ensemble.cli_sweep`. See
+[sweeps.md](sweeps.md) for the full TOML schema.
+
+### sweep run
+
+```
+ensemble sweep run <config.toml> [--no-resume]
+```
+
+Loads the sweep config, expands the cartesian product, runs one
+scenario invocation per cell (capped by `max_parallel`, default
+1), and writes per-cell traces, per-cell `meta.json`, and a flat
+`index.jsonl` to the sweep's traces directory.
+
+- `<config.toml>` (positional, required): the sweep config.
+- `--no-resume`: re-run cells whose `meta.json` already exists.
+  Default behavior skips them so an interrupted sweep can be
+  resumed cheaply.
+
+Side effects: creates the sweep's traces directory and writes
+one subdirectory per cell. Prints one line per cell to stderr
+as cells complete (`[ok|fail|skipped] cell_id  scores: ...`)
+and a JSON summary on stdout when finished. Exit code is 0 when
+every cell succeeded, 1 otherwise.
+
+## ensemble runs
+
+Cross-run observability subcommands that read the per-run
+`runs.jsonl` index. Shells to
+`uv run python -m ensemble.cli_runs`. See
+[observability.md](observability.md) for the on-disk layout and
+the full subcommand semantics.
+
+All four subcommands accept a global `--traces-dir D` to point
+at a sweep's directory or any other index location (default:
+`./traces`).
+
+### runs list
+
+```
+ensemble runs list [--scenario NAME] [--limit N]
+```
+
+Prints recent runs as a table sorted oldest-first. `--scenario`
+filters; `--limit` truncates to the last N rows.
+
+### runs show
+
+```
+ensemble runs show <run_id_or_prefix>
+```
+
+Prints one run's meta as pretty-printed JSON. The argument can
+be any unique prefix of the run id.
+
+### runs compare
+
+```
+ensemble runs compare <a_id_or_prefix> <b_id_or_prefix>
+```
+
+Diffs two runs' scores side by side. Each metric shows the A
+value, the B value, and the signed delta. Costs are dumped
+unmodified at the bottom.
+
+### runs export
+
+```
+ensemble runs export [--format json|csv]
+```
+
+Emits the full runs index. `json` is the default; `csv` flattens
+scores into one column per metric so the file loads into pandas
+without re-parsing JSON.
 
 ## ensemble worlds
 

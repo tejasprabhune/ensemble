@@ -64,9 +64,11 @@ when invoked:
   constructed ``World`` instance once it is built but before the
   scenario function runs.
 
-The wrapper returns a ``RunResult`` dataclass with three fields:
-``name`` (the scenario name), ``scores`` (the grader dict), and
-``trace`` (the parsed event log).
+The wrapper returns a ``RunResult`` dataclass with four fields:
+``name`` (the scenario name), ``scores`` (the grader dict),
+``trace`` (the parsed event log), and ``costs`` (a per-unit
+``Dict[str, float]`` aggregated from the trace's ``cost`` events
+via ``world.cost_summary()``; empty when nothing was recorded).
 
 ## World
 
@@ -114,9 +116,10 @@ world.spawn_user(
     id=None,
     persona=None,
     hidden_goal=None,
-    model="user-model",
+    model=None,
     system_prompt=None,
     hidden_state=None,
+    interactive=True,
 ) -> User
 ```
 
@@ -124,6 +127,19 @@ Creates a ``User`` actor and records it on the world. Emits a
 ``user_spawned`` system event to the trace with the resolved
 persona, model, and hidden state so trace consumers can render
 the actor's framing without each scenario logging it manually.
+
+- ``id`` defaults to ``user-1``, ``user-2``, ... from a per-world
+  counter so scaffold scenarios can elide ids they do not care
+  about.
+- ``model`` defaults to the world's ``default_user_model`` (set in
+  ``register_world`` or in ``world.toml``); the framework-wide
+  fallback is the sentinel ``"user-model"``.
+- ``interactive=False`` makes the user silent on inbound messages.
+  The scheduler still records what the agent said into the user's
+  history, but the user does not call the backend to produce a
+  reply. The scenario can still drive the conversation through
+  ``user.say(...)``. For scenarios with no real user, prefer
+  ``world.opener`` (next section).
 
 Returns a ``User`` proxy whose methods include ``id``,
 ``persona``, ``hidden_state``, ``backend_info``, ``say``, ``act``,
@@ -133,17 +149,50 @@ shortcuts. When the persona has ``mode = "trained"`` together
 with an ``adapter_name``, ``spawn_user`` routes the actor through
 a per-user ``LocalAdapterBackend``.
 
+## opener
+
+```python
+world.opener(message: str, *, to: str) -> Opener
+```
+
+Sends a seed message to an agent without spawning a user. Use
+this for the agent-iterates-silently shape: the agent receives an
+opening problem statement and then runs on its own (using its
+tools) until a stop condition fires. Internally the opener is a
+non-interactive user backed by the same scheduler plumbing, but
+it does not appear in ``world.users`` and the trace event is
+``kickoff`` rather than ``user_spawned``, so a scenario that has
+no real user does not leak a ghost user into graders or the
+viewer.
+
+```python
+rep = world.spawn_agent(tools=["read", "edit", "run_tests"])
+world.opener("rename foo to bar in this file", to=rep.id)
+yield world.until_done(rep.id)
+yield {"completed": 1.0}
+```
+
+The returned ``Opener`` exposes ``.id`` (the auto-assigned actor
+id, ``opener-1``, ``opener-2``, ...) and a ``.say(target, text)``
+method for emitting additional seed messages. Multiple openers
+can coexist; their ids are unique per world.
+
 ## spawn_agent
 
 ```python
 world.spawn_agent(
     id=None,
-    model="claude-sonnet-4-5",
+    model=None,
     tools=None,
     system_prompt=None,
     params=None,
 ) -> Agent
 ```
+
+- ``id`` defaults to ``agent-1``, ``agent-2``, ... from a per-world
+  counter.
+- ``model`` defaults to the world's ``default_agent_model``; the
+  framework-wide fallback is ``claude-sonnet-4-5``.
 
 Creates an ``Agent`` actor backed by the world's shared LLM
 backend and the world's tool registry, restricted to the named
@@ -218,6 +267,40 @@ yield world.until((world.turn_count > 30) | until_predicate("submit_called"))
 ``any_of`` and ``all_of`` flatten nested calls of the same
 combinator, so deeply nested expressions stay readable on the
 wire.
+
+## world.until_agent_emits and world.until_done
+
+For silent-loop scenarios the natural stop condition is "the
+agent said it was done", not "we hit turn N". Two helpers cover
+that case:
+
+```python
+world.until_agent_emits(
+    actor_id: str | None,
+    *,
+    contains: str | None = None,
+    equals: str | None = None,
+    regex: str | None = None,
+) -> Until
+
+world.until_done(actor_id: str | None = None, *, signal: str = "DONE") -> Until
+```
+
+``until_agent_emits`` halts when the named agent emits a message
+matching the criterion. Exactly one of ``contains``, ``equals``,
+or ``regex`` is required. When ``actor_id`` is ``None`` the
+condition matches any agent's emission. Each call registers a
+fresh per-instance predicate, so multiple stop conditions in the
+same world do not collide.
+
+``until_done`` is the shorthand the silent-loop shape reaches for:
+it is ``until_agent_emits(actor_id, contains=signal)`` with
+``signal="DONE"`` by default. Override ``signal`` when the agent
+uses a different sentinel word.
+
+```python
+yield world.until_done(rep.id) | (world.turn_count > 100)
+```
 
 ## world.run and world.simulate
 

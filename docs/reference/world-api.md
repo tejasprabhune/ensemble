@@ -365,6 +365,8 @@ name = "plank"
 python_package = "plank"
 rust_crate = "world"
 personas_dir = "personas"
+default_user_model = "claude-haiku-4-5"
+default_agent_model = "claude-sonnet-4-5"
 
 [[world.default_personas]]
 name = "frustrated_power_user"
@@ -393,12 +395,32 @@ The fields:
 - ``world.default_personas`` and ``world.default_tools``: lists of
   names the world ships. Informational; used by
   ``ensemble worlds show``.
+- ``world.default_user_model`` and ``world.default_agent_model``:
+  the models ``spawn_user()`` and ``spawn_agent()`` use when the
+  scenario does not pass ``model=...`` explicitly. Lets a world
+  pick its preferred defaults without every scenario repeating the
+  model identifier on every spawn line.
 - ``world.resources``: table mapping resource name to a
   ``{permits = N}`` declaration. Declared at world load time so a
   shared resource is actually shared rather than silently
   downgraded to exclusive on first use.
 - ``world.cli``: reserved for world-specific CLI subcommands.
 
+`register_world` accepts the same two model fields as kwargs for
+worlds that prefer to declare them in Python rather than TOML:
+
+```python
+register_world(
+    "my_world",
+    tools=[...],
+    default_user_model="claude-haiku-4-5",
+    default_agent_model="claude-sonnet-4-5",
+)
+```
+
 The manifest loader (``ensemble.load_world_manifest``) returns a
 ``WorldManifest`` dataclass. The ``ensemble worlds add`` command
-validates the manifest at registration time.
+validates the manifest at registration time. The python entry
+point also auto-discovers a ``world.toml`` in the cwd at run
+time, so a scaffold-and-run flow does not require the manual
+`ensemble worlds add` step.

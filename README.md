@@ -46,18 +46,34 @@ uv pip install 'ensemble-train[torch]'
 
 ## Run
 
+The complete on-ramp lives at [docs/quickstart.md](docs/quickstart.md).
+A short selection of common commands:
+
 ```sh
-# Run a registered scenario; writes the trace to ./traces/.
+# Scaffold a new pure-Python world and run its smoke scenario.
+./target/debug/ensemble init my_world
+cd my_world
+./target/debug/ensemble run my_world.smoke
+
+# Run a registered scenario from the repo root; writes per-run dirs to ./traces/.
 ./target/debug/ensemble run plank.refund_storm --world plank
+
+# See what backends and models are available, plus key status.
+./target/debug/ensemble models list
+
+# Inspect cross-run history.
+./target/debug/ensemble runs list
+./target/debug/ensemble runs compare <run_id_a> <run_id_b>
+
+# Open one trace in the browser, or compare two side by side.
+./target/debug/ensemble trace view traces/plank_refund_storm.jsonl
+./target/debug/ensemble trace compare traces/<run_a>/trace.jsonl traces/<run_b>/trace.jsonl
+
+# Run a matrix of configurations (see docs/reference/sweeps.md).
+./target/debug/ensemble sweep run sweep.toml
 
 # Re-bake the deterministic mock trace used on the site.
 uv run python examples/plank/bake_trace.py
-
-# Serve the site locally with the baked trace.
-./target/debug/ensemble trace view site/trace.jsonl --site site --port 8765
-
-# Scaffold a new world.
-./target/debug/ensemble init my_world
 
 # Kick off persona training (modal by default).
 ./target/debug/ensemble train examples/plank/personas/frustrated_power_user.toml \

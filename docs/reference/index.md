@@ -1,14 +1,20 @@
 # Reference
 
-This section is the reference complement to the tutorial pages on
-the site. It answers "what does this thing do, exactly" for every
-piece of the public surface. Tutorial pages explain when and why;
-these pages explain the contract.
+This section is the reference complement to the
+[quickstart](../quickstart.md) and the tutorial pages on the site.
+It answers "what does this thing do, exactly" for every piece of
+the public surface. Tutorial pages explain when and why; these
+pages explain the contract.
 
 Each page is a single scrollable document. There are no
 forward-references that ask you to continue on the next page; if
 two pages overlap, the relevant sections cross-link, so following
 the link reaches what you need without sequential reading.
+
+If you are new to ensemble, read the
+[quickstart](../quickstart.md) first. It walks from install to a
+running scenario to writing a tool and a scenario, and points back
+into these reference pages for the contracts behind each step.
 
 ## [World API](world-api.md)
 
@@ -83,3 +89,21 @@ set it, and how to read a trace from Python or Rust. The last
 section sketches the trace viewer's data model. Reach for this
 page when you are writing a predicate, a grader, or any
 downstream consumer of trace data.
+
+## [Sweeps](sweeps.md)
+
+The `sweep.toml` schema, the runner command, cell expansion, the
+on-disk layout (one directory per cell plus a flat
+`index.jsonl`), resume semantics, and concurrency. Reach for this
+page when you want to run the same scenario across a matrix of
+backends, models, seeds, or environment variables and aggregate
+the results.
+
+## [Cross-run observability](observability.md)
+
+The per-run trace-dir layout, the `runs.jsonl` index format, and
+the four `ensemble runs` subcommands (`list`, `show`, `compare`,
+`export`) plus `ensemble trace compare`. Reach for this page when
+you have run scenarios and want to find a specific run later,
+compare two runs side by side, or export the index for downstream
+analysis.
