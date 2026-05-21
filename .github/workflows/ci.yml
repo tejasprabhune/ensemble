@@ -30,7 +30,7 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           version: "0.5.x"
-      - name: uv sync (builds the ensemble + plank extensions)
+      - name: uv sync (builds the ensemble + agora extensions)
         run: uv sync
       - name: pytest (unit + mock integration)
         run: uv run pytest tests/ -v --tb=short

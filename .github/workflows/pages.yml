@@ -5,10 +5,10 @@ on:
     branches: [main]
     paths:
       - "site/**"
-      - "examples/plank/bake_trace.py"
+      - "examples/agora/bake_trace.py"
       - "python/ensemble/**"
       - "crates/**"
-      - "examples/plank/**"
+      - "examples/agora/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -40,11 +40,11 @@ jobs:
         with:
           version: "0.5.x"
 
-      - name: uv sync (builds the ensemble + plank extensions)
+      - name: uv sync (builds the ensemble + agora extensions)
         run: uv sync
 
       - name: bake the deterministic refund_storm trace
-        run: uv run python examples/plank/bake_trace.py
+        run: uv run python examples/agora/bake_trace.py
 
       - uses: actions/configure-pages@v5
 
