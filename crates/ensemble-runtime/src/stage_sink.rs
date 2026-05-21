@@ -301,67 +301,29 @@ mod inner {
         &CLIENT
     }
 
-    /// Synchronous HTTP POST using raw TCP. Called from spawn_blocking so
-    /// we avoid nesting a tokio runtime inside block_on.
+    /// Synchronous HTTP POST using reqwest blocking. Called from spawn_blocking
+    /// so it runs on a dedicated thread without nesting async runtimes.
     fn blocking_post_json(url: &str, api_key: &str, body: &serde_json::Value) -> Result<String> {
-        use std::io::{BufRead, BufReader};
-        use std::net::TcpStream;
+        static BLOCKING_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
+            reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .expect("stage blocking HTTP client")
+        });
 
-        let (host, port, path) = parse_http_url(url)?;
-        let body_str = body.to_string();
-        let request = format!(
-            "POST {path} HTTP/1.1\r\nHost: {host}:{port}\r\nAuthorization: Bearer {api_key}\r\nContent-Type: application/json\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n{body_str}",
-            len = body_str.len(),
-        );
+        let resp = BLOCKING_CLIENT
+            .post(url)
+            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Content-Type", "application/json")
+            .json(body)
+            .send()
+            .map_err(|e| anyhow!("HTTP POST {url}: {e}"))?;
 
-        let stream = TcpStream::connect(format!("{host}:{port}"))
-            .map_err(|e| anyhow!("TCP connect to {host}:{port}: {e}"))?;
-        stream.set_read_timeout(Some(Duration::from_secs(15))).ok();
-        {
-            use std::io::Write as W;
-            let mut w = &stream;
-            w.write_all(request.as_bytes())
-                .map_err(|e| anyhow!("TCP write: {e}"))?;
-        }
+        let status = resp.status();
+        let resp_body = resp.text().unwrap_or_default();
 
-        let mut reader = BufReader::new(&stream);
-
-        let mut status_line = String::new();
-        reader.read_line(&mut status_line)
-            .map_err(|e| anyhow!("reading status line: {e}"))?;
-        let status_code: u16 = status_line.split_whitespace().nth(1)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-
-        let mut content_length: Option<usize> = None;
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line)
-                .map_err(|e| anyhow!("reading header: {e}"))?;
-            if line == "\r\n" || line.is_empty() {
-                break;
-            }
-            let lower = line.to_ascii_lowercase();
-            if lower.starts_with("content-length:") {
-                content_length = lower["content-length:".len()..].trim().parse().ok();
-            }
-        }
-
-        let resp_body = if let Some(len) = content_length {
-            let mut buf = vec![0u8; len];
-            use std::io::Read;
-            reader.read_exact(&mut buf)
-                .map_err(|e| anyhow!("reading body: {e}"))?;
-            String::from_utf8_lossy(&buf).into_owned()
-        } else {
-            let mut buf = String::new();
-            use std::io::Read;
-            reader.read_to_string(&mut buf).ok();
-            buf
-        };
-
-        if status_code < 200 || status_code >= 300 {
-            return Err(anyhow!("HTTP {status_code}: {resp_body}"));
+        if !status.is_success() {
+            return Err(anyhow!("HTTP {}: {resp_body}", status.as_u16()));
         }
 
         let parsed: serde_json::Value = serde_json::from_str(&resp_body)
@@ -372,18 +334,6 @@ mod inner {
             .unwrap_or("")
             .to_string();
         Ok(run_url)
-    }
-
-    fn parse_http_url(url: &str) -> Result<(String, u16, String)> {
-        let without_scheme = url.strip_prefix("http://")
-            .ok_or_else(|| anyhow!("only http:// URLs supported for Stage (got {url:?})"))?;
-        let (authority, path) = without_scheme.split_once('/').map(|(a, p)| (a, format!("/{p}"))).unwrap_or((without_scheme, "/".to_string()));
-        let (host, port) = if let Some((h, p)) = authority.split_once(':') {
-            (h.to_string(), p.parse::<u16>().unwrap_or(80))
-        } else {
-            (authority.to_string(), 80u16)
-        };
-        Ok((host, port, path))
     }
 
     fn wall_time_ms() -> u64 {
