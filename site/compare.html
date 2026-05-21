@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble trace compare</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body style="display: block; max-width: none;">
+  <main class="wide" style="margin: 0 auto; padding: 32px 36px 64px; max-width: min(2000px, 98vw);">
+    <header style="margin-bottom: 20px;">
+      <a class="wordmark" href="index.html">ensemble</a>
+      <p class="tagline">Trace compare</p>
+    </header>
+
+    <div style="margin-bottom: 12px;">
+      <label style="font-size: 13px;">
+        <input type="checkbox" id="syncScroll" checked>
+        sync scroll by tick
+      </label>
+      <span id="aLabel" style="margin-left: 24px; font-size: 13px; color: #444;"></span>
+      <span id="bLabel" style="margin-left: 24px; font-size: 13px; color: #444;"></span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; height: calc(100vh - 160px);">
+      <div class="compare-col" id="colA" style="overflow-y: auto; border: 1px solid #ddd; padding: 12px; background: #fff;">
+        <h4 style="margin-top: 0;">A</h4>
+        <div id="feedA"></div>
+      </div>
+      <div class="compare-col" id="colB" style="overflow-y: auto; border: 1px solid #ddd; padding: 12px; background: #fff;">
+        <h4 style="margin-top: 0;">B</h4>
+        <div id="feedB"></div>
+      </div>
+    </div>
+  </main>
+  <script src="compare.js"></script>
+</body>
+</html>

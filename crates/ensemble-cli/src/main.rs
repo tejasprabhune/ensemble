@@ -208,6 +208,21 @@ enum TraceCmd {
         #[arg(long)]
         site: Option<PathBuf>,
     },
+    /// Serve a side-by-side comparison of two traces, scroll-synced
+    /// by tick. Use with `ensemble runs compare` to pick which two
+    /// runs to inspect.
+    Compare {
+        /// Path to the first JSONL trace.
+        a: PathBuf,
+        /// Path to the second JSONL trace.
+        b: PathBuf,
+        /// Port to bind the local viewer on.
+        #[arg(long, default_value_t = 8765)]
+        port: u16,
+        /// Directory holding the static site to serve (overlay).
+        #[arg(long)]
+        site: Option<PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -237,6 +252,9 @@ fn main() -> Result<()> {
         Cmd::Trace { sub } => match sub {
             TraceCmd::View { trace, port, site } => {
                 trace_serve::serve(&trace, port, site.as_deref())
+            }
+            TraceCmd::Compare { a, b, port, site } => {
+                trace_serve::serve_compare(&a, &b, port, site.as_deref())
             }
         },
         Cmd::Models { sub } => models_subcommand(sub),

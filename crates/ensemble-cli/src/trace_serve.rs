@@ -13,33 +13,72 @@ const EMBEDDED_VIEWER_HTML: &str =
     include_str!("../../../site/viewer.html");
 const EMBEDDED_VIEWER_JS: &str = include_str!("../../../site/viewer.js");
 const EMBEDDED_VIEWER_CSS: &str = include_str!("../../../site/style.css");
+// Compare-mode viewer: two traces side by side, scroll-synced by
+// tick. Same embedded-or-overlay story as the single-trace view.
+const EMBEDDED_COMPARE_HTML: &str =
+    include_str!("../../../site/compare.html");
+const EMBEDDED_COMPARE_JS: &str =
+    include_str!("../../../site/compare.js");
+
+/// Bundle of trace bytes the server holds in memory. Single-trace
+/// mode populates `primary` only; compare mode populates `primary`
+/// (mirrored at /trace.jsonl and /trace_a.jsonl) plus `secondary`
+/// at /trace_b.jsonl. Keeping both in one struct lets serve_one
+/// switch on what the user asked for without a separate code path.
+struct TraceBytes {
+    primary: Vec<u8>,
+    secondary: Option<Vec<u8>>,
+}
 
 pub fn serve(trace: &Path, port: u16, site: Option<&Path>) -> Result<()> {
     let trace_bytes = fs::read(trace)
         .with_context(|| format!("read trace from {}", trace.display()))?;
+    let traces = TraceBytes { primary: trace_bytes, secondary: None };
+    let site_dir = prepare_site_dir(site, &traces)?;
+    serve_loop(port, site_dir, traces, /* compare = */ false)
+}
 
-    // If --site was passed, mirror the old behaviour: write the trace
-    // into <site>/trace.jsonl and serve files off disk so devs can
-    // edit the html and reload. Otherwise serve everything from the
-    // embedded copy and keep the trace in memory.
-    let site_dir: Option<PathBuf> = match site {
-        Some(s) => {
-            if !s.exists() {
-                anyhow::bail!("site directory not found: {}", s.display());
-            }
-            let baked = s.join("trace.jsonl");
-            fs::write(&baked, &trace_bytes)
-                .with_context(|| format!("bake trace into {}", baked.display()))?;
-            Some(s.to_path_buf())
-        }
-        None => None,
-    };
+pub fn serve_compare(a: &Path, b: &Path, port: u16, site: Option<&Path>) -> Result<()> {
+    let a_bytes = fs::read(a)
+        .with_context(|| format!("read trace from {}", a.display()))?;
+    let b_bytes = fs::read(b)
+        .with_context(|| format!("read trace from {}", b.display()))?;
+    let traces = TraceBytes { primary: a_bytes, secondary: Some(b_bytes) };
+    let site_dir = prepare_site_dir(site, &traces)?;
+    serve_loop(port, site_dir, traces, /* compare = */ true)
+}
 
+fn prepare_site_dir(site: Option<&Path>, traces: &TraceBytes) -> Result<Option<PathBuf>> {
+    let Some(s) = site else { return Ok(None); };
+    if !s.exists() {
+        anyhow::bail!("site directory not found: {}", s.display());
+    }
+    let primary = s.join("trace.jsonl");
+    fs::write(&primary, &traces.primary)
+        .with_context(|| format!("bake trace into {}", primary.display()))?;
+    if let Some(b) = &traces.secondary {
+        let a_path = s.join("trace_a.jsonl");
+        let b_path = s.join("trace_b.jsonl");
+        fs::write(&a_path, &traces.primary)
+            .with_context(|| format!("bake trace into {}", a_path.display()))?;
+        fs::write(&b_path, b)
+            .with_context(|| format!("bake trace into {}", b_path.display()))?;
+    }
+    Ok(Some(s.to_path_buf()))
+}
+
+fn serve_loop(
+    port: u16,
+    site_dir: Option<PathBuf>,
+    traces: TraceBytes,
+    compare: bool,
+) -> Result<()> {
     let addr = format!("127.0.0.1:{port}");
     let listener =
         TcpListener::bind(&addr).with_context(|| format!("bind {addr}; is port in use?"))?;
     match &site_dir {
         Some(dir) => println!("serving {} on http://{addr}", dir.display()),
+        None if compare => println!("serving embedded compare viewer on http://{addr}"),
         None => println!("serving embedded viewer on http://{addr}"),
     }
     println!("press ctrl-c to stop");
@@ -51,7 +90,7 @@ pub fn serve(trace: &Path, port: u16, site: Option<&Path>) -> Result<()> {
         let req = String::from_utf8_lossy(&buf[..n]);
         let path = parse_request_path(&req).unwrap_or_else(|| "/".into());
 
-        let (status, body, content_type) = match serve_one(&path, &site_dir, &trace_bytes) {
+        let (status, body, content_type) = match serve_one(&path, &site_dir, &traces, compare) {
             Some((body, ct)) => ("200 OK", body, ct),
             None => ("404 Not Found", b"not found".to_vec(), "text/plain"),
         };
@@ -71,21 +110,28 @@ pub fn serve(trace: &Path, port: u16, site: Option<&Path>) -> Result<()> {
 fn serve_one(
     req_path: &str,
     site_dir: &Option<PathBuf>,
-    trace_bytes: &[u8],
+    traces: &TraceBytes,
+    compare: bool,
 ) -> Option<(Vec<u8>, &'static str)> {
     let mut p = req_path.trim_start_matches('/').to_string();
     if let Some(idx) = p.find('?') {
         p.truncate(idx);
     }
     if p.is_empty() {
-        p = "viewer.html".into();
+        p = if compare { "compare.html".into() } else { "viewer.html".into() };
     }
     if p == "index.html" {
-        p = "viewer.html".into();
+        p = if compare { "compare.html".into() } else { "viewer.html".into() };
     }
 
-    if p == "trace.jsonl" {
-        return Some((trace_bytes.to_vec(), "application/jsonl; charset=utf-8"));
+    if p == "trace.jsonl" || p == "trace_a.jsonl" {
+        return Some((traces.primary.clone(), "application/jsonl; charset=utf-8"));
+    }
+    if p == "trace_b.jsonl" {
+        if let Some(b) = &traces.secondary {
+            return Some((b.clone(), "application/jsonl; charset=utf-8"));
+        }
+        return None;
     }
 
     if let Some(dir) = site_dir {
@@ -109,6 +155,14 @@ fn serve_one(
         "style.css" => Some((
             EMBEDDED_VIEWER_CSS.as_bytes().to_vec(),
             "text/css; charset=utf-8",
+        )),
+        "compare.html" => Some((
+            EMBEDDED_COMPARE_HTML.as_bytes().to_vec(),
+            "text/html; charset=utf-8",
+        )),
+        "compare.js" => Some((
+            EMBEDDED_COMPARE_JS.as_bytes().to_vec(),
+            "application/javascript; charset=utf-8",
         )),
         _ => None,
     }
