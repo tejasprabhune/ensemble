@@ -15,7 +15,7 @@ jobs:
       - name: install rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.80"
+          toolchain: "1.85"
       - name: cache cargo
         uses: Swatinem/rust-cache@v2
       - name: install uv
