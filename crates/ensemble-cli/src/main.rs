@@ -246,6 +246,11 @@ enum StageCmd {
         #[command(subcommand)]
         sub: StageProjectsCmd,
     },
+    /// Push local traces to Stage. Skips runs already present.
+    Push {
+        /// Path to a trace directory, trace.jsonl file, or glob.
+        path: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -532,6 +537,9 @@ fn stage_subcommand(sub: StageCmd) -> Result<()> {
                     cmd.arg("create").arg(&project);
                 }
             }
+        }
+        StageCmd::Push { path } => {
+            cmd.arg("push").arg(&path);
         }
     }
     let status = cmd

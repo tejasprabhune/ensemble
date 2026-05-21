@@ -182,6 +182,152 @@ def cmd_projects_create(args) -> int:
     return 0
 
 
+def cmd_push(args: argparse.Namespace) -> int:
+    """Push local traces to Stage. Skips runs that already exist there."""
+    import glob as _glob
+    import uuid as _uuid
+    from .stage import Stage, stage_api_call  # noqa: WPS433
+
+    cfg = Stage.resolve()
+    if cfg is None:
+        print("stage: not configured (set ENSEMBLE_STAGE_API_KEY and ENSEMBLE_STAGE_PROJECT)", file=sys.stderr)
+        return 1
+
+    # Collect candidate trace directories from the glob/path argument.
+    pattern = args.path
+    candidates: List[Path] = []
+    p = Path(pattern)
+    if p.is_dir():
+        # Recursively find all trace.jsonl files under the directory.
+        for t in p.rglob("trace.jsonl"):
+            candidates.append(t.parent)
+    else:
+        for match in _glob.glob(pattern, recursive=True):
+            mp = Path(match)
+            if mp.is_file() and mp.name == "trace.jsonl":
+                candidates.append(mp.parent)
+            elif mp.is_dir() and (mp / "trace.jsonl").exists():
+                candidates.append(mp)
+
+    if not candidates:
+        print(f"no trace directories matched {pattern!r}", file=sys.stderr)
+        return 1
+
+    pushed = skipped = failed = 0
+    for run_dir in sorted(candidates):
+        meta_path = run_dir / "meta.json"
+        trace_path = run_dir / "trace.jsonl"
+        if not trace_path.exists():
+            continue
+        meta: dict = {}
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        run_id = meta.get("run_id") or run_dir.name
+        print(f"  checking {run_id} ...", end=" ", flush=True)
+
+        # Skip if already on Stage.
+        try:
+            stage_api_call(cfg, "GET", f"/v1/runs/{run_id}")
+            print("skipped (already on Stage)")
+            skipped += 1
+            continue
+        except RuntimeError as e:
+            if "404" not in str(e):
+                print(f"error checking Stage: {e}")
+                failed += 1
+                continue
+
+        # Create the run on Stage.
+        try:
+            stage_api_call(
+                cfg, "POST",
+                f"/v1/projects/{cfg.org_slug}/{cfg.project_slug}/runs",
+                {
+                    "id": run_id,
+                    "scenario": meta.get("scenario", ""),
+                    "world": meta.get("world", ""),
+                    "backend": meta.get("backend", ""),
+                    "metadata": {
+                        k: meta[k]
+                        for k in ("started_at", "finished_at", "duration_s")
+                        if k in meta
+                    },
+                },
+            )
+        except RuntimeError as e:
+            print(f"create-run failed: {e}")
+            failed += 1
+            continue
+
+        # Stream events in batches of 100.
+        events_text = trace_path.read_text(errors="replace")
+        raw_events = [
+            json.loads(line)
+            for line in events_text.splitlines()
+            if line.strip()
+            for _ in [None]  # single-pass try/except workaround
+        ]
+        # Re-parse with proper error handling.
+        raw_events = []
+        for line in events_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                raw_events.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+
+        first_ms = raw_events[0].get("ts_ms", 0) if raw_events else 0
+        stage_events = []
+        for i, ev in enumerate(raw_events):
+            p_payload = ev.get("payload") or {}
+            kind = p_payload.get("kind", "system")
+            wall_ms = max(0, int((ev.get("ts_ms", first_ms) - first_ms)))
+            stage_events.append({
+                "sequence_number": i + 1,
+                "kind": kind,
+                "payload": p_payload,
+                "event_id": str(_uuid.uuid4()),
+                "wall_time_ms": wall_ms,
+            })
+
+        total_ev = len(stage_events)
+        ev_errors = 0
+        for batch_start in range(0, max(1, total_ev), 100):
+            batch = stage_events[batch_start: batch_start + 100]
+            if not batch:
+                break
+            try:
+                stage_api_call(cfg, "POST", f"/v1/runs/{run_id}/events", {"events": batch})
+            except RuntimeError:
+                ev_errors += 1
+
+        # Mark completed.
+        scores = meta.get("scores") or {}
+        outcome = {"scores": scores} if scores else None
+        status_body: dict = {"status": "completed"}
+        if outcome:
+            status_body["outcome"] = outcome
+        try:
+            stage_api_call(cfg, "POST", f"/v1/runs/{run_id}/status", status_body)
+        except RuntimeError:
+            pass
+
+        if ev_errors:
+            print(f"pushed ({total_ev - ev_errors * 100}/{total_ev} events)")
+        else:
+            print(f"pushed ({total_ev} events)")
+        pushed += 1
+
+    print(f"\n{pushed} pushed, {skipped} skipped, {failed} failed")
+    return 0 if failed == 0 else 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="ensemble.cli_stage")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -198,6 +344,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     create_p = projects_sub.add_parser("create", help="Create a project.")
     create_p.add_argument("project", help="org_slug/project_slug")
 
+    push_p = sub.add_parser("push", help="Bulk-push local traces to Stage.")
+    push_p.add_argument(
+        "path",
+        help="Path to a trace directory, trace.jsonl file, or glob pattern.",
+    )
+
     args = parser.parse_args(argv)
 
     if args.cmd == "login":
@@ -211,6 +363,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return cmd_projects_list(args)
         if args.projects_cmd == "create":
             return cmd_projects_create(args)
+    if args.cmd == "push":
+        return cmd_push(args)
     return 1
 
 
