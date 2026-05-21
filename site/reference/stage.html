@@ -357,6 +357,22 @@ world = World("agora", stage=stage)</code></pre>
     </section>
 
     <section>
+      <h2>Deleting runs</h2>
+      <p>
+        To delete runs from the list page, check one or more rows and
+        press <kbd>d</kbd> (or click the delete button that appears in
+        the filter bar). Stage asks for confirmation before sending the
+        delete requests, then removes the rows from the table. Deletions
+        are permanent.
+      </p>
+      <p>
+        To delete a single run from its detail page, click the "delete"
+        button in the run header. After confirmation Stage navigates back
+        to the project runs list.
+      </p>
+    </section>
+
+    <section>
       <h2>Sharing</h2>
       <p>
         Any run, sweep, or training run detail page has a "Share"
@@ -403,35 +419,218 @@ ensemble stage push "traces/*/trace.jsonl"</code></pre>
     <section>
       <h2>Stage API</h2>
       <p>
-        Stage exposes a REST API at <code>/v1</code> for querying run
-        results, sweep summaries, and training metrics programmatically.
-        The same push-scoped API key you use for <code>ensemble run</code>
-        authenticates API requests.
+        Stage exposes a REST API at <code>/v1</code>. All endpoints
+        return JSON. Pass a push-scoped API key as a Bearer token:
       </p>
-<pre><code class="language-bash"># List runs for a project:
-curl -s -H "Authorization: Bearer $ENSEMBLE_STAGE_API_KEY" \
-  "https://ensemble-stage.fly.dev/v1/projects/myorg/myproject/runs?limit=20"
+<pre><code class="language-bash">curl -s -H "Authorization: Bearer $ENSEMBLE_STAGE_API_KEY" \
+  "https://ensemble-stage.fly.dev/v1/projects/myorg/myproject/runs?limit=20"</code></pre>
 
-# Fetch one run's metadata and scores:
-curl -s -H "Authorization: Bearer $ENSEMBLE_STAGE_API_KEY" \
-  "https://ensemble-stage.fly.dev/v1/projects/myorg/myproject/runs/019e4ac0-..."
+      <h3>Orgs and projects</h3>
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/orgs/{org_slug}</code></td>
+            <td>Org metadata and project list. Requires <code>admin</code> scope.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/projects/{org_slug}</code></td>
+            <td>Create a project. Body: <code>slug</code>, <code>name</code>, <code>public</code>, <code>description?</code>. Requires <code>admin</code> scope.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/projects/{org}/{proj}</code></td>
+            <td>Project metadata.</td>
+          </tr>
+        </tbody>
+      </table>
 
-# Fetch the run's full event stream as JSONL:
-curl -s -H "Authorization: Bearer $ENSEMBLE_STAGE_API_KEY" \
-  "https://ensemble-stage.fly.dev/v1/projects/myorg/myproject/runs/019e4ac0-.../events"</code></pre>
-      <p>
-        The runs list endpoint returns a paginated response with each
-        run's id, scenario, scores, backend, and timestamps. The
-        single-run endpoint returns the same fields plus the full scores
-        table. The events endpoint streams the trace as
-        newline-delimited JSON, matching the local
-        <code>trace.jsonl</code> format exactly.
-      </p>
-      <p>
-        The API is rate-limited per key. For bulk access to many runs,
-        prefer the events endpoint over the UI and cache responses
-        locally rather than re-fetching on each script run.
-      </p>
+      <h3>Runs</h3>
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/projects/{org}/{proj}/runs</code></td>
+            <td>List runs newest-first. Query params: <code>filter</code>, <code>sort</code>, <code>limit</code>, <code>cursor</code>.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/projects/{org}/{proj}/runs</code></td>
+            <td>Create run. Body: <code>scenario</code>, <code>world</code>, <code>backend</code>, <code>sweep_id?</code>, <code>metadata?</code>.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/runs/{run_id}</code></td>
+            <td>Full run metadata including outcome, cost, and sweep membership.</td>
+          </tr>
+          <tr>
+            <td><code>DELETE</code></td>
+            <td><code>/v1/runs/{run_id}</code></td>
+            <td>Delete a run and its events.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/runs/{run_id}/events</code></td>
+            <td>Append events. Body: <code>events</code> array. Idempotent on <code>event_id</code>. Up to 500 per request.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/runs/{run_id}/events</code></td>
+            <td>List events. Query param: <code>since</code> (sequence number, default -1 for all).</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/runs/{run_id}/status</code></td>
+            <td>Update run status. Body: <code>status</code>, <code>outcome?</code>, <code>total_cost?</code>, <code>wall_time_ms?</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Sweeps</h3>
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/projects/{org}/{proj}/sweeps</code></td>
+            <td>List sweeps newest-first.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/projects/{org}/{proj}/sweeps</code></td>
+            <td>Create sweep. Body: <code>config</code> (arbitrary JSON recording axes and parameters).</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/sweeps/{id}</code></td>
+            <td>Sweep metadata: status, config, timestamps.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/sweeps/{id}/runs</code></td>
+            <td>All child runs with outcomes and costs.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/sweeps/{id}/runs</code></td>
+            <td>Register an existing run as a child. Body: <code>run_id</code>.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/sweeps/{id}/status</code></td>
+            <td>Update sweep status. Body: <code>status</code> (running, completed, failed, cancelled).</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/sweeps/{id}/cancel</code></td>
+            <td>Cancel a running sweep. No request body required. Accepts session cookie or API key. Returns 404 if already in a terminal state.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Training runs</h3>
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/projects/{org}/{proj}/training_runs</code></td>
+            <td>List training runs newest-first.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/projects/{org}/{proj}/training_runs</code></td>
+            <td>Create training run. Body: <code>persona_name</code>, <code>base_model</code>, <code>hyperparameters?</code>.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/training_runs/{id}</code></td>
+            <td>Training run metadata: status, hyperparameters, final_metrics, artifact_uri.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/training_runs/{id}/metrics</code></td>
+            <td>Append step metrics. Body: <code>metrics</code> array of <code>{step, metric_name, value}</code>. Up to 1000 per request. Duplicate (step, metric_name) pairs are ignored.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/training_runs/{id}/metrics</code></td>
+            <td>All metrics in ascending step order. Poll this while status is running.</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/training_runs/{id}/status</code></td>
+            <td>Update status. Body: <code>status</code>, optional <code>final_metrics</code> and <code>artifact_uri</code> (only applied on terminal transitions).</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/training_runs/{id}/past_runs</code></td>
+            <td>The 5 most recent completed training runs for the same persona in the same project, with their metrics included. Used by the comparison overlay chart.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/training_runs/{id}/baseline_comparison</code></td>
+            <td>Trained-vs-prompted comparison. Finds eval runs whose <code>metadata.adapter_uri</code> matches this run's <code>artifact_uri</code>, groups by (scenario, backend), finds matching baseline runs, returns per-group means and delta. Response: <code>{linked: bool, reason?, entries: [{scenario, model, trained_mean, baseline_mean, delta, no_baseline}]}</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Account and API keys</h3>
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/me</code></td>
+            <td>Authenticated user profile. Requires session cookie or admin-scope key.</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/v1/me/api_keys</code></td>
+            <td>List API keys (metadata only; values not returned).</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/v1/me/api_keys</code></td>
+            <td>Create API key. Body: <code>name</code>, <code>scope</code> (push or admin), <code>expires_at?</code>. Returns raw key value once.</td>
+          </tr>
+          <tr>
+            <td><code>DELETE</code></td>
+            <td><code>/v1/me/api_keys/{id}</code></td>
+            <td>Revoke API key. Idempotent.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Error shape</h3>
+      <p>All errors return JSON:</p>
+<pre><code class="language-json">{ "error": { "code": "not_found", "message": "not found" } }</code></pre>
+      <table>
+        <thead>
+          <tr><th>Code</th><th>HTTP status</th><th>Meaning</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>unauthorized</code></td><td>401</td><td>Missing or invalid credentials.</td></tr>
+          <tr><td><code>forbidden</code></td><td>403</td><td>Credentials are valid but insufficient.</td></tr>
+          <tr><td><code>not_found</code></td><td>404</td><td>Resource does not exist or is not visible to the caller.</td></tr>
+          <tr><td><code>bad_request</code></td><td>400</td><td>Malformed body or invalid field value.</td></tr>
+          <tr><td><code>conflict</code></td><td>409</td><td>Duplicate resource (e.g. duplicate event_id).</td></tr>
+          <tr><td><code>internal_error</code></td><td>500</td><td>Server-side failure.</td></tr>
+        </tbody>
+      </table>
     </section>
 
     <section>
