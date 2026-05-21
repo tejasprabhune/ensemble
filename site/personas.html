@@ -13,13 +13,20 @@
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
     <nav>
       <div class="nav-group">
-        <div class="nav-group-title">Site</div>
+        <div class="nav-group-title">Get started</div>
         <a href="index.html">Overview</a>
-        <a href="docs.html">Docs</a>
-        <a href="scenarios.html">Scenarios</a>
-        <a href="plank.html">Plank</a>
+        <a href="quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="worlds.html">Writing a world</a>
+        <a href="scenarios.html">Writing a scenario</a>
+        <a href="tools.html">Tools</a>
         <a href="personas.html" class="active">Personas</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
         <a href="mcp.html">MCP</a>
+        <a href="plank.html">Plank example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -27,29 +34,13 @@
         <a href="reference/world-api.html">World API</a>
         <a href="reference/scenarios.html">Scenarios</a>
         <a href="reference/tools.html">Tools</a>
+        <a href="reference/predicates.html">Predicates</a>
         <a href="reference/personas.html">Personas</a>
         <a href="reference/cli.html">CLI</a>
         <a href="reference/runtime.html">Runtime</a>
         <a href="reference/traces.html">Traces</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-title">Docs sections</div>
-        <a href="docs.html#what-it-is">What Ensemble is</a>
-        <a href="docs.html#mental-model">Mental model</a>
-        <a href="docs.html#install">Install</a>
-        <a href="docs.html#first-scenario">Your first scenario</a>
-        <a href="docs.html#first-world">Your first world</a>
-        <a href="docs.html#tools">Tools</a>
-        <a href="docs.html#users-personas">Users and personas</a>
-        <a href="docs.html#verification">Verification and reward</a>
-        <a href="docs.html#rl">As an RL environment</a>
-        <a href="docs.html#power-user">Mid-run intervention</a>
-        <a href="docs.html#toml">TOML scenarios</a>
-        <a href="docs.html#cli">CLI</a>
-        <a href="docs.html#training">Training personas</a>
-        <a href="docs.html#architecture">Architecture</a>
-        <a href="docs.html#trace-format">Trace format</a>
-        <a href="docs.html#contributing">Contributing</a>
+        <a href="reference/sweeps.html">Sweeps</a>
+        <a href="reference/observability.html">Observability</a>
       </div>
     </nav>
   </aside>
@@ -57,22 +48,24 @@
   <main>
     <h1>Personas</h1>
     <p class="lead">
-      A persona is the spec for how a user actor should behave. Ensemble
-      supports two modes. A prompted persona lives entirely in its
-      system prompt, paired with a frontier model. A trained persona
-      swaps the frontier model for a smaller fine-tuned one, served
-      through a vLLM endpoint and pulled in through the same
-      <code>LLMBackend</code> trait. Scenarios cannot tell the
-      difference, which is the point.
+      A persona is the spec for how a user actor should behave during a
+      scenario. You write it once as a TOML file and reuse it across
+      runs. Ensemble supports two modes behind the same interface: a
+      prompted persona that lives entirely in its system prompt paired
+      with a frontier model, and a trained persona that swaps the
+      frontier model for a smaller fine-tuned one served through a vLLM
+      endpoint. Scenarios call <code>spawn_user(persona="...")</code>
+      either way; the runtime resolves the right backend.
     </p>
 
     <section>
       <h2>Spec format</h2>
       <p>
-        A persona is a TOML file. The schema is small and the fields are
-        optional in the obvious way. Trained personas add a
-        <code>[persona.training]</code> table that describes the base
-        model, the backend, and the hyperparameters.
+        A persona lives under the world's <code>personas_dir</code> and
+        is loaded by name. The schema is small and most fields are
+        optional. Trained personas add a
+        <code>[persona.training]</code> table that names the base model,
+        the backend, and the hyperparameters.
       </p>
 <pre><code class="language-toml">[persona]
 name = "frustrated_power_user"
@@ -114,65 +107,139 @@ learning_rate = 5e-6</code></pre>
     </section>
 
     <section>
+      <h2>Hidden state</h2>
+      <p>
+        Every user actor carries a hidden state: a JSON object that
+        travels with the actor across the run and stays private to the
+        persona. The runtime renders it into the system prompt inside a
+        <code>&lt;hidden_state&gt;...&lt;/hidden_state&gt;</code> block
+        on every turn, with a trailing instruction not to reveal it.
+        The defaults declared in
+        <code>persona.hidden_state.schema</code> seed the state at spawn
+        time, and a scenario can override individual keys by passing
+        <code>hidden_state={...}</code> or <code>hidden_goal="..."</code>
+        to <code>spawn_user</code>.
+      </p>
+      <p>
+        Predicates inside the world have access to the same state, so a
+        grader that wants ground truth on what the persona was actually
+        trying to do can ask the world directly instead of inferring it
+        from the transcript.
+      </p>
+    </section>
+
+    <section>
+      <h2>Prompted mode</h2>
+      <p>
+        The default. The runtime wraps the world's shared backend in a
+        <code>PromptedPersona</code>, which composes the persona's
+        system prompt template with the hidden-state block on every
+        completion. A prompted persona is one TOML file plus whatever
+        frontier model the scenario configured, with no extra
+        infrastructure.
+      </p>
+      <p>
+        When the scenario passes its own <code>system_prompt=</code> to
+        <code>spawn_user</code>, the wrapper prepends the scenario's
+        prompt before the persona block, and the hidden-state
+        instruction is always appended last.
+      </p>
+    </section>
+
+    <section>
+      <h2>Trained mode and vLLM wiring</h2>
+      <p>
+        Set <code>mode = "trained"</code> together with an
+        <code>adapter_name</code> under <code>[persona.training]</code>
+        and the spawned user routes through a per-user
+        <code>LocalAdapterBackend</code> instead of the world's shared
+        backend. The backend hits a vLLM-compatible OpenAI-shaped
+        endpoint; the base URL resolves from
+        <code>persona.training.serve_url</code> first, then from
+        <code>ENSEMBLE_VLLM_BASE_URL</code> in the environment, and
+        falls back to the world's default backend with a logged note if
+        neither is set.
+      </p>
+      <p>
+        The persona keeps its system prompt and hidden state regardless
+        of which backend serves the turn, so a scenario that runs
+        against the mock backend during development still produces
+        persona-shaped behaviour. Bringing a trained adapter back
+        online takes three pieces: a vLLM server hosting the base model
+        with the adapter mounted, the TOML's <code>adapter_name</code>
+        matching the id the server expects, and a reachable
+        <code>serve_url</code>.
+      </p>
+<pre><code class="language-bash">vllm serve Qwen/Qwen2.5-7B-Instruct \
+  --enable-lora \
+  --lora-modules trained-adapter=hf-username/ensemble-plank-frustrated-power-user</code></pre>
+      <p>
+        Scenarios construct the world normally and call
+        <code>spawn_user</code> with the persona name. The per-user
+        backend coexists with the world's shared backend in one run.
+      </p>
+<pre><code class="language-python">from ensemble import World
+
+world = World("plank", backend="auto")
+alice = world.spawn_user(id="alice", persona="frustrated_power_user")
+alice.backend_info
+# {"kind": "vllm", "base_url": "http://...", "adapter": "..."}</code></pre>
+    </section>
+
+    <section>
       <h2>Training a persona</h2>
       <p>
-        The training pipeline lives in <code>ensemble-train</code>. It
-        is a separate uv workspace member because its dependencies
-        (Torch, Transformers, TRL, PEFT) are heavy enough that you would
-        not want them on by default in a Python environment that just
-        authors scenarios. Install the extras when you actually want to
-        train:
+        The training pipeline lives in <code>ensemble-train</code>, a
+        separate uv workspace member. Its dependencies (Torch,
+        Transformers, TRL, PEFT) are heavy enough that you would not
+        want them on by default in an environment that just authors
+        scenarios. Install the extras when you actually want to train:
       </p>
 <pre><code class="language-bash">uv pip install 'ensemble-train[torch]'
-./target/debug/ensemble train \
-  examples/plank/personas/frustrated_power_user.toml --backend modal</code></pre>
+ensemble train examples/plank/personas/frustrated_power_user.toml --backend modal</code></pre>
       <p>
-        When the spec sets <code>dataset = "spec_only"</code> the
-        pipeline runs a self-play loop to build a preference dataset
-        before training starts. A frontier breaker model tries to push
-        the persona out of character; in-character continuations become
-        the chosen examples, breaks become the rejected ones. The result
-        is fed to TRL's <code>DPOTrainer</code> over a LoRA adapter on
-        the configured base model.
+        With <code>dataset = "spec_only"</code> the pipeline runs a
+        self-play loop to build a preference dataset before training
+        starts. A frontier breaker model tries to push the persona out
+        of character; in-character continuations become the chosen
+        examples, breaks become the rejected ones. The result feeds
+        TRL's <code>DPOTrainer</code> over a LoRA adapter on the
+        configured base model.
       </p>
       <p>
         Training writes to <code>checkpoints/&lt;persona&gt;/</code> and
-        emits a <code>persona-card.md</code> with a short summary of the
-        run. If <code>HF_USERNAME</code> is set in the environment, the
-        adapter is also pushed to the Hugging Face hub.
+        emits a <code>persona-card.md</code> with a short summary of
+        the run. If <code>HF_USERNAME</code> is set in the environment,
+        the adapter is also pushed to the Hugging Face hub.
       </p>
     </section>
 
     <section>
-      <h2>Consistency benchmark</h2>
-      <p>
-        [copy: motivation for tracking persona consistency as its own
-        metric. Suggested points: prompted personas drift under
-        adversarial pressure; trained personas hold up across more
-        turns; the framework gives both a comparable axis. Keep it
-        short.]
-      </p>
-      <div class="chart-placeholder">[copy: chart of consistency vs. adversarial turns, by persona, once the eval harness lands]</div>
-    </section>
-
-    <section>
-      <h2>Shipped personas (Plank)</h2>
+      <h2>Where to go next</h2>
       <ul>
-        <li><code>frustrated_power_user</code> is trained on Qwen2.5-7B with DPO+LoRA.</li>
-        <li><code>confused_new_user</code> is prompted.</li>
-        <li><code>enterprise_admin</code> is prompted.</li>
-        <li><code>patient_retail</code> is prompted.</li>
-        <li><code>chatty_neutral</code> is prompted.</li>
+        <li><a href="reference/personas.html">Personas reference</a>
+          for the full contract: every field in the TOML schema, the
+          <code>PromptedPersona</code> and
+          <code>LocalAdapterBackend</code> rust types, the hidden-state
+          resolution order, and the trained-persona auto-wiring
+          rules.</li>
+        <li><a href="scenarios.html">Writing a scenario</a> for how
+          <code>spawn_user</code> fits into the run.</li>
+        <li><a href="plank.html">Plank example</a> for the five
+          personas (one trained, four prompted) that ship with the
+          worked example.</li>
       </ul>
     </section>
 
     <footer class="site">
-      Source on <a href="https://github.com/tejasprabhune">tejasprabhune</a>. Built in Rust and Python.
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
     </footer>
   </main>
 
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
   <script>hljs.highlightAll();</script>
 </body>

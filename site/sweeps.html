@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble, sweeps</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Get started</div>
+        <a href="index.html">Overview</a>
+        <a href="quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="worlds.html">Writing a world</a>
+        <a href="scenarios.html">Writing a scenario</a>
+        <a href="tools.html">Tools</a>
+        <a href="personas.html">Personas</a>
+        <a href="sweeps.html" class="active">Sweeps</a>
+        <a href="observability.html">Observability</a>
+        <a href="mcp.html">MCP</a>
+        <a href="plank.html">Plank example</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="reference/index.html">Reference home</a>
+        <a href="reference/world-api.html">World API</a>
+        <a href="reference/scenarios.html">Scenarios</a>
+        <a href="reference/tools.html">Tools</a>
+        <a href="reference/predicates.html">Predicates</a>
+        <a href="reference/personas.html">Personas</a>
+        <a href="reference/cli.html">CLI</a>
+        <a href="reference/runtime.html">Runtime</a>
+        <a href="reference/traces.html">Traces</a>
+        <a href="reference/sweeps.html">Sweeps</a>
+        <a href="reference/observability.html">Observability</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+    <h1>Sweeps</h1>
+    <p class="lead">
+      A sweep is the same scenario run across many configurations:
+      backends, models, seeds, personas, anything you can express as
+      a CLI flag or an environment variable. This guide walks from
+      the smallest useful sweep up to the resume semantics and the
+      observability subcommands that read the per-cell index.
+    </p>
+
+    <section>
+      <h2>Why a sweep runner</h2>
+      <p>
+        The question "how does this scenario behave across three
+        seeds and two backends" used to mean a shell loop around
+        <code>ensemble run</code>, a hand-rolled directory naming
+        scheme, and a separate script to collect the results. The
+        sweep runner replaces all of that: one TOML file declares the
+        matrix, one command runs it, and the per-cell output lands in
+        a layout the cross-run subcommands already understand.
+      </p>
+      <p>
+        Reach for a sweep when you want to declare a matrix of runs,
+        run it with one command, and resume after an interruption
+        without re-paying for the cells that already finished.
+      </p>
+    </section>
+
+    <section>
+      <h2>The minimal TOML</h2>
+      <p>
+        A sweep is a single TOML file. The smallest useful shape is
+        one scenario plus one axis:
+      </p>
+<pre><code class="language-toml">[sweep]
+scenario = "my_world.refund"
+
+[sweep.flags]
+backend = ["mock"]</code></pre>
+      <p>
+        This expands to exactly one cell: the refund scenario, run
+        once against the mock backend. The axis is still useful here
+        because the cell id encodes the backend name, which keeps the
+        on-disk layout consistent once you add more axes.
+      </p>
+    </section>
+
+    <section>
+      <h2>The full schema</h2>
+      <p>
+        The full sweep file has a <code>[sweep]</code> table for the
+        scenario and run-wide knobs, plus two axis tables. Each axis
+        table contributes one or more dimensions to the cartesian
+        product:
+      </p>
+<pre><code class="language-toml">[sweep]
+scenario = "my_world.refund"
+world = "my_world"                  # optional; falls through to the scenario's declaration
+max_parallel = 4                    # default 1
+traces_dir = "traces/refund_sweep"  # default: traces/&lt;scenario_slug&gt;_sweep
+package_dir = "."                   # optional; path containing the scenarios package
+
+[sweep.flags]
+# Each key becomes a --&lt;key&gt; CLI flag passed to ensemble run.
+# Each value list contributes one axis to the cartesian product.
+backend = ["mock", "anthropic"]
+
+[sweep.env]
+# Each key is exported as an env var for the scenario subprocess.
+# Use this when the dimension you want to sweep is not a CLI flag.
+PLANK_SEED = ["1", "2", "3"]
+MY_TEMPERATURE = ["0.0", "0.7"]</code></pre>
+      <p>
+        The two axis tables are independent. <code>[sweep.flags]</code>
+        values become CLI flags on the cell's subprocess;
+        <code>[sweep.env]</code> values become environment variables
+        for that subprocess. The runner takes the cartesian product
+        across both tables together, so the file above expands to
+        2 backends times 3 seeds times 2 temperatures = 12 cells.
+      </p>
+      <p>
+        If both tables are empty the sweep contains exactly one cell
+        with no overrides. That is useful when you want the
+        on-disk layout and the resume semantics without varying any
+        configuration.
+      </p>
+    </section>
+
+    <section>
+      <h2>Running</h2>
+      <p>
+        One command runs the whole matrix:
+      </p>
+<pre><code class="language-bash">ensemble sweep run sweep.toml</code></pre>
+      <p>
+        The runner expands the cartesian product, spawns subprocesses
+        up to <code>max_parallel</code> concurrently, and prints one
+        line per cell to stderr as cells complete:
+      </p>
+<pre><code class="language-text">[ok] backend-mock__PLANK_SEED-1  scores: refund_issued=1.0
+[fail] backend-anthropic__PLANK_SEED-2  scores: &lt;none&gt;
+[skipped] backend-mock__PLANK_SEED-2  scores: refund_issued=1.0</code></pre>
+      <p>
+        After every cell finishes, the runner prints one JSON object
+        on stdout summarising the sweep:
+      </p>
+<pre><code class="language-json">{"scenario":"my_world.refund","cells":6,"failed":0,"traces_dir":"traces/refund_sweep","index":"traces/refund_sweep/index.jsonl"}</code></pre>
+      <p>
+        The exit code is 0 when every cell succeeded and 1 when any
+        cell failed. <code>max_parallel = 1</code> (the default)
+        serialises cells; higher values run them concurrently. Pick
+        the limit based on your backend's rate budget and on whether
+        your scenario uses external resources that do not tolerate
+        concurrent callers.
+      </p>
+    </section>
+
+    <section>
+      <h2>Cell ids and the on-disk layout</h2>
+      <p>
+        Each cell's axis values combine into a stable,
+        filesystem-safe id that becomes the cell's directory name.
+        With the sweep above and the axes
+        <code>backend = ["mock", "anthropic"]</code> by
+        <code>PLANK_SEED = ["1", "2"]</code>, the runner produces:
+      </p>
+<pre><code class="language-text">traces/refund_sweep/
+  index.jsonl
+  backend-anthropic__PLANK_SEED-1/
+    trace.jsonl
+    meta.json
+  backend-anthropic__PLANK_SEED-2/
+    trace.jsonl
+    meta.json
+  backend-mock__PLANK_SEED-1/
+    trace.jsonl
+    meta.json
+  backend-mock__PLANK_SEED-2/
+    trace.jsonl
+    meta.json</code></pre>
+      <p>
+        <code>index.jsonl</code> is the flat per-cell summary the
+        observability subcommands read: one JSON line per cell with
+        the scenario, the axis values, the scores, the costs, the
+        exit code, and the trace path. <code>meta.json</code> inside
+        each cell directory carries the same data plus an optional
+        <code>error</code> field with the last 2000 bytes of stderr
+        when the subprocess failed, which is the first place to look
+        when a cell shows up as <code>[fail]</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>Resume semantics</h2>
+      <p>
+        Resume is the default. A cell whose <code>meta.json</code>
+        already exists is skipped on the next run, so a sweep
+        interrupted halfway through can be re-invoked with the same
+        command and only the missing cells run. That is what the
+        <code>[skipped]</code> lines on stderr report.
+      </p>
+      <p>
+        When you want every cell to re-run, for example after editing
+        the scenario or the world, pass <code>--no-resume</code>:
+      </p>
+<pre><code class="language-bash">ensemble sweep run sweep.toml --no-resume</code></pre>
+      <p>
+        The flag wipes the resume check, not the per-cell directories
+        themselves; the runner overwrites the trace and meta files as
+        each cell finishes. If you want a clean slate, delete the
+        traces directory before re-running.
+      </p>
+    </section>
+
+    <section>
+      <h2>Reading sweep results</h2>
+      <p>
+        The sweep's <code>index.jsonl</code> is shaped to be read by
+        the cross-run subcommands. Point them at the sweep directory:
+      </p>
+<pre><code class="language-bash">ensemble runs list --traces-dir traces/refund_sweep
+ensemble runs export --traces-dir traces/refund_sweep --format csv &gt; results.csv</code></pre>
+      <p>
+        <code>ensemble runs list</code> prints a table of cells with
+        scores and costs; <code>ensemble runs export</code> emits the
+        same data as CSV or JSON for downstream plotting.
+        <code>ensemble runs compare</code> takes two cell ids (prefix
+        matching, so you only type the distinguishing part) and diffs
+        their scores side by side. <code>ensemble trace compare</code>
+        opens the two cells' traces in the browser viewer,
+        scroll-synced by tick, when you want to see why the scores
+        differ.
+      </p>
+    </section>
+
+    <section>
+      <h2>When the cartesian product is wrong</h2>
+      <p>
+        Sometimes two axes should move together rather than
+        independently. A run with <code>model = "claude-haiku-4-5"</code>
+        and <code>temperature = "0.0"</code> may make sense, but
+        pairing it with <code>temperature = "1.0"</code> does not. The
+        sweep schema takes the full cartesian product and has no
+        zip operator.
+      </p>
+      <p>
+        The workaround is one axis whose values name presets the
+        scenario reads internally:
+      </p>
+<pre><code class="language-toml">[sweep.flags]
+preset = ["fast", "balanced", "thorough"]</code></pre>
+      <p>
+        The scenario reads <code>preset</code> from the CLI flag (or
+        env var) and picks the matching settings itself. This trades
+        schema simplicity for the loss of axis-level reporting in
+        <code>index.jsonl</code>: the cell id is
+        <code>preset-fast</code> rather than carrying the model and
+        temperature as separate columns. An explicit zip operator may
+        land later if the audit's next round finds it load-bearing.
+      </p>
+    </section>
+
+    <section>
+      <h2>Where to go next</h2>
+      <ul>
+        <li><a href="observability.html">Observability</a> for the
+          <code>runs</code> subcommands, the index format, and how
+          sweep cells flow into the cross-run views.</li>
+        <li><a href="reference/sweeps.html">Sweeps reference</a> for
+          the exact TOML schema, the cell-id construction rules, and
+          the contract <code>index.jsonl</code> rows satisfy.</li>
+        <li><a href="reference/observability.html">Observability
+          reference</a> for the field-by-field shape of
+          <code>index.jsonl</code> and the flags every
+          <code>runs</code> subcommand accepts.</li>
+      </ul>
+    </section>
+
+    <footer class="site">
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>

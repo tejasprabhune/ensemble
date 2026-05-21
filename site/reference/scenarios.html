@@ -13,13 +13,20 @@
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
     <nav>
       <div class="nav-group">
-        <div class="nav-group-title">Site</div>
+        <div class="nav-group-title">Get started</div>
         <a href="../index.html">Overview</a>
-        <a href="../docs.html">Docs</a>
-        <a href="../scenarios.html">Scenarios overview</a>
-        <a href="../plank.html">Plank</a>
-        <a href="../personas.html">Personas overview</a>
+        <a href="../quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="../worlds.html">Writing a world</a>
+        <a href="../scenarios.html">Writing a scenario</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../personas.html">Personas</a>
+        <a href="../sweeps.html">Sweeps</a>
+        <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
+        <a href="../plank.html">Plank example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -32,197 +39,561 @@
         <a href="cli.html">CLI</a>
         <a href="runtime.html">Runtime</a>
         <a href="traces.html">Traces</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-title">On this page</div>
-        <a href="#scenario-decorator">@scenario decorator</a>
-        <a href="#world">World</a>
-        <a href="#spawn-user">spawn_user</a>
-        <a href="#spawn-agent">spawn_agent</a>
-        <a href="#worlduntil-worlduntil-predicate-and-the-turn-count-sentinel">world.until, world.until_predicate, and the turn_count sentinel</a>
-        <a href="#worldrun-and-worldsimulate">world.run and world.simulate</a>
-        <a href="#worldapply">world.apply</a>
-        <a href="#worldlog-note-and-worldlog-event">world.log_note and world.log_event</a>
-        <a href="#evaluate-predicate-predicate-names-tool-names">evaluate_predicate, predicate_names, tool_names</a>
-        <a href="#actor-hidden-state">actor_hidden_state</a>
-        <a href="#scenariostoml-schema">scenarios.toml schema</a>
-        <a href="#grader-expressions">Grader expressions</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
       </div>
     </nav>
   </aside>
 
   <main>
-<h1>Scenarios</h1>
-<p>This page is the reference for the scenario surface: the `<code>@scenario</code><code> decorator, the </code><code>World</code><code> instance the scenario function binds against, and the </code><code>scenarios.toml</code>` declarative manifest.</p>
-<h2 id="scenario-decorator">@scenario decorator</h2>
-<p>`<code>@scenario(name, *, world=None)</code>` registers a python coroutine as a runnable scenario under the global registry. The decorator accepts two flavours of function: an async generator that yields its until predicate and then its grader scores, and a regular async function that runs the simulation itself and returns the grader dict.</p>
+    <h1>Scenarios</h1>
+    <p>
+      This page is the reference for the scenario surface: the
+      <code>@scenario</code> decorator, the <code>World</code>
+      instance the scenario function binds against, and the
+      <code>scenarios.toml</code> declarative manifest.
+    </p>
+
+    <section>
+      <h2>@scenario decorator</h2>
+      <p>
+        <code>@scenario(name, *, world=None)</code> registers a
+        python coroutine as a runnable scenario under the global
+        registry. The decorator accepts two flavours of function: an
+        async generator that yields its until predicate and then its
+        grader scores, and a regular async function that runs the
+        simulation itself and returns the grader dict.
+      </p>
 <pre><code class="language-python"># yield flavor; the typical case
-@scenario(&quot;plank.smoke&quot;, world=&quot;plank&quot;)
+@scenario("plank.smoke", world="plank")
 async def smoke(world):
-    user = world.spawn_user(id=&quot;alice&quot;, persona=&quot;patient_retail&quot;)
-    world.spawn_agent(id=&quot;rep&quot;, model=&quot;claude-sonnet-4-5&quot;, tools=[&quot;search_kb&quot;])
-    user.say(&quot;rep&quot;, &quot;hi&quot;)
-    yield world.until(world.turn_count &gt; 8)
-    yield {&quot;saw_event&quot;: 1.0}</code></pre>
+    user = world.spawn_user(id="alice", persona="patient_retail")
+    world.spawn_agent(id="rep", model="claude-sonnet-4-5", tools=["search_kb"])
+    user.say("rep", "hi")
+    yield world.until(world.turn_count > 8)
+    yield {"saw_event": 1.0}</code></pre>
 <pre><code class="language-python"># async-def flavor; required when the scenario drives the run itself
-@scenario(&quot;plank.audit&quot;, world=&quot;plank&quot;)
+@scenario("plank.audit", world="plank")
 async def audit(world):
-    carol = world.spawn_user(id=&quot;carol&quot;, persona=&quot;enterprise_admin&quot;)
-    world.spawn_agent(id=&quot;rep&quot;, model=&quot;claude-sonnet-4-5&quot;, tools=[&quot;escalate&quot;])
-    carol.say(&quot;rep&quot;, &quot;audit log please&quot;)
+    carol = world.spawn_user(id="carol", persona="enterprise_admin")
+    world.spawn_agent(id="rep", model="claude-sonnet-4-5", tools=["escalate"])
+    carol.say("rep", "audit log please")
     async with world.simulate() as run:
-        await run.wait_until(world.turn_count &gt; 10)
-        carol.say(&quot;rep&quot;, &quot;escalate this&quot;)
-        await run.wait_until(world.turn_count &gt; 18)
-    return {&quot;escalated&quot;: 1.0 if carol.hidden_goal_resolved() else 0.0}</code></pre>
-<p>Parameters:</p>
-<ul>
-<li>`<code>name</code><code> (required): the registry key. </code><code>run_scenario(name)</code><code> and </code><code>ensemble run &lt;name&gt;</code><code> look the scenario up by this string. The convention is </code><code>&lt;world&gt;.&lt;short_name&gt;</code>`, but any string works.</li>
-<li>`<code>world</code><code>: the world name this scenario defaults to. The runner uses it when </code><code>--world</code><code> is not supplied on the CLI, or when </code><code>run_scenario(name, world_name=None)</code>` is called.</li>
-</ul>
-<p>The wrapper the decorator returns accepts these keyword arguments when invoked:</p>
-<ul>
-<li>`<code>world_name</code><code>: overrides the decorator&#x27;s </code><code>world=</code>` default.</li>
-<li>`<code>backend</code><code>: the LLM backend, one of </code><code>&quot;mock&quot;</code><code>, </code><code>&quot;anthropic&quot;</code><code>, </code><code>&quot;openai&quot;</code><code>, </code><code>&quot;vllm&quot;</code><code>, or </code><code>&quot;auto&quot;</code>`.</li>
-<li>`<code>base_url</code>`: optional override for the backend&#x27;s base URL.</li>
-<li>`<code>trace_path</code>`: when supplied, the runtime mirrors every event to this JSONL file as it is appended.</li>
-<li>`<code>external_agent_id</code><code>: names the agent slot that the connected MCP client drives, used by the </code><code>mcp serve --scenario --as-agent</code>` path.</li>
-<li>`<code>on_world_constructed</code><code>: a callable invoked with the constructed </code><code>World</code>` instance once it is built but before the scenario function runs.</li>
-</ul>
-<p>The wrapper returns a `<code>RunResult</code><code> dataclass with three fields: </code><code>name</code><code> (the scenario name), </code><code>scores</code><code> (the grader dict), and </code><code>trace</code>` (the parsed event log).</p>
-<h2 id="world">World</h2>
-<p>`<code>World(name, *, backend=None, base_url=None, dotenv=True, verbose=None, trace_path=None, external_agent_id=None)</code><code> is the scenario-facing wrapper around the native rust world. Construction is what triggers the world plugin to register itself: the python package named in </code><code>world.toml</code><code> must already have been imported (a common pattern is </code><code>import plank</code><code> at the top of the scenario module so plank&#x27;s </code><code>register_world</code>` runs before the World is built).</p>
-<p>A `<code>World</code><code> subclass (</code><code>class PopcornWorld(World)</code><code>) auto-derives its world name from the </code><code>world_name</code><code> class attribute or the lower-cased class name; its decorated methods and </code><code>setup(self)</code>` are wired up at instance construction time. The <a href="world-api.html">world-api reference</a> covers the subclass form in detail.</p>
-<p>The properties:</p>
-<ul>
-<li>`<code>world.name</code>`: the world&#x27;s registry name.</li>
-<li>`<code>world.backend</code>`: the chosen backend&#x27;s string name.</li>
-<li>`<code>world.turn_count</code><code>: a sentinel that produces an </code><code>Until</code><code> from </code><code>&gt; N</code><code> or </code><code>&gt;= N</code>` comparisons.</li>
-<li>`<code>world.trace_path</code><code>: the current live-trace sink path, or </code><code>None</code>` when no sink is attached.</li>
-<li>`<code>world.users</code><code> / </code><code>world.agents</code><code>: lists of </code><code>User</code><code> / </code><code>Agent</code>` proxies the scenario has spawned, in declaration order.</li>
-<li>`<code>world.shared_state</code><code>: a mutable dict the runtime forwards into sandbox workers via </code><code>ENSEMBLE_SHARED_STATE</code>`. See the <a href="world-api.html#sandbox-contract">sandbox contract</a>.</li>
-</ul>
-<p>The methods documented in their own subsections below: `<code>spawn_user</code><code>, </code><code>spawn_agent</code><code>, </code><code>until</code><code>, </code><code>until_predicate</code><code>, </code><code>run</code><code>, </code><code>simulate</code><code>, </code><code>trace</code><code>, </code><code>apply</code><code>, </code><code>log_note</code><code>, </code><code>log_event</code><code>, </code><code>actor_hidden_state</code><code>, </code><code>tool_names</code><code>, </code><code>predicate_names</code><code>, </code><code>evaluate_predicate</code><code>, </code><code>set_budget</code><code>, </code><code>cost_total</code><code>, </code><code>record_cost</code><code>, </code><code>set_trace_path</code>`.</p>
-<h2 id="spawn-user">spawn_user</h2>
+        await run.wait_until(world.turn_count > 10)
+        carol.say("rep", "escalate this")
+        await run.wait_until(world.turn_count > 18)
+    return {"escalated": 1.0 if carol.hidden_goal_resolved() else 0.0}</code></pre>
+      <p>Parameters:</p>
+      <ul>
+        <li><code>name</code> (required): the registry key.
+          <code>run_scenario(name)</code> and
+          <code>ensemble run &lt;name&gt;</code> look the scenario up
+          by this string. The convention is
+          <code>&lt;world&gt;.&lt;short_name&gt;</code>, but any
+          string works.</li>
+        <li><code>world</code>: the world name this scenario defaults
+          to. The runner uses it when <code>--world</code> is not
+          supplied on the CLI, or when
+          <code>run_scenario(name, world_name=None)</code> is called.</li>
+      </ul>
+      <p>
+        The wrapper the decorator returns accepts these keyword
+        arguments when invoked:
+      </p>
+      <ul>
+        <li><code>world_name</code>: overrides the decorator's
+          <code>world=</code> default.</li>
+        <li><code>backend</code>: the LLM backend, one of
+          <code>"mock"</code>, <code>"anthropic"</code>,
+          <code>"openai"</code>, <code>"vllm"</code>, or
+          <code>"auto"</code>.</li>
+        <li><code>base_url</code>: optional override for the
+          backend's base URL.</li>
+        <li><code>trace_path</code>: when supplied, the runtime
+          mirrors every event to this JSONL file as it is appended.</li>
+        <li><code>external_agent_id</code>: names the agent slot that
+          the connected MCP client drives, used by the
+          <code>mcp serve --scenario --as-agent</code> path.</li>
+        <li><code>on_world_constructed</code>: a callable invoked
+          with the constructed <code>World</code> instance once it is
+          built but before the scenario function runs.</li>
+      </ul>
+      <p>
+        The wrapper returns a <code>RunResult</code> dataclass with
+        four fields: <code>name</code> (the scenario name),
+        <code>scores</code> (the grader dict), <code>trace</code>
+        (the parsed event log), and <code>costs</code> (a per-unit
+        <code>Dict[str, float]</code> aggregated from the trace's
+        <code>cost</code> events via
+        <code>world.cost_summary()</code>; empty when nothing was
+        recorded).
+      </p>
+    </section>
+
+    <section>
+      <h2>World</h2>
+      <p>
+        <code>World(name, *, backend=None, base_url=None, dotenv=True,
+        verbose=None, trace_path=None, external_agent_id=None)</code>
+        is the scenario-facing wrapper around the native rust world.
+        Construction is what triggers the world plugin to register
+        itself: the python package named in <code>world.toml</code>
+        must already have been imported (a common pattern is
+        <code>import plank</code> at the top of the scenario module
+        so plank's <code>register_world</code> runs before the World
+        is built).
+      </p>
+      <p>
+        A <code>World</code> subclass
+        (<code>class PopcornWorld(World)</code>) auto-derives its
+        world name from the <code>world_name</code> class attribute
+        or the lower-cased class name; its decorated methods and
+        <code>setup(self)</code> are wired up at instance
+        construction time. The
+        <a href="world-api.html">world-api reference</a> covers the
+        subclass form in detail.
+      </p>
+      <p>The properties:</p>
+      <ul>
+        <li><code>world.name</code>: the world's registry name.</li>
+        <li><code>world.backend</code>: the chosen backend's string
+          name.</li>
+        <li><code>world.turn_count</code>: a sentinel that produces
+          an <code>Until</code> from <code>&gt; N</code> or
+          <code>&gt;= N</code> comparisons.</li>
+        <li><code>world.trace_path</code>: the current live-trace
+          sink path, or <code>None</code> when no sink is attached.</li>
+        <li><code>world.users</code> / <code>world.agents</code>:
+          lists of <code>User</code> / <code>Agent</code> proxies the
+          scenario has spawned, in declaration order.</li>
+        <li><code>world.shared_state</code>: a mutable dict the
+          runtime forwards into sandbox workers via
+          <code>ENSEMBLE_SHARED_STATE</code>. See the
+          <a href="world-api.html#sandbox-contract">sandbox contract</a>.</li>
+      </ul>
+      <p>
+        The methods documented in their own subsections below:
+        <code>spawn_user</code>, <code>spawn_agent</code>,
+        <code>until</code>, <code>until_predicate</code>,
+        <code>run</code>, <code>simulate</code>, <code>trace</code>,
+        <code>apply</code>, <code>log_note</code>,
+        <code>log_event</code>, <code>actor_hidden_state</code>,
+        <code>tool_names</code>, <code>predicate_names</code>,
+        <code>evaluate_predicate</code>, <code>set_budget</code>,
+        <code>cost_total</code>, <code>record_cost</code>,
+        <code>set_trace_path</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>spawn_user</h2>
 <pre><code class="language-python">world.spawn_user(
     id=None,
     persona=None,
     hidden_goal=None,
-    model=&quot;user-model&quot;,
+    model=None,
     system_prompt=None,
     hidden_state=None,
+    interactive=True,
 ) -&gt; User</code></pre>
-<p>Creates a `<code>User</code><code> actor and records it on the world. Emits a </code><code>user_spawned</code>` system event to the trace with the resolved persona, model, and hidden state so trace consumers can render the actor&#x27;s framing without each scenario logging it manually.</p>
-<p>Returns a `<code>User</code><code> proxy whose methods include </code><code>id</code><code>, </code><code>persona</code><code>, </code><code>hidden_state</code><code>, </code><code>backend_info</code><code>, </code><code>say</code><code>, </code><code>act</code><code>, </code><code>predicate</code><code> (per-user predicate convenience), and the </code><code>hidden_goal_resolved</code><code> / </code><code>was_redirected_to_upgrade</code><code> shortcuts. When the persona has </code><code>mode = &quot;trained&quot;</code><code> together with an </code><code>adapter_name</code><code>, </code><code>spawn_user</code><code> routes the actor through a per-user </code><code>LocalAdapterBackend</code>`.</p>
-<h2 id="spawn-agent">spawn_agent</h2>
+      <p>
+        Creates a <code>User</code> actor and records it on the
+        world. Emits a <code>user_spawned</code> system event to the
+        trace with the resolved persona, model, and hidden state so
+        trace consumers can render the actor's framing without each
+        scenario logging it manually.
+      </p>
+      <ul>
+        <li><code>id</code> defaults to <code>user-1</code>,
+          <code>user-2</code>, ... from a per-world counter so
+          scaffold scenarios can elide ids they do not care about.</li>
+        <li><code>model</code> defaults to the world's
+          <code>default_user_model</code> (set in
+          <code>register_world</code> or in <code>world.toml</code>);
+          the framework-wide fallback is the sentinel
+          <code>"user-model"</code>.</li>
+        <li><code>interactive=False</code> makes the user silent on
+          inbound messages. The scheduler still records what the
+          agent said into the user's history, but the user does not
+          call the backend to produce a reply. The scenario can
+          still drive the conversation through
+          <code>user.say(...)</code>. For scenarios with no real
+          user, prefer <code>world.opener</code> (next section).</li>
+      </ul>
+      <p>
+        Returns a <code>User</code> proxy whose methods include
+        <code>id</code>, <code>persona</code>,
+        <code>hidden_state</code>, <code>backend_info</code>,
+        <code>say</code>, <code>act</code>, <code>predicate</code>
+        (per-user predicate convenience), and the
+        <code>hidden_goal_resolved</code> /
+        <code>was_redirected_to_upgrade</code> shortcuts. When the
+        persona has <code>mode = "trained"</code> together with an
+        <code>adapter_name</code>, <code>spawn_user</code> routes the
+        actor through a per-user <code>LocalAdapterBackend</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>opener</h2>
+<pre><code class="language-python">world.opener(message: str, *, to: str) -&gt; Opener</code></pre>
+      <p>
+        Sends a seed message to an agent without spawning a user.
+        Use this for the agent-iterates-silently shape: the agent
+        receives an opening problem statement and then runs on its
+        own (using its tools) until a stop condition fires.
+        Internally the opener is a non-interactive user backed by the
+        same scheduler plumbing, but it does not appear in
+        <code>world.users</code> and the trace event is
+        <code>kickoff</code> rather than <code>user_spawned</code>,
+        so a scenario that has no real user does not leak a ghost
+        user into graders or the viewer.
+      </p>
+<pre><code class="language-python">rep = world.spawn_agent(tools=["read", "edit", "run_tests"])
+world.opener("rename foo to bar in this file", to=rep.id)
+yield world.until_done(rep.id)
+yield {"completed": 1.0}</code></pre>
+      <p>
+        The returned <code>Opener</code> exposes <code>.id</code>
+        (the auto-assigned actor id, <code>opener-1</code>,
+        <code>opener-2</code>, ...) and a
+        <code>.say(target, text)</code> method for emitting
+        additional seed messages. Multiple openers can coexist;
+        their ids are unique per world.
+      </p>
+    </section>
+
+    <section>
+      <h2>spawn_agent</h2>
 <pre><code class="language-python">world.spawn_agent(
     id=None,
-    model=&quot;claude-sonnet-4-5&quot;,
+    model=None,
     tools=None,
     system_prompt=None,
     params=None,
 ) -&gt; Agent</code></pre>
-<p>Creates an `<code>Agent</code><code> actor backed by the world&#x27;s shared LLM backend and the world&#x27;s tool registry, restricted to the named tools. Emits an </code><code>agent_spawned</code><code> system event with </code><code>actor_id</code><code>, </code><code>model</code><code>, </code><code>tools</code><code>, </code><code>system_prompt</code><code>, and </code><code>params</code><code> so the trace viewer can render the spawn special and worlds no longer need a per-scenario </code><code>log_note</code>` helper for the system prompt.</p>
-<ul>
-<li>`<code>id</code><code>: the actor id. Defaults to </code><code>&quot;agent&quot;</code>` when unset.</li>
-<li>`<code>model</code>`: the model identifier sent to the backend.</li>
-<li>`<code>tools</code><code>: tool restriction. </code><code>None</code><code> means the agent sees every tool the world registered; </code><code>[]</code>` means no tools; a non-empty list filters both the schemas the model sees and the dispatcher&#x27;s accept-list.</li>
-<li>`<code>system_prompt</code>`: explicit system prompt.</li>
-<li>`<code>params</code><code>: an open dict of per-agent LLM knobs forwarded into the backend&#x27;s </code><code>CompletionRequest</code><code> as </code><code>extra_params</code><code>. Useful for </code><code>reasoning_effort</code><code>, </code><code>top_p</code>`, or any other provider-specific extension on a single agent. Backends ignore keys they do not understand; the underlying API rejects bad values with its own error.</li>
-</ul>
-<p>When `<code>id</code><code> matches the world&#x27;s </code><code>external_agent_id</code><code> (set on construction), </code><code>spawn_agent</code><code> returns an </code><code>_ExternalAgent</code>` proxy instead of building a real agent. The MCP-connected client drives the slot.</p>
-<h2 id="worlduntil-worlduntil-predicate-and-the-turn-count-sentinel">world.until, world.until_predicate, and the turn_count sentinel</h2>
-<p>`<code>world.until(condition)</code><code> coerces a condition into an </code><code>Until</code>` value the scheduler can evaluate. Accepts:</p>
-<ul>
-<li>an existing `<code>Until</code>`, returned unchanged;</li>
-<li>a comparison built from `<code>world.turn_count &gt; N</code><code> or </code><code>&gt;= N</code>`.</li>
-</ul>
-<p>Boolean values are explicitly rejected because they almost always indicate a mistake.</p>
-<p>`<code>world.until_predicate(name, **args)</code><code> builds an </code><code>Until</code>` that fires when the named world predicate returns true on the live trace. The scheduler evaluates the predicate each tick against a trace snapshot, so the &quot;stop when the agent submits&quot; pattern is one expression rather than a turn-count budget plus a post-hoc inspection:</p>
+      <ul>
+        <li><code>id</code> defaults to <code>agent-1</code>,
+          <code>agent-2</code>, ... from a per-world counter.</li>
+        <li><code>model</code> defaults to the world's
+          <code>default_agent_model</code>; the framework-wide
+          fallback is <code>claude-sonnet-4-5</code>.</li>
+      </ul>
+      <p>
+        Creates an <code>Agent</code> actor backed by the world's
+        shared LLM backend and the world's tool registry, restricted
+        to the named tools. Emits an <code>agent_spawned</code>
+        system event with <code>actor_id</code>, <code>model</code>,
+        <code>tools</code>, <code>system_prompt</code>, and
+        <code>params</code> so the trace viewer can render the spawn
+        special and worlds no longer need a per-scenario
+        <code>log_note</code> helper for the system prompt.
+      </p>
+      <ul>
+        <li><code>id</code>: the actor id. Defaults to
+          <code>"agent"</code> when unset.</li>
+        <li><code>model</code>: the model identifier sent to the
+          backend.</li>
+        <li><code>tools</code>: tool restriction. <code>None</code>
+          means the agent sees every tool the world registered;
+          <code>[]</code> means no tools; a non-empty list filters
+          both the schemas the model sees and the dispatcher's
+          accept-list.</li>
+        <li><code>system_prompt</code>: explicit system prompt.</li>
+        <li><code>params</code>: an open dict of per-agent LLM knobs
+          forwarded into the backend's
+          <code>CompletionRequest</code> as
+          <code>extra_params</code>. Useful for
+          <code>reasoning_effort</code>, <code>top_p</code>, or any
+          other provider-specific extension on a single agent.
+          Backends ignore keys they do not understand; the underlying
+          API rejects bad values with its own error.</li>
+      </ul>
+      <p>
+        When <code>id</code> matches the world's
+        <code>external_agent_id</code> (set on construction),
+        <code>spawn_agent</code> returns an
+        <code>_ExternalAgent</code> proxy instead of building a real
+        agent. The MCP-connected client drives the slot.
+      </p>
+    </section>
+
+    <section>
+      <h2>world.until, world.until_predicate, and the turn_count sentinel</h2>
+      <p>
+        <code>world.until(condition)</code> coerces a condition into
+        an <code>Until</code> value the scheduler can evaluate.
+        Accepts:
+      </p>
+      <ul>
+        <li>an existing <code>Until</code>, returned unchanged;</li>
+        <li>a comparison built from
+          <code>world.turn_count &gt; N</code> or
+          <code>&gt;= N</code>.</li>
+      </ul>
+      <p>
+        Boolean values are explicitly rejected because they almost
+        always indicate a mistake.
+      </p>
+      <p>
+        <code>world.until_predicate(name, **args)</code> builds an
+        <code>Until</code> that fires when the named world predicate
+        returns true on the live trace. The scheduler evaluates the
+        predicate each tick against a trace snapshot, so the "stop
+        when the agent submits" pattern is one expression rather
+        than a turn-count budget plus a post-hoc inspection:
+      </p>
 <pre><code class="language-python">from ensemble import until_predicate
 
 # stop on submission, give up after 30 turns either way
-yield world.until_predicate(&quot;submit_called&quot;) | (world.turn_count &gt; 30)</code></pre>
-<p>`<code>until_predicate(name, **args)</code><code> (module-level) is the same factory; </code><code>world.until_predicate</code><code> additionally validates that the predicate is registered, raising </code><code>PredicateError</code>` if the name is unknown, so a typo in your stop condition fails loudly at scenario definition rather than silently never firing.</p>
-<p>Combinators come in two forms:</p>
+yield world.until_predicate("submit_called") | (world.turn_count > 30)</code></pre>
+      <p>
+        <code>until_predicate(name, **args)</code> (module-level) is
+        the same factory; <code>world.until_predicate</code>
+        additionally validates that the predicate is registered,
+        raising <code>PredicateError</code> if the name is unknown,
+        so a typo in your stop condition fails loudly at scenario
+        definition rather than silently never firing.
+      </p>
+      <p>Combinators come in two forms:</p>
 <pre><code class="language-python">from ensemble import any_of, all_of, until_predicate
 
-yield world.until(any_of(world.turn_count &gt; 30, until_predicate(&quot;submit_called&quot;)))
-yield world.until(all_of(world.turn_count &gt;= 4, until_predicate(&quot;hit_goal&quot;)))
+yield world.until(any_of(world.turn_count > 30, until_predicate("submit_called")))
+yield world.until(all_of(world.turn_count >= 4, until_predicate("hit_goal")))
 
-# the | and &amp; operators mean the same thing
-yield world.until((world.turn_count &gt; 30) | until_predicate(&quot;submit_called&quot;))</code></pre>
-<p>`<code>any_of</code><code> and </code><code>all_of</code>` flatten nested calls of the same combinator, so deeply nested expressions stay readable on the wire.</p>
-<h2 id="worldrun-and-worldsimulate">world.run and world.simulate</h2>
-<p>`<code>world.run(until)</code><code> is the blocking entry point. The scheduler runs on the global tokio runtime; the calling thread blocks on </code><code>block_on</code>` until the scheduler halts. Returns the parsed trace.</p>
-<pre><code class="language-python">trace = world.run(world.until(world.turn_count &gt; 8))</code></pre>
-<p>If the scenario forgot to seed a message (no `<code>user.say</code><code> and no </code><code>agent.say</code><code>) and only agents are registered, the runtime emits a </code><code>system</code>` note explaining that the scheduler will quiesce on the first tick. The run still proceeds in case the scenario meant to start idle; the warning surfaces the most common &quot;empty-trace-with-no-error&quot; trap.</p>
-<p>`<code>world.simulate()</code><code> returns an async context manager that starts the scheduler on a background task and exposes a </code><code>SimulationRun</code>` handle inside the block:</p>
+# the | and & operators mean the same thing
+yield world.until((world.turn_count > 30) | until_predicate("submit_called"))</code></pre>
+      <p>
+        <code>any_of</code> and <code>all_of</code> flatten nested
+        calls of the same combinator, so deeply nested expressions
+        stay readable on the wire.
+      </p>
+    </section>
+
+    <section>
+      <h2>world.until_agent_emits and world.until_done</h2>
+      <p>
+        For silent-loop scenarios the natural stop condition is "the
+        agent said it was done", not "we hit turn N". Two helpers
+        cover that case:
+      </p>
+<pre><code class="language-python">world.until_agent_emits(
+    actor_id: str | None,
+    *,
+    contains: str | None = None,
+    equals: str | None = None,
+    regex: str | None = None,
+) -&gt; Until
+
+world.until_done(actor_id: str | None = None, *, signal: str = "DONE") -&gt; Until</code></pre>
+      <p>
+        <code>until_agent_emits</code> halts when the named agent
+        emits a message matching the criterion. Exactly one of
+        <code>contains</code>, <code>equals</code>, or
+        <code>regex</code> is required. When <code>actor_id</code>
+        is <code>None</code> the condition matches any agent's
+        emission. Each call registers a fresh per-instance
+        predicate, so multiple stop conditions in the same world do
+        not collide.
+      </p>
+      <p>
+        <code>until_done</code> is the shorthand the silent-loop
+        shape reaches for: it is
+        <code>until_agent_emits(actor_id, contains=signal)</code>
+        with <code>signal="DONE"</code> by default. Override
+        <code>signal</code> when the agent uses a different sentinel
+        word.
+      </p>
+<pre><code class="language-python">yield world.until_done(rep.id) | (world.turn_count > 100)</code></pre>
+    </section>
+
+    <section>
+      <h2>world.run and world.simulate</h2>
+      <p>
+        <code>world.run(until)</code> is the blocking entry point.
+        The scheduler runs on the global tokio runtime; the calling
+        thread blocks on <code>block_on</code> until the scheduler
+        halts. Returns the parsed trace.
+      </p>
+<pre><code class="language-python">trace = world.run(world.until(world.turn_count > 8))</code></pre>
+      <p>
+        If the scenario forgot to seed a message (no
+        <code>user.say</code> and no <code>agent.say</code>) and only
+        agents are registered, the runtime emits a
+        <code>system</code> note explaining that the scheduler will
+        quiesce on the first tick. The run still proceeds in case
+        the scenario meant to start idle; the warning surfaces the
+        most common "empty-trace-with-no-error" trap.
+      </p>
+      <p>
+        <code>world.simulate()</code> returns an async context
+        manager that starts the scheduler on a background task and
+        exposes a <code>SimulationRun</code> handle inside the block:
+      </p>
 <pre><code class="language-python">async with world.simulate() as run:
-    fired = await run.wait_until(world.turn_count &gt; 4, timeout_ms=15_000)
+    fired = await run.wait_until(world.turn_count > 4, timeout_ms=15_000)
     # ... inspect state, push new messages, mutate the world ...</code></pre>
-<p>`<code>run.wait_until(condition, timeout_ms=30_000)</code><code> returns </code><code>True</code><code> when the predicate fires and </code><code>False</code><code> when the timeout elapses. Use the async-with path when the scenario needs to react to what happened earlier in the run; use </code><code>world.run</code>` when the scenario commits to a single stop condition up front.</p>
-<h2 id="worldapply">world.apply</h2>
-<p>See the <a href="world-api.html#worldapply">world api reference</a>. `<code>apply</code><code> is the system-level mutation path: it runs a tool with no actor attribution and stamps </code><code>seed=true</code>` on the resulting events.</p>
-<h2 id="worldlog-note-and-worldlog-event">world.log_note and world.log_event</h2>
-<p>`<code>world.log_note(text)</code><code> appends a free-form system note to the trace. </code><code>world.log_event(kind, payload)</code><code> is the structured counterpart: it appends a system note whose body is </code><code>{&quot;kind&quot;: kind, **payload}</code><code>, which lets the viewer render known kinds (</code><code>agent_spawned</code><code>, </code><code>user_spawned</code><code>, </code><code>grader</code><code>, </code><code>problem_prompt</code>`) specially and falls back to a generic notes panel for unknown kinds. Both are public; the trace recorder&#x27;s internals are intentionally not.</p>
-<pre><code class="language-python">world.log_event(&quot;problem_prompt&quot;, {&quot;text&quot;: problem_text})
-world.log_event(&quot;eval_config&quot;, {&quot;seed&quot;: 42, &quot;shots&quot;: 5})</code></pre>
-<h2 id="evaluate-predicate-predicate-names-tool-names">evaluate_predicate, predicate_names, tool_names</h2>
-<p>`<code>world.evaluate_predicate(name, args=None, *, default=...)</code><code> runs a registered predicate against the current trace. Unknown predicate names raise </code><code>PredicateError</code><code> by default so typos in your own world&#x27;s predicate names fail loudly in CI. Pass </code><code>default=False</code>` (or any other value) for portability across worlds with different predicate sets.</p>
-<p>`<code>world.predicate_names()</code><code> returns every name the world has registered. </code><code>world.tool_names()</code><code> does the same for tools. Both are public; a generic scenario that wants to spawn an agent with &quot;everything the world has&quot; can write </code><code>world.spawn_agent(id=&quot;r&quot;, tools=world.tool_names())</code>`.</p>
-<h2 id="actor-hidden-state">actor_hidden_state</h2>
-<p>`<code>world.actor_hidden_state(actor_id)</code>` returns the live hidden state dict for the named user (or an empty dict for agents without hidden state). Useful for graders that read a reviewer agent&#x27;s verdict after the run completes:</p>
-<pre><code class="language-python">verdict = world.actor_hidden_state(&quot;reviewer&quot;).get(&quot;verdict&quot;, &quot;pending&quot;)
-return {&quot;verdict_was_reject&quot;: float(verdict == &quot;reject&quot;)}</code></pre>
-<h2 id="scenariostoml-schema">scenarios.toml schema</h2>
-<p>The declarative form covers scenarios that don&#x27;t need mid-run intervention. `<code>ensemble.load_manifest(path)</code><code> parses the file and registers a scenario per entry in the global registry, so the same runner code drives both python </code><code>@scenario</code>` and TOML scenarios.</p>
+      <p>
+        <code>run.wait_until(condition, timeout_ms=30_000)</code>
+        returns <code>True</code> when the predicate fires and
+        <code>False</code> when the timeout elapses. Use the
+        async-with path when the scenario needs to react to what
+        happened earlier in the run; use <code>world.run</code> when
+        the scenario commits to a single stop condition up front.
+      </p>
+    </section>
+
+    <section>
+      <h2>world.apply</h2>
+      <p>
+        See the
+        <a href="world-api.html#worldapply">world api reference</a>.
+        <code>apply</code> is the system-level mutation path: it
+        runs a tool with no actor attribution and stamps
+        <code>seed=true</code> on the resulting events.
+      </p>
+    </section>
+
+    <section>
+      <h2>world.log_note and world.log_event</h2>
+      <p>
+        <code>world.log_note(text)</code> appends a free-form system
+        note to the trace. <code>world.log_event(kind, payload)</code>
+        is the structured counterpart: it appends a system note whose
+        body is <code>{"kind": kind, **payload}</code>, which lets
+        the viewer render known kinds (<code>agent_spawned</code>,
+        <code>user_spawned</code>, <code>grader</code>,
+        <code>problem_prompt</code>) specially and falls back to a
+        generic notes panel for unknown kinds. Both are public; the
+        trace recorder's internals are intentionally not.
+      </p>
+<pre><code class="language-python">world.log_event("problem_prompt", {"text": problem_text})
+world.log_event("eval_config", {"seed": 42, "shots": 5})</code></pre>
+    </section>
+
+    <section>
+      <h2>evaluate_predicate, predicate_names, tool_names</h2>
+      <p>
+        <code>world.evaluate_predicate(name, args=None, *, default=...)</code>
+        runs a registered predicate against the current trace.
+        Unknown predicate names raise <code>PredicateError</code> by
+        default so typos in your own world's predicate names fail
+        loudly in CI. Pass <code>default=False</code> (or any other
+        value) for portability across worlds with different
+        predicate sets.
+      </p>
+      <p>
+        <code>world.predicate_names()</code> returns every name the
+        world has registered. <code>world.tool_names()</code> does
+        the same for tools. Both are public; a generic scenario that
+        wants to spawn an agent with "everything the world has" can
+        write
+        <code>world.spawn_agent(id="r", tools=world.tool_names())</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>actor_hidden_state</h2>
+      <p>
+        <code>world.actor_hidden_state(actor_id)</code> returns the
+        live hidden state dict for the named user (or an empty dict
+        for agents without hidden state). Useful for graders that
+        read a reviewer agent's verdict after the run completes:
+      </p>
+<pre><code class="language-python">verdict = world.actor_hidden_state("reviewer").get("verdict", "pending")
+return {"verdict_was_reject": float(verdict == "reject")}</code></pre>
+    </section>
+
+    <section>
+      <h2>scenarios.toml schema</h2>
+      <p>
+        The declarative form covers scenarios that don't need mid-run
+        intervention. <code>ensemble.load_manifest(path)</code>
+        parses the file and registers a scenario per entry in the
+        global registry, so the same runner code drives both python
+        <code>@scenario</code> and TOML scenarios.
+      </p>
 <pre><code class="language-toml"># examples/plank/scenarios.toml
 [scenario.refund_storm]
-world = &quot;plank&quot;
+world = "plank"
 duration_turns = 30
 seed = 42
 
 [[scenario.refund_storm.users]]
-id = &quot;alice&quot;
-persona = &quot;frustrated_power_user&quot;
-hidden_goal = &quot;refund_3mo&quot;
-model = &quot;user-model&quot;
-initial_action = { tool = &quot;open_ticket&quot;, args = { ticket_id = &quot;t-100&quot;, user_id = &quot;u-alice&quot;, subject = &quot;want my money back&quot; } }
+id = "alice"
+persona = "frustrated_power_user"
+hidden_goal = "refund_3mo"
+model = "user-model"
+initial_action = { tool = "open_ticket", args = { ticket_id = "t-100", user_id = "u-alice", subject = "want my money back" } }
 
 [[scenario.refund_storm.agents]]
-id = &quot;rep1&quot;
-model = &quot;claude-sonnet-4-5&quot;
-tools = [&quot;lookup_user&quot;, &quot;issue_refund&quot;, &quot;escalate&quot;, &quot;search_kb&quot;]
+id = "rep1"
+model = "claude-sonnet-4-5"
+tools = ["lookup_user", "issue_refund", "escalate", "search_kb"]
 
 [scenario.refund_storm.graders]
-alice_refund_resolved = &quot;alice_hidden_goal_resolved&quot;
-global_no_double_refunds = &quot;not had_double_refund&quot;</code></pre>
-<p>Per-scenario fields:</p>
-<ul>
-<li>`<code>world</code>` (required): the world name to construct.</li>
-<li>`<code>duration_turns</code><code>: integer used as </code><code>world.turn_count &gt; N</code>` for the until predicate. Defaults to 20.</li>
-<li>`<code>seed</code>`: informational; not consumed by the runtime today.</li>
-<li>`<code>users</code><code>: array of user specs. Each entry supplies </code><code>id</code><code>, </code><code>persona</code><code>, optional </code><code>hidden_goal</code><code>, optional </code><code>model</code><code>, and an optional </code><code>initial_action = { tool = &quot;...&quot;, args = {...} }</code>`.</li>
-<li>`<code>agents</code><code>: array of agent specs. </code><code>id</code><code>, </code><code>model</code><code>, </code><code>tools</code><code> get passed to </code><code>world.spawn_agent</code>`.</li>
-<li>`<code>graders</code><code>: a table of name =&gt; grader expression. Each expression is evaluated against the context the loader builds; truthy values become </code><code>1.0</code><code>, falsy </code><code>0.0</code>`.</li>
-</ul>
-<h2 id="grader-expressions">Grader expressions</h2>
-<p>Grader expressions live in a tiny boolean DSL: `<code>and</code><code>, </code><code>or</code><code>, </code><code>not</code><code>, parens, and bare names. Calls, attribute access, and literals other than </code><code>true</code><code>/</code><code>false</code>` are rejected. The scenario loader builds a context that includes:</p>
-<ul>
-<li>`<code>true</code><code>, </code><code>false</code><code>, </code><code>any_event</code><code>, </code><code>turn_count</code>` (the literal shortcuts).</li>
-<li>Every world predicate by name, evaluated against the trace.</li>
-<li>Per-user predicates as `<code>&lt;user_id&gt;_&lt;predicate&gt;</code><code>, evaluated with </code><code>args = {&quot;user_id&quot;: &quot;&lt;user_id&gt;&quot;}</code>`.</li>
-</ul>
-<p>Unknown names raise rather than silently returning false, so a typo in a grader expression fails loudly at run time.</p>
+alice_refund_resolved = "alice_hidden_goal_resolved"
+global_no_double_refunds = "not had_double_refund"</code></pre>
+      <p>Per-scenario fields:</p>
+      <ul>
+        <li><code>world</code> (required): the world name to
+          construct.</li>
+        <li><code>duration_turns</code>: integer used as
+          <code>world.turn_count &gt; N</code> for the until
+          predicate. Defaults to 20.</li>
+        <li><code>seed</code>: informational; not consumed by the
+          runtime today.</li>
+        <li><code>users</code>: array of user specs. Each entry
+          supplies <code>id</code>, <code>persona</code>, optional
+          <code>hidden_goal</code>, optional <code>model</code>, and
+          an optional
+          <code>initial_action = { tool = "...", args = {...} }</code>.</li>
+        <li><code>agents</code>: array of agent specs.
+          <code>id</code>, <code>model</code>, <code>tools</code> get
+          passed to <code>world.spawn_agent</code>.</li>
+        <li><code>graders</code>: a table of name =&gt; grader
+          expression. Each expression is evaluated against the
+          context the loader builds; truthy values become
+          <code>1.0</code>, falsy <code>0.0</code>.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Grader expressions</h2>
+      <p>
+        Grader expressions live in a tiny boolean DSL:
+        <code>and</code>, <code>or</code>, <code>not</code>, parens,
+        and bare names. Calls, attribute access, and literals other
+        than <code>true</code>/<code>false</code> are rejected. The
+        scenario loader builds a context that includes:
+      </p>
+      <ul>
+        <li><code>true</code>, <code>false</code>,
+          <code>any_event</code>, <code>turn_count</code> (the
+          literal shortcuts).</li>
+        <li>Every world predicate by name, evaluated against the
+          trace.</li>
+        <li>Per-user predicates as
+          <code>&lt;user_id&gt;_&lt;predicate&gt;</code>, evaluated
+          with <code>args = {"user_id": "&lt;user_id&gt;"}</code>.</li>
+      </ul>
+      <p>
+        Unknown names raise rather than silently returning false, so
+        a typo in a grader expression fails loudly at run time.
+      </p>
+    </section>
+
+    <footer class="site">
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
+    </footer>
   </main>
 
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/rust.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
   <script>hljs.highlightAll();</script>
 </body>
 </html>

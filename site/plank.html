@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ensemble, plank</title>
+  <title>ensemble, plank example</title>
   <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -13,13 +13,20 @@
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
     <nav>
       <div class="nav-group">
-        <div class="nav-group-title">Site</div>
+        <div class="nav-group-title">Get started</div>
         <a href="index.html">Overview</a>
-        <a href="docs.html">Docs</a>
-        <a href="scenarios.html">Scenarios</a>
-        <a href="plank.html" class="active">Plank</a>
+        <a href="quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="worlds.html">Writing a world</a>
+        <a href="scenarios.html">Writing a scenario</a>
+        <a href="tools.html">Tools</a>
         <a href="personas.html">Personas</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
         <a href="mcp.html">MCP</a>
+        <a href="plank.html" class="active">Plank example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -27,41 +34,27 @@
         <a href="reference/world-api.html">World API</a>
         <a href="reference/scenarios.html">Scenarios</a>
         <a href="reference/tools.html">Tools</a>
+        <a href="reference/predicates.html">Predicates</a>
         <a href="reference/personas.html">Personas</a>
         <a href="reference/cli.html">CLI</a>
         <a href="reference/runtime.html">Runtime</a>
         <a href="reference/traces.html">Traces</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-title">Docs sections</div>
-        <a href="docs.html#what-it-is">What Ensemble is</a>
-        <a href="docs.html#mental-model">Mental model</a>
-        <a href="docs.html#install">Install</a>
-        <a href="docs.html#first-scenario">Your first scenario</a>
-        <a href="docs.html#first-world">Your first world</a>
-        <a href="docs.html#tools">Tools</a>
-        <a href="docs.html#users-personas">Users and personas</a>
-        <a href="docs.html#verification">Verification and reward</a>
-        <a href="docs.html#rl">As an RL environment</a>
-        <a href="docs.html#power-user">Mid-run intervention</a>
-        <a href="docs.html#toml">TOML scenarios</a>
-        <a href="docs.html#cli">CLI</a>
-        <a href="docs.html#training">Training personas</a>
-        <a href="docs.html#architecture">Architecture</a>
-        <a href="docs.html#trace-format">Trace format</a>
-        <a href="docs.html#contributing">Contributing</a>
+        <a href="reference/sweeps.html">Sweeps</a>
+        <a href="reference/observability.html">Observability</a>
       </div>
     </nav>
   </aside>
 
   <main>
-    <h1>Plank</h1>
+    <h1>Plank example</h1>
     <p class="lead">
-      Plank is a small fake SaaS customer-support tool. It is the worked
-      example world that ships with Ensemble and the one the hero demo
-      runs against. Its job is to show the framework's shape end to end:
-      a typed world, a tool registry, a handful of personas, and three
-      scenarios that exercise different parts of the system.
+      Plank is a small fake SaaS customer-support world that ships with
+      Ensemble. It is the worked example the hero demo runs against and
+      the one most of the docs reach for when they need a concrete tool
+      registry or scenario. Its job is to show the framework's shape
+      end to end: a typed world backed by a Rust crate, a registry of
+      six tools, five personas, and three scenarios that exercise
+      different parts of the system.
     </p>
 
     <section>
@@ -71,7 +64,8 @@
         The database lives inside <code>plank::PlankState</code> and is
         shared by every tool closure through an
         <code>Arc&lt;Mutex&lt;_&gt;&gt;</code>. Each
-        <code>World("plank")</code> instance gets its own fresh database.
+        <code>World("plank")</code> instance gets its own fresh
+        database, which is what makes runs reproducible.
       </p>
 <pre><code class="language-sql">users         (id, name, email, plan)
 tickets       (id, user_id, subject, status, opened_at)
@@ -85,16 +79,22 @@ refunds       (id, user_id, amount_cents, reason, ts)</code></pre>
       <h2>Tools</h2>
       <p>
         Six tools operate on the database. All six write to
-        <code>audit_log</code>, which means the grader can replay the
-        full sequence of agent actions after the run finishes.
+        <code>audit_log</code>, so the grader can replay the full
+        sequence of agent actions after the run finishes.
       </p>
       <ul>
         <li><code>lookup_user(user_id)</code> fetches a user record.</li>
         <li><code>lookup_ticket(ticket_id)</code> fetches a ticket.</li>
-        <li><code>issue_refund(user_id, amount_cents, reason)</code> issues a refund. The tool refuses a second call for the same user, which is what makes the <code>no_double_refunds</code> grader meaningful.</li>
-        <li><code>escalate(ticket_id, to_team)</code> sets a ticket status to <code>escalated</code>.</li>
-        <li><code>search_kb(query)</code> runs a case-insensitive substring search over the knowledge base.</li>
-        <li><code>update_subscription(user_id, plan)</code> switches a user's plan.</li>
+        <li><code>issue_refund(user_id, amount_cents, reason)</code>
+          issues a refund. The tool refuses a second call for the same
+          user, which is what makes the
+          <code>no_double_refunds</code> grader meaningful.</li>
+        <li><code>escalate(ticket_id, to_team)</code> sets a ticket
+          status to <code>escalated</code>.</li>
+        <li><code>search_kb(query)</code> runs a case-insensitive
+          substring search over the knowledge base.</li>
+        <li><code>update_subscription(user_id, plan)</code> switches a
+          user's plan.</li>
       </ul>
     </section>
 
@@ -102,11 +102,11 @@ refunds       (id, user_id, amount_cents, reason, ts)</code></pre>
       <h2>Personas shipped</h2>
       <p>
         Five personas ship with Plank. One is trained, four are
-        prompted. See the <a href="personas.html">personas page</a> for
-        the TOML schema and the training pipeline.
+        prompted. See the <a href="personas.html">personas guide</a>
+        for the TOML schema and the training pipeline.
       </p>
       <ul>
-        <li><code>frustrated_power_user</code>, trained adapter via DPO+LoRA.</li>
+        <li><code>frustrated_power_user</code>, trained adapter via DPO+LoRA on Qwen2.5-7B.</li>
         <li><code>confused_new_user</code>, prompted.</li>
         <li><code>enterprise_admin</code>, prompted.</li>
         <li><code>patient_retail</code>, prompted.</li>
@@ -117,9 +117,13 @@ refunds       (id, user_id, amount_cents, reason, ts)</code></pre>
     <section>
       <h2>Scenarios shipped</h2>
       <ul>
-        <li><code>plank.single_ticket</code> is the sanity check. One user, one agent.</li>
-        <li><code>plank.refund_storm</code> is the hero demo on the front page. Three users, two agents, contended refund policy.</li>
-        <li><code>plank.enterprise_audit</code> uses the <code>async with</code> path with mid-run intervention.</li>
+        <li><code>plank.single_ticket</code> is the sanity check. One
+          user, one agent, one ticket.</li>
+        <li><code>plank.refund_storm</code> is the hero demo on the
+          front page. Three users, two agents, contended refund
+          policy.</li>
+        <li><code>plank.enterprise_audit</code> uses the
+          <code>async with</code> path with mid-run intervention.</li>
       </ul>
     </section>
 
@@ -137,10 +141,10 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ./target/debug/ensemble trace view traces/plank_refund_storm.jsonl \
   --site site --port 8765</code></pre>
       <p>
-        The Rust world (state + tool implementations) lives at
-        <code>examples/plank/world/src/</code>, the plank python
-        extension at <code>examples/plank/python_ext/</code>, the
-        Python package and <code>register_world</code> call at
+        The Rust world (state and tool implementations) lives at
+        <code>examples/plank/world/src/</code>, the Python extension at
+        <code>examples/plank/python_ext/</code>, the Python package and
+        <code>register_world</code> call at
         <code>examples/plank/plank/</code>, the scenarios at
         <code>examples/plank/scenarios/</code>, the personas at
         <code>examples/plank/personas/</code>, and the manifest at
@@ -148,8 +152,23 @@ export ANTHROPIC_API_KEY=sk-ant-...
       </p>
     </section>
 
+    <section>
+      <h2>Where to go next</h2>
+      <ul>
+        <li><a href="worlds.html">Writing a world</a> for the
+          decisions Plank made (Rust-backed state, typed tool calls)
+          translated into the general pattern.</li>
+        <li><a href="scenarios.html">Writing a scenario</a> for how
+          <code>plank.refund_storm</code> wires three users and two
+          agents together.</li>
+        <li><a href="personas.html">Personas</a> for the schema behind
+          the five personas Plank ships.</li>
+      </ul>
+    </section>
+
     <footer class="site">
-      [copy: source link once the repo is public]. Built in Rust and Python.
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
     </footer>
   </main>
 

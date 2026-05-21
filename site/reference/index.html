@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ensemble, reference home reference</title>
+  <title>ensemble, reference</title>
   <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
   <link rel="stylesheet" href="../style.css">
 </head>
@@ -13,13 +13,20 @@
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
     <nav>
       <div class="nav-group">
-        <div class="nav-group-title">Site</div>
+        <div class="nav-group-title">Get started</div>
         <a href="../index.html">Overview</a>
-        <a href="../docs.html">Docs</a>
-        <a href="../scenarios.html">Scenarios overview</a>
-        <a href="../plank.html">Plank</a>
-        <a href="../personas.html">Personas overview</a>
+        <a href="../quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="../worlds.html">Writing a world</a>
+        <a href="../scenarios.html">Writing a scenario</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../personas.html">Personas</a>
+        <a href="../sweeps.html">Sweeps</a>
+        <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
+        <a href="../plank.html">Plank example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -32,49 +39,197 @@
         <a href="cli.html">CLI</a>
         <a href="runtime.html">Runtime</a>
         <a href="traces.html">Traces</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-title">On this page</div>
-        <a href="#world-api">[World API](world-api.md)</a>
-        <a href="#scenarios">[Scenarios](scenarios.md)</a>
-        <a href="#tools">[Tools](tools.md)</a>
-        <a href="#predicates">[Predicates](predicates.md)</a>
-        <a href="#personas">[Personas](personas.md)</a>
-        <a href="#cli">[CLI](cli.md)</a>
-        <a href="#runtime">[Runtime](runtime.md)</a>
-        <a href="#traces">[Traces](traces.md)</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
       </div>
     </nav>
   </aside>
 
   <main>
-<h1>Reference</h1>
-<p>This section is the reference complement to the tutorial pages on the site. It answers &quot;what does this thing do, exactly&quot; for every piece of the public surface. Tutorial pages explain when and why; these pages explain the contract.</p>
-<p>Each page is a single scrollable document. There are no forward-references that ask you to continue on the next page; if two pages overlap, the relevant sections cross-link, so following the link reaches what you need without sequential reading.</p>
-<h2 id="world-api"><a href="world-api.html">World API</a></h2>
-<p>How to write a world plugin. <code>register_world</code> and its kwargs, the python plugin path through <code>PluginTool</code> and predicates, the <code>World.apply</code> system-level mutation entry point, the rust <code>WorldState</code> trait for worlds with a typed rust core, and the <code>world.toml</code> manifest schema field by field. Reach for this page when you are extending the framework with a new world or wiring an existing rust state library into a world plugin.</p>
-<h2 id="scenarios"><a href="scenarios.html">Scenarios</a></h2>
-<p>The <code>@scenario</code> decorator (both flavours), the <code>World</code> instance the scenario function binds against, every method and property the scenario calls (<code>spawn_user</code>, <code>spawn_agent</code>, <code>until</code>, <code>run</code>, <code>simulate</code>, <code>apply</code>, the cost ledger, predicate evaluation), and the <code>scenarios.toml</code> declarative format with its grader-expression DSL. Start here when you are authoring a new scenario or reading an existing one closely.</p>
-<h2 id="tools"><a href="tools.html">Tools</a></h2>
-<p>How to declare a tool a world&#x27;s agents can call. The <code>PluginTool</code> dataclass, the <code>tool()</code> helper for the common case, the JSON-string envelope (<code>effect</code>, <code>diff</code>, <code>costs</code>, <code>progress</code>) the runtime expects, and the four optional capabilities tools opt into: resource locks, timeouts, progress emission, and cost annotations. The last section covers sandboxed dispatch through <code>ensemble.tool_worker</code>.</p>
-<h2 id="predicates"><a href="predicates.html">Predicates</a></h2>
-<p>The named yes/no questions a world publishes for scenarios to ask. The <code>PluginPredicate</code> type, the <code>predicate</code> helper for the common case, the <code>evaluate_predicate</code> / <code>predicate_names</code> surface, how user-scoped predicates dispatch on <code>args[&quot;user_id&quot;]</code>, and how grader expressions compile predicate names into scores. Worked example from popcorn-world&#x27;s trace-walking and state-reading predicates. Reach for this page when you are writing a grader, an <code>until</code> condition, or a new world&#x27;s predicate set.</p>
-<h2 id="personas"><a href="personas.html">Personas</a></h2>
-<p>The persona TOML schema field by field, the hidden-state mechanism that travels with a user actor and is rendered into the system prompt, the <code>PromptedPersona</code> wrapper, the <code>LocalAdapterBackend</code>, and the auto-wiring that routes a <code>mode = &quot;trained&quot;</code> persona&#x27;s user to a vLLM-served adapter via <code>serve_url</code> or <code>ENSEMBLE_VLLM_BASE_URL</code>. Reach for this page when you are writing or tuning a persona, or when you are wiring a trained adapter from <code>ensemble-train</code> back into a scenario.</p>
-<h2 id="cli"><a href="cli.html">CLI</a></h2>
-<p>Every <code>ensemble</code> subcommand and every flag, with type, default, behavior, side effects, and one example invocation. <code>init</code>, <code>run</code>, <code>trace view</code>, <code>worlds {list, add, remove, show}</code>, <code>mcp serve</code> (in both tools-only and scenario-driving forms), and <code>train</code>. Reach for this page when you are looking up a flag you forgot or wiring the binary into a script.</p>
-<h2 id="runtime"><a href="runtime.html">Runtime</a></h2>
-<p>The <code>LLMBackend</code> trait and the four shipped implementations (<code>AnthropicBackend</code>, <code>OpenAIBackend</code>, <code>LocalAdapterBackend</code>, <code>MockBackend</code>), how <code>CompletionResponse.usage</code> becomes per-actor cost annotations, the <code>auto</code> backend&#x27;s precedence rules, the <code>max_tokens</code> vs <code>max_completion_tokens</code> divergence between providers, and the minimal contract a custom backend implements. Reach for this page when you are debugging a real-network run or writing a new backend.</p>
-<h2 id="traces"><a href="traces.html">Traces</a></h2>
-<p>The JSONL trace format. Every event kind with its schema, when the runtime emits it, what the <code>seed</code> flag means and which paths set it, and how to read a trace from Python or Rust. The last section sketches the trace viewer&#x27;s data model. Reach for this page when you are writing a predicate, a grader, or any downstream consumer of trace data.</p>
+    <h1>Reference</h1>
+    <p>
+      This section is the reference complement to the
+      <a href="../quickstart.html">quickstart</a> and the tutorial
+      pages on the site. It answers "what does this thing do,
+      exactly" for every piece of the public surface. Tutorial pages
+      explain when and why; these pages explain the contract.
+    </p>
+    <p>
+      Each page is a single scrollable document. There are no
+      forward-references that ask you to continue on the next page;
+      if two pages overlap, the relevant sections cross-link, so
+      following the link reaches what you need without sequential
+      reading.
+    </p>
+    <p>
+      If you are new to ensemble, read the
+      <a href="../quickstart.html">quickstart</a> first. It walks
+      from install to a running scenario to writing a tool and a
+      scenario, and points back into these reference pages for the
+      contracts behind each step.
+    </p>
+
+    <section>
+      <h2><a href="world-api.html">World API</a></h2>
+      <p>
+        How to write a world plugin. <code>register_world</code> and
+        its kwargs, the python plugin path through
+        <code>PluginTool</code> and predicates, the
+        <code>World.apply</code> system-level mutation entry point,
+        the rust <code>WorldState</code> trait for worlds with a
+        typed rust core, and the <code>world.toml</code> manifest
+        schema field by field. Reach for this page when you are
+        extending the framework with a new world or wiring an
+        existing rust state library into a world plugin.
+      </p>
+    </section>
+
+    <section>
+      <h2><a href="scenarios.html">Scenarios</a></h2>
+      <p>
+        The <code>@scenario</code> decorator (both flavours), the
+        <code>World</code> instance the scenario function binds
+        against, every method and property the scenario calls
+        (<code>spawn_user</code>, <code>spawn_agent</code>,
+        <code>until</code>, <code>run</code>, <code>simulate</code>,
+        <code>apply</code>, the cost ledger, predicate evaluation),
+        and the <code>scenarios.toml</code> declarative format with
+        its grader-expression DSL. Start here when you are authoring
+        a new scenario or reading an existing one closely.
+      </p>
+    </section>
+
+    <section>
+      <h2><a href="tools.html">Tools</a></h2>
+      <p>
+        How to declare a tool a world's agents can call. The
+        <code>PluginTool</code> dataclass, the <code>tool()</code>
+        helper for the common case, the JSON-string envelope
+        (<code>effect</code>, <code>diff</code>, <code>costs</code>,
+        <code>progress</code>) the runtime expects, and the four
+        optional capabilities tools opt into: resource locks,
+        timeouts, progress emission, and cost annotations. The last
+        section covers sandboxed dispatch through
+        <code>ensemble.tool_worker</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2><a href="predicates.html">Predicates</a></h2>
+      <p>
+        The named yes/no questions a world publishes for scenarios
+        to ask. The <code>PluginPredicate</code> type, the
+        <code>predicate</code> helper for the common case, the
+        <code>evaluate_predicate</code> / <code>predicate_names</code>
+        surface, how user-scoped predicates dispatch on
+        <code>args["user_id"]</code>, and how grader expressions
+        compile predicate names into scores. Worked example from
+        popcorn-world's trace-walking and state-reading predicates.
+        Reach for this page when you are writing a grader, an
+        <code>until</code> condition, or a new world's predicate set.
+      </p>
+    </section>
+
+    <section>
+      <h2><a href="personas.html">Personas</a></h2>
+      <p>
+        The persona TOML schema field by field, the hidden-state
+        mechanism that travels with a user actor and is rendered
+        into the system prompt, the <code>PromptedPersona</code>
+        wrapper, the <code>LocalAdapterBackend</code>, and the
+        auto-wiring that routes a <code>mode = "trained"</code>
+        persona's user to a vLLM-served adapter via
+        <code>serve_url</code> or
+        <code>ENSEMBLE_VLLM_BASE_URL</code>. Reach for this page
+        when you are writing or tuning a persona, or when you are
+        wiring a trained adapter from <code>ensemble-train</code>
+        back into a scenario.
+      </p>
+    </section>
+
+    <section>
+      <h2><a href="cli.html">CLI</a></h2>
+      <p>
+        Every <code>ensemble</code> subcommand and every flag, with
+        type, default, behavior, side effects, and one example
+        invocation. <code>init</code>, <code>run</code>,
+        <code>trace view</code>,
+        <code>worlds {list, add, remove, show}</code>,
+        <code>mcp serve</code> (in both tools-only and
+        scenario-driving forms), and <code>train</code>. Reach for
+        this page when you are looking up a flag you forgot or
+        wiring the binary into a script.
+      </p>
+    </section>
+
+    <section>
+      <h2><a href="runtime.html">Runtime</a></h2>
+      <p>
+        The <code>LLMBackend</code> trait and the four shipped
+        implementations (<code>AnthropicBackend</code>,
+        <code>OpenAIBackend</code>,
+        <code>LocalAdapterBackend</code>,
+        <code>MockBackend</code>), how
+        <code>CompletionResponse.usage</code> becomes per-actor cost
+        annotations, the <code>auto</code> backend's precedence
+        rules, the <code>max_tokens</code> vs
+        <code>max_completion_tokens</code> divergence between
+        providers, and the minimal contract a custom backend
+        implements. Reach for this page when you are debugging a
+        real-network run or writing a new backend.
+      </p>
+    </section>
+
+    <section>
+      <h2><a href="traces.html">Traces</a></h2>
+      <p>
+        The JSONL trace format. Every event kind with its schema,
+        when the runtime emits it, what the <code>seed</code> flag
+        means and which paths set it, and how to read a trace from
+        Python or Rust. The last section sketches the trace viewer's
+        data model. Reach for this page when you are writing a
+        predicate, a grader, or any downstream consumer of trace
+        data.
+      </p>
+    </section>
+
+    <section>
+      <h2><a href="sweeps.html">Sweeps</a></h2>
+      <p>
+        The <code>sweep.toml</code> schema, the runner command, cell
+        expansion, the on-disk layout (one directory per cell plus a
+        flat <code>index.jsonl</code>), resume semantics, and
+        concurrency. Reach for this page when you want to run the
+        same scenario across a matrix of backends, models, seeds, or
+        environment variables and aggregate the results.
+      </p>
+    </section>
+
+    <section>
+      <h2><a href="observability.html">Cross-run observability</a></h2>
+      <p>
+        The per-run trace-dir layout, the <code>runs.jsonl</code>
+        index format, and the four <code>ensemble runs</code>
+        subcommands (<code>list</code>, <code>show</code>,
+        <code>compare</code>, <code>export</code>) plus
+        <code>ensemble trace compare</code>. Reach for this page
+        when you have run scenarios and want to find a specific run
+        later, compare two runs side by side, or export the index
+        for downstream analysis.
+      </p>
+    </section>
+
+    <footer class="site">
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
+    </footer>
   </main>
 
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/rust.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
   <script>hljs.highlightAll();</script>
 </body>
 </html>

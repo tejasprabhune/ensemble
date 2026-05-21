@@ -13,13 +13,20 @@
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
     <nav>
       <div class="nav-group">
-        <div class="nav-group-title">Site</div>
+        <div class="nav-group-title">Get started</div>
         <a href="../index.html">Overview</a>
-        <a href="../docs.html">Docs</a>
-        <a href="../scenarios.html">Scenarios overview</a>
-        <a href="../plank.html">Plank</a>
-        <a href="../personas.html">Personas overview</a>
+        <a href="../quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="../worlds.html">Writing a world</a>
+        <a href="../scenarios.html">Writing a scenario</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../personas.html">Personas</a>
+        <a href="../sweeps.html">Sweeps</a>
+        <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
+        <a href="../plank.html">Plank example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -32,26 +39,169 @@
         <a href="cli.html">CLI</a>
         <a href="runtime.html">Runtime</a>
         <a href="traces.html">Traces</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-title">On this page</div>
-        <a href="#plugintool">PluginTool</a>
-        <a href="#tool-helper">tool() helper</a>
-        <a href="#effect-diff-costs-progress-envelope">Effect, diff, costs, progress envelope</a>
-        <a href="#resources">Resources</a>
-        <a href="#timeouts">Timeouts</a>
-        <a href="#progress">Progress</a>
-        <a href="#costs">Costs</a>
-        <a href="#sandboxed-tools">Sandboxed tools</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
       </div>
     </nav>
   </aside>
 
   <main>
-<h1>Tools</h1>
-<p>This page documents how to declare a tool a world&#x27;s agents can call. It covers the `<code>PluginTool</code><code> dataclass at the bottom of the stack, the </code><code>tool()</code>` helper that wraps a plain python function for the common case (in both factory and decorator forms), the JSON-string envelope the runtime expects, the four optional capabilities a tool can opt into (resource locks, timeouts, progress emission, cost annotations), and the sandboxed-dispatch contract.</p>
-<h2 id="plugintool">PluginTool</h2>
-<p>`<code>PluginTool</code><code> is the dataclass </code><code>register_world</code>` accepts. Every plugin tool eventually lands as one of these:</p>
+    <h1>Tools</h1>
+    <p>
+      A tool is a python function the agent can call. This page
+      covers the three shapes of the <code>@tool</code> decorator,
+      the JSON-Schema inference rules, the return-envelope contract,
+      and the four optional capabilities a tool can opt into:
+      resource locks, timeouts, progress emission, and cost
+      annotations. The last section covers sandboxed dispatch.
+    </p>
+    <p>
+      Reach for this page when you are adding a tool, choosing
+      between the decorator shapes, or wiring a tool's optional
+      capability.
+    </p>
+
+    <section>
+      <h2>The common case: bare <code>@tool</code></h2>
+      <p>
+        In the common case the decorator infers everything from the
+        function. The name comes from the function's
+        <code>__name__</code>, the description from the first
+        paragraph of the docstring, and the JSON-Schema
+        <code>parameters</code> from the type hints. Tools whose
+        inputs are typed primitives, lists, dicts, or
+        <code>Optional[T]</code> should reach for this form first:
+      </p>
+<pre><code class="language-python">from ensemble import register_world, tool
+
+
+@tool
+def lookup_user(user_id: str) -&gt; dict:
+    """Return the user record by id."""
+    return {"id": user_id, "name": "Alice", "plan": "team"}
+
+
+@tool
+def search_kb(query: str, tags: list[str] | None = None) -&gt; list:
+    """Search the knowledge base. Tags filter the returned items."""
+    return kb.search(query, tags or [])
+
+
+register_world("my_world", tools=[lookup_user, search_kb])</code></pre>
+      <p>The inferred schema for <code>search_kb</code> here is:</p>
+<pre><code class="language-json">{
+  "type": "object",
+  "properties": {
+    "query": {"type": "string"},
+    "tags": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["query"]
+}</code></pre>
+      <p>
+        Parameters with no default become <code>required</code>.
+        <code>Optional[T]</code> and default-<code>None</code>
+        parameters do not. <code>Literal["a", "b"]</code> becomes
+        <code>{"enum": ["a", "b"]}</code>. Unknown types become an
+        empty schema fragment, which the runtime treats as "any JSON
+        value"; reach for the override form when you want a tighter
+        schema than inference can produce.
+      </p>
+    </section>
+
+    <section>
+      <h2>Decorator with overrides</h2>
+      <p>
+        When you want to keep inference for most fields but override
+        one or two (a tool name that differs from the function name,
+        a description that is not the docstring's first paragraph, a
+        hand-written schema):
+      </p>
+<pre><code class="language-python">@tool(description="Submit the kernel for static checks and run.")
+def submit(src: str):
+    return runner.check_and_run(src)</code></pre>
+      <p>
+        Any of <code>name</code>, <code>description</code>,
+        <code>parameters</code>, <code>timeout_ms</code>,
+        <code>resources</code>, <code>sandbox</code>,
+        <code>sandbox_world</code> may be passed. Fields you omit
+        are inferred from the function.
+      </p>
+    </section>
+
+    <section>
+      <h2>Four-argument factory</h2>
+      <p>
+        For tools whose schema is already in hand and you want a
+        <code>PluginTool</code> built eagerly (inside a
+        <code>register_world(tools=[...])</code> call, for example):
+      </p>
+<pre><code class="language-python">register_world("my_world", tools=[
+    tool(
+        "submit_kernel",
+        "Submit the kernel and run it.",
+        {"type": "object", "properties": {"src": {"type": "string"}},
+         "required": ["src"]},
+        submit_kernel_fn,
+    ),
+])</code></pre>
+      <p>
+        This form does no inference: every field is explicit. It is
+        the right call when the schema is generated from somewhere
+        else (a shared spec, a server's tool list) or when the
+        function does not have type hints.
+      </p>
+    </section>
+
+    <section>
+      <h2><code>World</code> subclass methods</h2>
+      <p>
+        Decorated methods on a <code>World</code> subclass work the
+        same way. The subclass walker picks them up at construction
+        time and binds them to <code>self</code>. The bare form is
+        fine because the walker skips <code>self</code> during
+        schema inference:
+      </p>
+<pre><code class="language-python">from ensemble import World, tool
+
+
+class MyWorld(World):
+    def setup(self):
+        self.db = Db()
+
+    @tool
+    def lookup_user(self, user_id: str) -&gt; dict:
+        """Return the user record by id."""
+        return {"ok": True, "data": self.db.lookup_user(user_id)}</code></pre>
+    </section>
+
+    <section>
+      <h2>Return envelope</h2>
+      <p>The wrapper accepts three return shapes:</p>
+      <ul>
+        <li>A dict, sent as the tool's effect.</li>
+        <li>A <code>(effect, diff)</code> tuple. The diff is emitted
+          as a <code>state_diff</code> event alongside the
+          <code>tool_result</code>.</li>
+        <li>A dict that contains one or more of <code>effect</code>,
+          <code>diff</code>, <code>costs</code>,
+          <code>progress</code>. This is the structured-envelope
+          form, used when the tool wants to annotate cost or emit
+          progress without using the <code>emit_progress</code>
+          injection path.</li>
+      </ul>
+      <p>
+        Argument routing tries <code>fn(**args)</code> first and
+        falls back to <code>fn(args)</code> if the function rejects
+        keyword expansion. A function that declares an
+        <code>emit_progress</code> parameter receives a callable for
+        progress reporting; see the
+        <a href="#progress">progress section</a>.
+      </p>
+    </section>
+
+    <section>
+      <h2>PluginTool</h2>
+      <p>Underneath the decorators, every tool is a <code>PluginTool</code>:</p>
 <pre><code class="language-python">@dataclass
 class PluginTool:
     name: str
@@ -62,149 +212,171 @@ class PluginTool:
     resources: Optional[List[str]] = None
     sandbox: bool = False
     sandbox_world: Optional[str] = None</code></pre>
-<ul>
-<li>`<code>name</code><code> is what the model sees and what </code><code>register_tool</code>` keys the registry by.</li>
-<li>`<code>description</code>` is the LLM-facing hint. Both Anthropic and OpenAI forward it to the model verbatim.</li>
-<li>`<code>parameters</code>` is the JSON Schema for the tool&#x27;s argument object. The runtime does not enforce the schema; it forwards it to the model so the model produces compliant args.</li>
-<li>`<code>fn</code><code> is the callable the runtime dispatches to. Most authors do not write </code><code>fn</code><code> directly; they write a plain python function and let </code><code>tool(...)</code>` wrap it.</li>
-<li>`<code>timeout_ms</code><code>, </code><code>resources</code><code>, </code><code>sandbox</code><code>, and </code><code>sandbox_world</code>` are documented in their own sections below.</li>
-</ul>
-<h2 id="tool-helper">tool() helper</h2>
-<p>`<code>tool</code>` works as both a factory and a decorator factory. The factory form remains the legacy entry point:</p>
-<pre><code class="language-python"># my_world/__init__.py
-from ensemble import register_world, tool
+      <p>
+        Most authors never construct this directly; the decorators
+        build it from the wrapped function.
+      </p>
+    </section>
 
+    <section>
+      <h2>Resources</h2>
+<pre><code class="language-python">@tool(resources=["billing_db"])
+def lookup(user_id: str) -&gt; dict: ...</code></pre>
+      <p>
+        Each name in <code>resources</code> is a permit the runtime
+        acquires before the closure runs and releases when it
+        returns. Two dispatches that share a name serialise through
+        the world's <code>ResourceManager</code>; unrelated names
+        run in parallel. Resources can be declared up front via
+        <code>register_world(..., resources={"billing_db": 1})</code>
+        (the
+        <a href="world-api.html#worldtoml-manifest-schema">world api reference</a>
+        covers the manifest form). A name a tool references but no
+        one declared is created lazily as an exclusive lock on first
+        use.
+      </p>
+      <p>
+        A <code>{permits = N}</code> resource lets up to N concurrent
+        dispatches hold a permit simultaneously, which is the right
+        shape for a connection pool or a GPU lane shared across
+        tools.
+      </p>
+    </section>
 
-def lookup_user(user_id: str):
-    user = db.lookup_user(user_id)
-    return {&quot;ok&quot;: True, &quot;data&quot;: user}
-
-
-register_world(
-    &quot;my_world&quot;,
-    tools=[
-        tool(
-            name=&quot;lookup_user&quot;,
-            description=&quot;Look up a user by id.&quot;,
-            parameters={
-                &quot;type&quot;: &quot;object&quot;,
-                &quot;properties&quot;: {&quot;user_id&quot;: {&quot;type&quot;: &quot;string&quot;}},
-                &quot;required&quot;: [&quot;user_id&quot;],
-            },
-            fn=lookup_user,
-        ),
-    ],
-)</code></pre>
-<p>The decorator-factory form works both at module level and on a `<code>World</code><code> subclass method. The decorated function is otherwise unchanged from the caller&#x27;s perspective; the metadata lives on </code><code>fn._ensemble_tool_meta</code>` for the runtime to consume:</p>
-<pre><code class="language-python"># my_world/__init__.py
-from ensemble import register_world, tool
-
-
-@tool(
-    name=&quot;lookup_user&quot;,
-    description=&quot;Look up a user by id.&quot;,
-    parameters={
-        &quot;type&quot;: &quot;object&quot;,
-        &quot;properties&quot;: {&quot;user_id&quot;: {&quot;type&quot;: &quot;string&quot;}},
-        &quot;required&quot;: [&quot;user_id&quot;],
-    },
-    timeout_ms=2000,
-)
-def lookup_user(user_id: str):
-    return {&quot;ok&quot;: True, &quot;data&quot;: db.lookup_user(user_id)}
-
-
-register_world(&quot;my_world&quot;, tools=[lookup_user])</code></pre>
-<pre><code class="language-python"># my_world/world.py
-from ensemble import World, tool
-
-
-class MyWorld(World):
-    def setup(self):
-        self.db = Db()
-
-    @tool(
-        name=&quot;lookup_user&quot;,
-        description=&quot;Look up a user by id.&quot;,
-        parameters={
-            &quot;type&quot;: &quot;object&quot;,
-            &quot;properties&quot;: {&quot;user_id&quot;: {&quot;type&quot;: &quot;string&quot;}},
-            &quot;required&quot;: [&quot;user_id&quot;],
-        },
-    )
-    def lookup_user(self, user_id: str):
-        return {&quot;ok&quot;: True, &quot;data&quot;: self.db.lookup_user(user_id)}</code></pre>
-<p>The wrapper accepts three return shapes:</p>
-<ul>
-<li>A dict, sent as the tool&#x27;s effect.</li>
-<li>A `<code>(effect, diff)</code><code> tuple. The diff is emitted as a </code><code>state_diff</code><code> event alongside the </code><code>tool_result</code>`.</li>
-<li>A dict that contains one or more of `<code>effect</code><code>, </code><code>diff</code><code>, </code><code>costs</code><code>, </code><code>progress</code><code>. This is the structured-envelope form, used when the tool wants to annotate cost or emit progress without using the </code><code>emit_progress</code>` injection path.</li>
-</ul>
-<p>Argument routing tries `<code>fn(**args)</code><code> first and falls back to </code><code>fn(args)</code><code> if the function rejects keyword expansion. A function that declares an </code><code>emit_progress</code>` parameter receives a callable for progress reporting; see the <a href="#progress">progress section</a>.</p>
-<h2 id="effect-diff-costs-progress-envelope">Effect, diff, costs, progress envelope</h2>
-<p>The raw `<code>fn</code><code> callable a </code><code>PluginTool</code>` carries takes one string (the JSON of the args dict) and returns one string (the JSON of the result envelope). The envelope schema:</p>
-<pre><code class="language-json">{
-  &quot;effect&quot;: &lt;any JSON&gt;,
-  &quot;diff&quot;:    &lt;any JSON, optional&gt;,
-  &quot;costs&quot;:   {&quot;&lt;unit&gt;&quot;: &lt;number&gt;, ...},
-  &quot;progress&quot;: [{&quot;fraction&quot;: 0..1, &quot;message&quot;: &quot;...&quot;}],
-  &quot;is_error&quot;: &lt;bool, optional; the MCP path uses this&gt;
-}</code></pre>
-<p>The runtime forwards `<code>effect</code><code> to the calling agent as the tool&#x27;s return value. It emits a </code><code>state_diff</code><code> event when </code><code>diff</code><code> is present, a </code><code>cost</code><code> event per unit in </code><code>costs</code><code>, and a </code><code>progress</code><code> event per entry in </code><code>progress</code><code> (flushed in order, ahead of the trailing </code><code>tool_result</code>`). Any other keys are ignored.</p>
-<h2 id="resources">Resources</h2>
-<pre><code class="language-python">@tool(..., resources=[&quot;billing_db&quot;])
-def lookup(...): ...</code></pre>
-<p>Each name in `<code>resources</code><code> is a permit the runtime acquires before the closure runs and releases when it returns. Two dispatches that share a name serialise through the world&#x27;s </code><code>ResourceManager</code><code>; unrelated names run in parallel. Resources can be declared up front via </code><code>register_world(..., resources={&quot;billing_db&quot;: 1})</code>` (the <a href="world-api.html#worldtoml-manifest-schema">world api reference</a> covers the manifest form). A name a tool references but no one declared is created lazily as an exclusive lock on first use.</p>
-<p>A `<code>Shared{permits = N}</code><code> resource lets up to </code><code>N</code>` concurrent dispatches hold a permit simultaneously, which is the right shape for a connection pool or a GPU lane shared across tools.</p>
-<h2 id="timeouts">Timeouts</h2>
-<pre><code class="language-python">@tool(..., timeout_ms=2000)
+    <section>
+      <h2>Timeouts</h2>
+<pre><code class="language-python">@tool(timeout_ms=2000)
 def slow(...): ...</code></pre>
-<p>Caps a single dispatch at the given duration. When the timeout fires the runtime emits a `<code>tool_timeout</code><code> event, the calling agent sees a tool error, and the scenario continues. The closure runs on the tokio blocking pool; the timeout is applied around the </code><code>spawn_blocking</code>` future, so a closure that ignores the deadline still leaks until it completes, but the agent moves on.</p>
-<p>Pair `<code>timeout_ms</code>` with progress emission for long-running work so the trace is observable while the dispatch is in flight.</p>
-<h2 id="progress">Progress</h2>
-<p>A python tool that declares an `<code>emit_progress</code><code> parameter receives a callable; each invocation records one </code><code>(fraction, message)</code><code> pair that the runtime flushes to the trace as a </code><code>progress</code><code> event right before the trailing </code><code>tool_result</code>`. The helper inspects the function&#x27;s signature, so a tool that does not need progress reporting simply omits the parameter.</p>
-<pre><code class="language-python">@tool(
-    name=&quot;reconcile_billing&quot;,
-    description=&quot;Walk a user&#x27;s billing history.&quot;,
-    parameters={
-        &quot;type&quot;: &quot;object&quot;,
-        &quot;properties&quot;: {
-            &quot;user_id&quot;: {&quot;type&quot;: &quot;string&quot;},
-            &quot;months&quot;: {&quot;type&quot;: &quot;integer&quot;},
-        },
-        &quot;required&quot;: [&quot;user_id&quot;, &quot;months&quot;],
-    },
-)
-def reconcile(user_id: str, months: int, emit_progress):
+      <p>
+        Caps a single dispatch at the given duration. When the
+        timeout fires the runtime emits a <code>tool_timeout</code>
+        event, the calling agent sees a tool error, and the scenario
+        continues. The closure runs on the tokio blocking pool; the
+        timeout is applied around the <code>spawn_blocking</code>
+        future, so a closure that ignores the deadline still leaks
+        until it completes, but the agent moves on.
+      </p>
+      <p>
+        Pair <code>timeout_ms</code> with progress emission for
+        long-running work so the trace is observable while the
+        dispatch is in flight.
+      </p>
+    </section>
+
+    <section id="progress">
+      <h2>Progress</h2>
+      <p>
+        A python tool that declares an <code>emit_progress</code>
+        parameter receives a callable; each invocation records one
+        <code>(fraction, message)</code> pair that the runtime
+        flushes to the trace as a <code>progress</code> event right
+        before the trailing <code>tool_result</code>. The helper
+        inspects the function's signature, so a tool that does not
+        need progress reporting simply omits the parameter:
+      </p>
+<pre><code class="language-python">@tool
+def reconcile_billing(user_id: str, months: int, emit_progress) -&gt; dict:
+    """Walk a user's billing history month by month."""
     for i in range(1, months + 1):
-        emit_progress(i / months, f&quot;scanned month {i}/{months}&quot;)
+        emit_progress(i / months, f"scanned month {i}/{months}")
         ...
-    return {&quot;ok&quot;: True, &quot;months_reconciled&quot;: months}</code></pre>
-<p>The structured-envelope form (`<code>return {&quot;progress&quot;: [...]}</code>`) is still supported for tools that compute progress in bulk.</p>
-<h2 id="costs">Costs</h2>
-<p>Tools annotate cost by returning a `<code>costs</code>` dict in their envelope:</p>
+    return {"ok": True, "months_reconciled": months}</code></pre>
+      <p>
+        The structured-envelope form
+        (<code>return {"progress": [...]}</code>) is still supported
+        for tools that compute progress in bulk.
+      </p>
+    </section>
+
+    <section>
+      <h2>Costs</h2>
+      <p>
+        Tools annotate cost by returning a <code>costs</code> dict
+        in their envelope:
+      </p>
 <pre><code class="language-python">def heavy_op(...):
     ...
     return {
-        &quot;effect&quot;: {&quot;ok&quot;: True, &quot;result&quot;: result},
-        &quot;costs&quot;: {&quot;gpu_seconds&quot;: 4.2, &quot;usd&quot;: 0.03},
+        "effect": {"ok": True, "result": result},
+        "costs": {"gpu_seconds": 4.2, "usd": 0.03},
     }</code></pre>
-<p>Units are open strings. Each entry becomes one `<code>cost</code><code> event on the trace, attributed to the calling actor; the runtime maintains a running total per unit (both world-wide and per-actor). A budget declared via </code><code>world.set_budget(unit, amount, actor=...)</code><code> halts the scheduler with </code><code>StopReason::BudgetExceeded</code>` when a recorded cost would push the total past the cap.</p>
-<p>LLM backends also annotate cost on their own behalf. Each completion records `<code>tokens_in</code><code>, </code><code>tokens_out</code><code>, and (when the model is in </code><code>crates/ensemble-runtime/pricing.toml</code><code>) </code><code>usd</code>` against the actor that issued the call. The <a href="runtime.html#usage-and-cost-annotation">runtime reference</a> covers the pricing table.</p>
-<h2 id="sandboxed-tools">Sandboxed tools</h2>
-<pre><code class="language-python">@tool(..., sandbox=True)
+      <p>
+        Units are open strings. Each entry becomes one
+        <code>cost</code> event on the trace, attributed to the
+        calling actor; the runtime maintains a running total per
+        unit (both world-wide and per-actor). A budget declared via
+        <code>world.set_budget(unit, amount, actor=...)</code> halts
+        the scheduler with <code>StopReason::BudgetExceeded</code>
+        when a recorded cost would push the total past the cap.
+      </p>
+      <p>
+        LLM backends annotate cost on their own behalf. Each
+        completion records <code>tokens_in</code>,
+        <code>tokens_out</code>, and (when the model is in
+        <code>crates/ensemble-runtime/pricing.toml</code>)
+        <code>usd</code> against the actor that issued the call. The
+        aggregated totals surface on <code>RunResult.costs</code>,
+        <code>world.cost_summary()</code>, and the CLI's stdout
+        summary line for any run that recorded a cost. See the
+        <a href="runtime.html#usage-and-cost-annotation">runtime reference</a>
+        for the pricing table.
+      </p>
+    </section>
+
+    <section id="sandboxed-tools">
+      <h2>Sandboxed tools</h2>
+<pre><code class="language-python">@tool(sandbox=True)
 def compile_kernel(src: str): ...</code></pre>
-<p>A sandboxed tool runs each dispatch in a fresh `<code>python -m ensemble.tool_worker</code>` subprocess. The worker imports the world&#x27;s python package (which re-registers all of the world&#x27;s tools, building per-instance state from scratch), looks up the named tool, calls it once with the supplied JSON args, prints the result envelope on stdout, and exits. A crash in the worker surfaces as a structured error envelope rather than killing the scheduler.</p>
-<p>The cost is process startup per dispatch (tens to hundreds of milliseconds), so sandbox mode pays off only when isolation is worth more than the latency: tools that run untrusted code, tools that leave CUDA contexts in a bad state, tools that import a binary library that occasionally segfaults. State the parent&#x27;s closures held is not shared with the worker, so a sandboxed tool must encode its entire input in its JSON args and its entire output in its JSON return; for configuration the worker needs to read, use `<code>world.shared_state</code><code> (which the runtime serialises into </code><code>ENSEMBLE_SHARED_STATE</code>` on every dispatch). See the <a href="world-api.html#sandbox-contract">sandbox contract</a> on the world-api page for the full cross-boundary table.</p>
-<p>`<code>sandbox_world</code><code> is the world name the worker imports to re-register the tool. The wrapper fills it in automatically at </code><code>World(name)</code><code> construction time, so authors rarely set it themselves. Worlds that live outside the worlds registry should also set </code><code>python_package</code><code> and </code><code>package_dir</code><code> on </code><code>register_world</code><code> so the worker resolves the same package the parent loaded; subclass-form worlds derive these automatically from </code><code>type(self).__module__</code>`.</p>
+      <p>
+        A sandboxed tool runs each dispatch in a fresh
+        <code>python -m ensemble.tool_worker</code> subprocess. The
+        worker imports the world's python package (which
+        re-registers all of the world's tools, building per-instance
+        state from scratch), looks up the named tool, calls it once
+        with the supplied JSON args, prints the result envelope on
+        stdout, and exits. A crash in the worker surfaces as a
+        structured error envelope rather than killing the scheduler.
+      </p>
+      <p>
+        The cost is process startup per dispatch (tens to hundreds
+        of milliseconds), so sandbox mode pays off only when
+        isolation is worth more than the latency: tools that run
+        untrusted code, tools that leave CUDA contexts in a bad
+        state, tools that import a binary library that occasionally
+        segfaults. State the parent's closures held is not shared
+        with the worker, so a sandboxed tool must encode its entire
+        input in its JSON args and its entire output in its JSON
+        return; for configuration the worker needs to read, use
+        <code>world.shared_state</code> (which the runtime
+        serialises into <code>ENSEMBLE_SHARED_STATE</code> on every
+        dispatch). See the
+        <a href="world-api.html#sandbox-contract">sandbox contract</a>
+        on the world-api page for the full cross-boundary table.
+      </p>
+      <p>
+        <code>sandbox_world</code> is the world name the worker
+        imports to re-register the tool. The wrapper fills it in
+        automatically at <code>World(name)</code> construction time,
+        so authors rarely set it themselves. Worlds that live outside
+        the worlds registry should also set <code>python_package</code>
+        and <code>package_dir</code> on <code>register_world</code>
+        so the worker resolves the same package the parent loaded;
+        subclass-form worlds derive these automatically from
+        <code>type(self).__module__</code>.
+      </p>
+    </section>
+
+    <footer class="site">
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
+    </footer>
   </main>
 
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/rust.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
   <script>hljs.highlightAll();</script>
 </body>
 </html>

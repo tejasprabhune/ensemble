@@ -46,7 +46,8 @@ uv pip install 'ensemble-train[torch]'
 
 ## Run
 
-The complete on-ramp lives at [docs/quickstart.md](docs/quickstart.md).
+The complete on-ramp lives on the documentation site at
+[tejasprabhune.github.io/ensemble/quickstart.html](https://tejasprabhune.github.io/ensemble/quickstart.html).
 A short selection of common commands:
 
 ```sh
@@ -69,7 +70,7 @@ cd my_world
 ./target/debug/ensemble trace view traces/plank_refund_storm.jsonl
 ./target/debug/ensemble trace compare traces/<run_a>/trace.jsonl traces/<run_b>/trace.jsonl
 
-# Run a matrix of configurations (see docs/reference/sweeps.md).
+# Run a matrix of configurations (see the Sweeps page on the docs site).
 ./target/debug/ensemble sweep run sweep.toml
 
 # Re-bake the deterministic mock trace used on the site.

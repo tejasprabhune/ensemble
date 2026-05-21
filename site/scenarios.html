@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ensemble, scenarios</title>
+  <title>ensemble, writing a scenario</title>
   <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -13,13 +13,20 @@
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
     <nav>
       <div class="nav-group">
-        <div class="nav-group-title">Site</div>
+        <div class="nav-group-title">Get started</div>
         <a href="index.html">Overview</a>
-        <a href="docs.html">Docs</a>
-        <a href="scenarios.html" class="active">Scenarios</a>
-        <a href="plank.html">Plank</a>
+        <a href="quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="worlds.html">Writing a world</a>
+        <a href="scenarios.html" class="active">Writing a scenario</a>
+        <a href="tools.html">Tools</a>
         <a href="personas.html">Personas</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
         <a href="mcp.html">MCP</a>
+        <a href="plank.html">Plank example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -27,206 +34,335 @@
         <a href="reference/world-api.html">World API</a>
         <a href="reference/scenarios.html">Scenarios</a>
         <a href="reference/tools.html">Tools</a>
+        <a href="reference/predicates.html">Predicates</a>
         <a href="reference/personas.html">Personas</a>
         <a href="reference/cli.html">CLI</a>
         <a href="reference/runtime.html">Runtime</a>
         <a href="reference/traces.html">Traces</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-title">Docs sections</div>
-        <a href="docs.html#what-it-is">What Ensemble is</a>
-        <a href="docs.html#mental-model">Mental model</a>
-        <a href="docs.html#install">Install</a>
-        <a href="docs.html#first-scenario">Your first scenario</a>
-        <a href="docs.html#first-world">Your first world</a>
-        <a href="docs.html#tools">Tools</a>
-        <a href="docs.html#users-personas">Users and personas</a>
-        <a href="docs.html#verification">Verification and reward</a>
-        <a href="docs.html#rl">As an RL environment</a>
-        <a href="docs.html#power-user">Mid-run intervention</a>
-        <a href="docs.html#toml">TOML scenarios</a>
-        <a href="docs.html#cli">CLI</a>
-        <a href="docs.html#training">Training personas</a>
-        <a href="docs.html#architecture">Architecture</a>
-        <a href="docs.html#trace-format">Trace format</a>
-        <a href="docs.html#contributing">Contributing</a>
+        <a href="reference/sweeps.html">Sweeps</a>
+        <a href="reference/observability.html">Observability</a>
       </div>
     </nav>
   </aside>
 
   <main>
-    <h1>Scenarios</h1>
+    <h1>Writing a scenario</h1>
     <p class="lead">
-      A scenario assembles a set of actors, runs them in a shared
-      world, and grades the outcome.
-    </p>
-    <p>
-      The same simulation can be expressed three ways. The yield
-      flavor is the common case: it reads top-to-bottom as set-up,
-      run, grade. The <code>async with</code> flavor exposes the
-      running scheduler so a scenario can change the world mid-run,
-      which matters for tests that want to simulate a sudden mood
-      shift or inject a perturbation after the agent commits to a
-      plan. The TOML manifest is the declarative form: it covers the
-      cases where the scenario is essentially data (a sweep, a
-      regression suite) and you would rather not write Python.
-    </p>
-    <p>
-      All three compile to the same Rust scheduler; the choice is
-      stylistic. Most scenarios start as the yield flavor and only
-      grow into <code>async with</code> when they need intervention,
-      or into TOML when they become a matrix.
+      A scenario is the script that arranges a single run inside a
+      world. It spawns the users and agents, hands the agent its
+      first problem, declares when the run should stop, and reports
+      what counts as success. Most scenarios are twenty lines of
+      Python around a single <code>@scenario</code> decorator.
     </p>
 
     <section>
-      <h2>Yield flavor</h2>
+      <h2>The minimal shape</h2>
       <p>
-        Spawn actors, yield an until condition, yield a grader
-        dictionary. The first yield starts the scheduler and runs the
-        simulation until the condition fires. The second yield produces
-        the reward.
+        Every scenario follows the same skeleton: import the world so
+        its plugin registers, decorate an async function with
+        <code>@scenario</code>, spawn the actors, yield an
+        <code>Until</code> condition that tells the scheduler when to
+        stop, and yield a grader dict with the scores. The function
+        takes one argument, the <code>world</code> instance the
+        runner constructs for you.
       </p>
-<pre><code class="language-python">from collections.abc import AsyncIterator
+<pre><code class="language-python">import my_world  # noqa: F401  registers the world plugin
+from ensemble import scenario
 
-from ensemble import Until, World, scenario
 
+@scenario("my_world.refund", world="my_world")
+async def refund(world):
+    alice = world.spawn_user(persona="frustrated_customer")
+    rep = world.spawn_agent(tools=["lookup_user", "issue_refund"])
 
-@scenario("refund_storm", world="plank")
-async def refund_storm(world: World) -> AsyncIterator[Until | dict[str, float]]:
-    alice = world.spawn_user(
-        id="alice",
-        persona="frustrated_power_user",
-        hidden_goal="refund_3mo",
-        model="claude-haiku-4-5",
-    )
-    bob = world.spawn_user(
-        id="bob",
-        persona="confused_new_user",
-        model="claude-haiku-4-5",
-    )
-    rep1 = world.spawn_agent(
-        id="rep1",
-        model="claude-sonnet-4-5",
-        tools=["lookup_user", "issue_refund"],
-    )
+    alice.say(rep.id, "I want a refund for the last three months.")
 
-    alice.act("open_ticket", subject="want my money back")
-    bob.act("open_ticket", subject="how do refunds work")
-
-    yield world.until(world.turn_count &gt; 30)
-
-    yield {
-        "alice_refund_resolved": float(alice.hidden_goal_resolved()),
-        "no_double_refunds": float(not world.had_double_refund()),
-    }</code></pre>
+    yield world.until(world.turn_count > 20)
+    yield {"refund_issued": 1.0 if alice.hidden_goal_resolved() else 0.0}</code></pre>
+      <p>
+        The decorator's first argument is the registry name, by
+        convention <code>&lt;world&gt;.&lt;short_name&gt;</code>. The
+        <code>world=</code> keyword names the world the runner builds
+        when <code>--world</code> is not passed on the CLI. Both
+        <code>ensemble run my_world.refund</code> and
+        <code>run_scenario("my_world.refund")</code> look the
+        scenario up by that registry name.
+      </p>
+      <p>
+        Importing the world's Python package at the top of the file
+        is what triggers its <code>register_world</code> call. The
+        <code>World</code> the runner constructs cannot find the
+        plugin otherwise, so this import is load-bearing even when
+        you do not reference it directly.
+      </p>
     </section>
 
     <section>
-      <h2>Power-user flavor</h2>
+      <h2>Spawning users and agents</h2>
       <p>
-        Use <code>async with world.simulate()</code> when you want to
-        inspect or change something while the simulation is in flight.
-        The scheduler runs on a background Tokio task.
-        <code>wait_until</code> blocks the scenario coroutine until the
-        condition fires or a timeout elapses. Between waits you can read
-        hidden state, push a new message into an actor's inbox, or assert
-        intermediate invariants.
+        <code>world.spawn_user</code> creates a user actor backed by
+        a persona. <code>world.spawn_agent</code> creates an agent
+        backed by the world's LLM backend and tool registry. Both
+        return a proxy you hold onto so the scenario can speak as the
+        actor and read its state later.
       </p>
-<pre><code class="language-python">from ensemble import World, scenario
+<pre><code class="language-python">alice = world.spawn_user(persona="frustrated_customer", hidden_goal="refund_3mo")
+rep = world.spawn_agent(tools=["lookup_user", "issue_refund"])
 
+alice.say(rep.id, "I want a refund for the last three months.")</code></pre>
+      <p>
+        You can leave the <code>id</code> off both calls. The runtime
+        assigns <code>user-1</code>, <code>user-2</code>, ... and
+        <code>agent-1</code>, <code>agent-2</code>, ... from a
+        per-world counter, so scaffold scenarios stay short and only
+        name actors when graders or stop conditions need to reference
+        them by id.
+      </p>
+      <p>
+        The <code>model</code> argument is also optional. When you
+        omit it, <code>spawn_user</code> uses the world's
+        <code>default_user_model</code> and <code>spawn_agent</code>
+        uses its <code>default_agent_model</code>, both set in
+        <code>register_world</code> or in <code>world.toml</code>.
+        Override on a single actor by passing
+        <code>model="claude-sonnet-4-5"</code> directly.
+      </p>
+      <p>
+        Some scenarios have no real user: the agent receives an
+        opening problem statement and iterates on its own until it
+        emits a done signal. For that shape, reach for
+        <code>world.opener</code> instead of spawning a user. The
+        opener sends a seed message without creating a user actor,
+        so it never appears in <code>world.users</code> and the
+        trace records a <code>kickoff</code> event rather than a
+        <code>user_spawned</code> one.
+      </p>
+<pre><code class="language-python">@scenario("my_world.refactor", world="my_world")
+async def refactor(world):
+    rep = world.spawn_agent(tools=["read", "edit", "grep", "run_tests"])
+    world.opener("rename foo to bar in this file and fix call sites", to=rep.id)
 
-@scenario("enterprise_audit", world="plank")
-async def enterprise_audit(world: World) -> dict[str, float]:
-    carol = world.spawn_user(
-        id="carol",
-        persona="enterprise_admin",
-        hidden_goal="audit_log_export",
-        model="claude-haiku-4-5",
-    )
-    rep = world.spawn_agent(
-        id="rep1",
-        model="claude-sonnet-4-5",
-        tools=["escalate", "search_kb"],
-    )
-    carol.say("rep1", "i need the q3 audit log exported as csv.")
+    yield world.until_done(rep.id)
+    yield {"completed": 1.0}</code></pre>
+    </section>
+
+    <section>
+      <h2>Until conditions</h2>
+      <p>
+        The first thing a scenario yields is an <code>Until</code>:
+        the question the scheduler asks every tick to decide whether
+        to keep running. The four building blocks cover almost every
+        scenario.
+      </p>
+      <p>
+        <code>world.turn_count &gt; N</code> is the simplest. The
+        <code>turn_count</code> attribute is a sentinel that produces
+        an <code>Until</code> when you compare it with
+        <code>&gt;</code> or <code>&gt;=</code>. Use this when the
+        scenario should run for a fixed budget regardless of what
+        happens inside.
+      </p>
+<pre><code class="language-python">yield world.until(world.turn_count > 20)</code></pre>
+      <p>
+        <code>world.until_predicate("name", **args)</code> stops the
+        run when a named world predicate becomes true on the live
+        trace. Reach for this when the natural answer to "are we
+        done" is a fact about what the agent did, not a turn budget.
+        The world has to register the predicate; passing an unknown
+        name raises immediately, so typos surface at scenario
+        definition rather than as a run that never stops.
+      </p>
+<pre><code class="language-python">yield world.until_predicate("submit_called")</code></pre>
+      <p>
+        <code>world.until_agent_emits</code> halts when a specific
+        agent says something that matches a criterion. Exactly one
+        of <code>contains</code>, <code>equals</code>, or
+        <code>regex</code> is required.
+        <code>world.until_done(actor_id)</code> is the shorthand for
+        the silent-loop case: it watches for the agent emitting
+        <code>"DONE"</code>, and you can override the sentinel with
+        <code>signal=</code>.
+      </p>
+<pre><code class="language-python">yield world.until_agent_emits(rep.id, contains="ready for review")
+yield world.until_done(rep.id, signal="FINISHED")</code></pre>
+      <p>
+        Real scenarios usually want a stop condition with a safety
+        net: stop on the thing you care about, but also cap the
+        budget so a misbehaving agent does not run forever. Combine
+        conditions with <code>|</code> (any-of) and
+        <code>&amp;</code> (all-of). The same combinators are
+        available as <code>any_of</code> and <code>all_of</code>
+        when you want function-call form for nested expressions.
+      </p>
+<pre><code class="language-python">from ensemble import until_predicate
+
+yield world.until(world.until_predicate("submit_called") | (world.turn_count > 30))
+yield world.until(world.until_done(rep.id) | (world.turn_count > 100))
+yield world.until((world.turn_count >= 4) & until_predicate("hit_goal"))</code></pre>
+    </section>
+
+    <section>
+      <h2>Two scenario flavors</h2>
+      <p>
+        Scenarios come in two shapes. The common case is an async
+        generator that yields its until condition, lets the runner
+        drive the scheduler, and then yields the grader dict. Pick
+        this whenever the scenario commits to a single stop
+        condition before the run starts.
+      </p>
+<pre><code class="language-python">@scenario("plank.smoke", world="plank")
+async def smoke(world):
+    user = world.spawn_user(persona="patient_retail")
+    rep = world.spawn_agent(tools=["search_kb"])
+    user.say(rep.id, "hi")
+
+    yield world.until(world.turn_count > 8)
+    yield {"saw_event": 1.0}</code></pre>
+      <p>
+        The other shape is a regular async function (no
+        <code>yield</code>) that drives the run itself through
+        <code>async with world.simulate()</code>. The context manager
+        starts the scheduler on a background task and gives you a
+        <code>SimulationRun</code> handle with
+        <code>await run.wait_until(condition, timeout_ms=...)</code>.
+        Inside the block, the scenario can inspect state, push new
+        messages from a user, or mutate the world between waits.
+        Pick this when the scenario needs to react to what already
+        happened.
+      </p>
+<pre><code class="language-python">@scenario("plank.audit", world="plank")
+async def audit(world):
+    carol = world.spawn_user(persona="enterprise_admin")
+    rep = world.spawn_agent(tools=["escalate"])
+    carol.say(rep.id, "audit log please")
 
     async with world.simulate() as run:
-        await run.wait_until(world.turn_count &gt; 10)
-        carol.say("rep1", "if you cannot do this, please escalate.")
-        await run.wait_until(world.turn_count &gt; 18)
+        await run.wait_until(world.turn_count > 10)
+        carol.say(rep.id, "escalate this")
+        await run.wait_until(world.turn_count > 18)
 
-    return {"escalated_or_promised": 1.0}</code></pre>
+    return {"escalated": 1.0 if carol.hidden_goal_resolved() else 0.0}</code></pre>
+      <p>
+        The simulate flavor returns the grader dict from a plain
+        <code>return</code> statement; there is no second yield. The
+        yield flavor is shorter and reads top-to-bottom; reach for
+        the simulate form only when the scenario has a real reason
+        to inject behavior in the middle of the run.
+      </p>
     </section>
 
     <section>
-      <h2>Declarative TOML</h2>
+      <h2>Graders</h2>
       <p>
-        When you want a matrix of similar scenarios without writing one
-        Python function each, declare them in <code>scenarios.toml</code>.
-        The manifest compiles to the same runtime as the Python decorator
-        at load time.
+        The grader dict is how a scenario reports outcomes. The keys
+        are score names; the values are floats, by convention
+        <code>0.0</code> or <code>1.0</code> for boolean outcomes
+        and any float for continuous ones. The same dict ends up in
+        the run's <code>scores</code> field and in the runs index,
+        so keep the names stable across runs you intend to compare.
       </p>
-<pre><code class="language-toml">[scenario.refund_storm]
+<pre><code class="language-python">yield {
+    "refund_issued": 1.0 if alice.hidden_goal_resolved() else 0.0,
+    "no_double_refund": 1.0 - float(world.evaluate_predicate("had_double_refund")),
+}</code></pre>
+      <p>
+        Most graders are built from world predicates and per-user
+        helpers. <code>world.evaluate_predicate("name")</code> runs
+        a registered predicate against the final trace and returns
+        a bool. The user proxy exposes shortcuts like
+        <code>alice.hidden_goal_resolved()</code> and
+        <code>alice.predicate("name")</code> for per-user predicates
+        that filter on <code>args["user_id"]</code>. Unknown
+        predicate names raise rather than silently returning false,
+        so a grader typo fails loudly.
+      </p>
+      <p>
+        The <a href="reference/predicates.html">Predicates
+        reference</a> covers the full predicate contract, including
+        the per-user dispatch rules and how the trace argument is
+        shaped.
+      </p>
+    </section>
+
+    <section>
+      <h2>The declarative TOML form</h2>
+      <p>
+        For static scenarios that do not need mid-run intervention,
+        you can write <code>scenarios.toml</code> instead of Python.
+        <code>ensemble.load_manifest(path)</code> parses the file and
+        registers one scenario per entry, so the same runner code
+        drives both Python and TOML scenarios.
+      </p>
+<pre><code class="language-toml"># examples/plank/scenarios.toml
+[scenario.refund_storm]
 world = "plank"
 duration_turns = 30
+seed = 42
 
 [[scenario.refund_storm.users]]
 id = "alice"
 persona = "frustrated_power_user"
-model = "claude-haiku-4-5"
-initial_action = { tool = "open_ticket", args = { subject = "want my money back" } }
+hidden_goal = "refund_3mo"
+initial_action = { tool = "open_ticket", args = { ticket_id = "t-100", user_id = "u-alice", subject = "want my money back" } }
 
 [[scenario.refund_storm.agents]]
 id = "rep1"
 model = "claude-sonnet-4-5"
-tools = ["lookup_user", "issue_refund"]
+tools = ["lookup_user", "issue_refund", "escalate", "search_kb"]
 
 [scenario.refund_storm.graders]
-alice_resolved = "hidden_goal_resolved"
-no_double_refund = "not had_double_refund"</code></pre>
+alice_refund_resolved = "alice_hidden_goal_resolved"
+global_no_double_refunds = "not had_double_refund"</code></pre>
       <p>
-        Grader expressions use a small safe boolean DSL. The parser
-        understands <code>and</code>, <code>or</code>, <code>not</code>,
-        parentheses, and named predicates that the world exposes.
-        Function calls and attribute access are rejected by the parser,
-        so there is no path to <code>eval</code> from a TOML file.
+        <code>duration_turns</code> becomes the
+        <code>world.turn_count &gt; N</code> stop condition.
+        <code>users</code> and <code>agents</code> are arrays that
+        forward to <code>spawn_user</code> and
+        <code>spawn_agent</code>. The optional
+        <code>initial_action</code> on a user fires a tool call with
+        no actor attribution at startup, useful for seeding world
+        state before the conversation begins.
+      </p>
+      <p>
+        Grader expressions live in a small boolean DSL: bare
+        predicate names, <code>and</code>, <code>or</code>,
+        <code>not</code>, parens, and the literals <code>true</code>
+        and <code>false</code>. Per-user predicates are addressable
+        as <code>&lt;user_id&gt;_&lt;predicate&gt;</code>, evaluated
+        with <code>args = {"user_id": "&lt;user_id&gt;"}</code>.
+        Truthy expressions become <code>1.0</code>, falsy
+        <code>0.0</code>. Reach for TOML when the scenario is a
+        fixed configuration you want to enumerate across a sweep;
+        reach for Python when the scenario needs to do anything the
+        DSL cannot express.
       </p>
     </section>
 
     <section>
-      <h2>API reference</h2>
-
-      <h3>World</h3>
+      <h2>Where to go next</h2>
       <ul>
-        <li><code>World(name, backend=None, base_url=None)</code> constructs a world by registered name. <code>backend</code> chooses the LLM client and defaults to <code>"mock"</code>.</li>
-        <li><code>spawn_user(id, persona, hidden_goal, model)</code> adds a user actor.</li>
-        <li><code>spawn_agent(id, model, tools)</code> adds an agent actor.</li>
-        <li><code>turn_count</code> is a sentinel that supports comparison ops, so <code>world.turn_count &gt; 30</code> evaluates to an until condition.</li>
-        <li><code>until(condition)</code> coerces a comparison or an existing <code>Until</code> object.</li>
-        <li><code>simulate()</code> returns an async context manager for mid-run intervention.</li>
-        <li><code>run(until)</code> runs to completion against the supplied stop condition.</li>
-        <li><code>trace()</code> returns the list of decoded JSONL events.</li>
-      </ul>
-
-      <h3>User and Agent</h3>
-      <ul>
-        <li><code>say(target, text)</code> queues a message before <code>run()</code>, or sends it immediately while the scheduler is running.</li>
-        <li><code>act(tool, **kwargs)</code> records a tool call from this actor, which is useful for seeding the initial state.</li>
-      </ul>
-
-      <h3>Until combinators</h3>
-      <ul>
-        <li><code>world.turn_count &gt; n</code> and <code>world.turn_count &gt;= n</code> are the common cases.</li>
-        <li><code>any_of(...)</code> and <code>all_of(...)</code> compose conditions; in Python they are JSON specs that the Rust side compiles into closures.</li>
+        <li><a href="tools.html">Tools</a> for the
+          <code>@tool</code> decorator, the JSON-Schema inference
+          rules, and the sandbox capability.</li>
+        <li><a href="personas.html">Personas</a> for the persona
+          format, the trained-persona adapters, and how
+          <code>spawn_user(persona=...)</code> looks them up.</li>
+        <li><a href="reference/scenarios.html">Scenarios reference</a>
+          for the full contract: every kwarg on
+          <code>@scenario</code>, the <code>RunResult</code> shape,
+          the complete <code>scenarios.toml</code> schema, and the
+          grader DSL grammar.</li>
       </ul>
     </section>
 
     <footer class="site">
-      Source on <a href="https://github.com/tejasprabhune">tejasprabhune</a>. Built in Rust and Python.
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
     </footer>
   </main>
 
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
   <script>hljs.highlightAll();</script>

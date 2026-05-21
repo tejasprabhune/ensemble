@@ -5,8 +5,6 @@ on:
     branches: [main]
     paths:
       - "site/**"
-      - "docs/**"
-      - "scripts/render_reference.py"
       - "examples/plank/bake_trace.py"
       - "python/ensemble/**"
       - "crates/**"
@@ -47,9 +45,6 @@ jobs:
 
       - name: bake the deterministic refund_storm trace
         run: uv run python examples/plank/bake_trace.py
-
-      - name: render docs/reference/*.md -> site/reference/*.html
-        run: uv run python scripts/render_reference.py
 
       - uses: actions/configure-pages@v5
 

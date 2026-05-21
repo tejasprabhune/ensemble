@@ -13,13 +13,20 @@
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
     <nav>
       <div class="nav-group">
-        <div class="nav-group-title">Site</div>
+        <div class="nav-group-title">Get started</div>
         <a href="../index.html">Overview</a>
-        <a href="../docs.html">Docs</a>
-        <a href="../scenarios.html">Scenarios overview</a>
-        <a href="../plank.html">Plank</a>
-        <a href="../personas.html">Personas overview</a>
+        <a href="../quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="../worlds.html">Writing a world</a>
+        <a href="../scenarios.html">Writing a scenario</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../personas.html">Personas</a>
+        <a href="../sweeps.html">Sweeps</a>
+        <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
+        <a href="../plank.html">Plank example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -32,70 +39,115 @@
         <a href="cli.html">CLI</a>
         <a href="runtime.html">Runtime</a>
         <a href="traces.html">Traces</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-title">On this page</div>
-        <a href="#subclassable-world">Subclassable World</a>
-        <a href="#register-world-factory-form">register_world (factory form)</a>
-        <a href="#tool-and-predicate-decorators">Tool and predicate decorators</a>
-        <a href="#sandbox-contract">Sandbox contract</a>
-        <a href="#worldapply">World.apply</a>
-        <a href="#worldstate-rust-trait">WorldState (rust trait)</a>
-        <a href="#worldtoml-manifest-schema">world.toml manifest schema</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
       </div>
     </nav>
   </aside>
 
   <main>
-<h1>World API</h1>
-<p>This page is the reference for authoring a world plugin. A world is the typed, mutable state a scenario&#x27;s actors share, the tools that mutate it, and the predicates that ask questions of the resulting trace. There are two equivalent ways to declare a world: the factory form (`<code>register_world(name, ...)</code><code>) and the subclass form (</code><code>class MyWorld(World)</code><code>). The subclass form is the natural fit when the world has mutable per-instance state that wants to live on </code><code>self</code>`; the factory form is the natural fit when the state lives in a typed container the python code only configures (a rust core, a sqlite handle, a remote service client).</p>
-<p>Both paths produce the same trace events, share the same JSON-string ABI into the rust core, and obey the same sandbox semantics. A scenario constructed against the world never has to know which path the world picked.</p>
-<h2 id="subclassable-world">Subclassable World</h2>
+    <h1>World API</h1>
+    <p>
+      This page is the reference for authoring a world plugin. A
+      world is the typed, mutable state a scenario's actors share,
+      the tools that mutate it, and the predicates that ask questions
+      of the resulting trace. There are two equivalent ways to
+      declare a world: the factory form
+      (<code>register_world(name, ...)</code>) and the subclass form
+      (<code>class MyWorld(World)</code>). The subclass form is the
+      natural fit when the world has mutable per-instance state that
+      wants to live on <code>self</code>; the factory form is the
+      natural fit when the state lives in a typed container the
+      python code only configures (a rust core, a sqlite handle, a
+      remote service client).
+    </p>
+    <p>
+      Both paths produce the same trace events, share the same
+      JSON-string ABI into the rust core, and obey the same sandbox
+      semantics. A scenario constructed against the world never has
+      to know which path the world picked.
+    </p>
+
+    <section>
+      <h2>Subclassable World</h2>
 <pre><code class="language-python"># popcornbench/world.py
 from ensemble import World, tool, predicate
 
 
 class PopcornWorld(World):
-    world_name = &quot;popcornbench&quot;
+    world_name = "popcornbench"
 
     def setup(self):
         # Per-instance state lives on self. The runtime calls setup()
         # exactly once per construction, before the decorated-method
         # walker runs, so tools and predicates see a fully built
         # state container.
-        self.runner = KernelRunner(device=&quot;cuda&quot;)
+        self.runner = KernelRunner(device="cuda")
         self.submitted: dict[str, dict] = {}
 
     @tool(
-        name=&quot;submit_kernel&quot;,
-        description=&quot;Submit a kernel for static check and run.&quot;,
+        name="submit_kernel",
+        description="Submit a kernel for static check and run.",
         parameters={
-            &quot;type&quot;: &quot;object&quot;,
-            &quot;properties&quot;: {&quot;src&quot;: {&quot;type&quot;: &quot;string&quot;}},
-            &quot;required&quot;: [&quot;src&quot;],
+            "type": "object",
+            "properties": {"src": {"type": "string"}},
+            "required": ["src"],
         },
     )
     def submit_kernel(self, src: str):
         outcome = self.runner.check_and_run(src)
         self.submitted[outcome.id] = outcome
-        return ({&quot;id&quot;: outcome.id, &quot;ok&quot;: outcome.ok},
-                [{&quot;path&quot;: [&quot;submissions&quot;, outcome.id], &quot;set&quot;: outcome.summary}])
+        return ({"id": outcome.id, "ok": outcome.ok},
+                [{"path": ["submissions", outcome.id], "set": outcome.summary}])
 
-    @predicate(name=&quot;submit_called&quot;)
+    @predicate(name="submit_called")
     def submit_called(self, trace, args):
         return any(
-            e.get(&quot;payload&quot;, {}).get(&quot;name&quot;) == &quot;submit_kernel&quot;
-            and e[&quot;payload&quot;].get(&quot;kind&quot;) == &quot;tool_result&quot;
+            e.get("payload", {}).get("name") == "submit_kernel"
+            and e["payload"].get("kind") == "tool_result"
             for e in trace
         )
 
-    @predicate(name=&quot;any_submission_passed&quot;)
+    @predicate(name="any_submission_passed")
     def any_submission_passed(self, trace, args):
         return any(o.ok for o in self.submitted.values())</code></pre>
-<p>A subclass instance is constructed exactly like the built-in `<code>World</code><code>: </code><code>world = PopcornWorld(backend=&quot;anthropic&quot;)</code><code>. The runtime walks </code><code>type(world).__mro__</code><code> for methods marked by </code><code>@tool</code><code> and </code><code>@predicate</code><code>, builds bound </code><code>PluginTool</code><code> / </code><code>PluginPredicate</code><code> objects, and forwards them into the native tool and predicate registries. </code><code>setup</code>` runs before the walker so the tool wrappers see fully initialised state.</p>
-<p>A subclass that wants a per-instance world name distinct from the class name passes `<code>world_name = &quot;...&quot;</code><code> as a class attribute, or overrides the default by passing </code><code>name=&quot;...&quot;</code>` on construction. The default falls back to the lower-cased class name.</p>
-<p>The decorated-method `<code>self</code><code> is the live </code><code>World</code><code> subclass instance. Mutate </code><code>self.state</code><code> (or whatever you named it) freely inside a tool; predicates that close over the same state read the mutation directly. The sandbox boundary still applies: a tool declared </code><code>sandbox=True</code><code> does not see in-process mutations made by its parent, because the sandbox worker is a fresh interpreter. Use </code><code>self.shared_state</code>` for cross-boundary configuration; the <a href="#sandbox-contract">sandbox contract</a> below covers the details.</p>
-<h2 id="register-world-factory-form">register_world (factory form)</h2>
+      <p>
+        A subclass instance is constructed exactly like the built-in
+        <code>World</code>:
+        <code>world = PopcornWorld(backend="anthropic")</code>. The
+        runtime walks <code>type(world).__mro__</code> for methods
+        marked by <code>@tool</code> and <code>@predicate</code>,
+        builds bound <code>PluginTool</code> /
+        <code>PluginPredicate</code> objects, and forwards them into
+        the native tool and predicate registries. <code>setup</code>
+        runs before the walker so the tool wrappers see fully
+        initialised state.
+      </p>
+      <p>
+        A subclass that wants a per-instance world name distinct
+        from the class name passes <code>world_name = "..."</code> as
+        a class attribute, or overrides the default by passing
+        <code>name="..."</code> on construction. The default falls
+        back to the lower-cased class name.
+      </p>
+      <p>
+        The decorated-method <code>self</code> is the live
+        <code>World</code> subclass instance. Mutate
+        <code>self.state</code> (or whatever you named it) freely
+        inside a tool; predicates that close over the same state
+        read the mutation directly. The sandbox boundary still
+        applies: a tool declared <code>sandbox=True</code> does not
+        see in-process mutations made by its parent, because the
+        sandbox worker is a fresh interpreter. Use
+        <code>self.shared_state</code> for cross-boundary
+        configuration; the
+        <a href="#sandbox-contract">sandbox contract</a> below
+        covers the details.
+      </p>
+    </section>
+
+    <section>
+      <h2>register_world (factory form)</h2>
 <pre><code class="language-python"># examples/plank/plank/__init__.py
 from ensemble import register_world
 
@@ -106,103 +158,258 @@ def _setup():
     return tools, predicates
 
 register_world(
-    &quot;plank&quot;,
+    "plank",
     setup=_setup,
     personas_dir=PERSONAS_DIR,
-    resources={&quot;billing_db&quot;: 1},
-    python_package=&quot;plank&quot;,
+    resources={"billing_db": 1},
+    python_package="plank",
     package_dir=PACKAGE_DIR,
 )</code></pre>
-<p>The keyword arguments:</p>
-<ul>
-<li>`<code>setup</code><code>: a zero-arg callable returning a </code><code>(tools, predicates)</code><code> pair. Invoked once per </code><code>World(name)</code><code> construction, so worlds with per-instance state (a fresh in-memory SQLite database, a new random seed) return a new batch each time. Mutually exclusive with </code><code>tools</code><code> / </code><code>predicates</code>`.</li>
-<li>`<code>tools</code><code>: a sequence of </code><code>PluginTool</code><code> or </code><code>@tool</code><code>-decorated functions for stateless worlds. The decorator-form entries are coerced into </code><code>PluginTool</code><code> at registration time, so a top-level </code><code>@tool(name=..., description=..., parameters=...)</code><code> function can be passed directly without a separate </code><code>tool(...)</code>` factory call.</li>
-<li>`<code>predicates</code><code>: a sequence of </code><code>PluginPredicate</code><code> or </code><code>@predicate</code><code>-decorated functions; same coercion rules as </code><code>tools</code>`.</li>
-<li>`<code>personas_dir</code><code>: a path the persona resolver consults when a scenario passes </code><code>persona=&quot;...&quot;</code><code> to </code><code>spawn_user</code>`.</li>
-<li>`<code>resources</code><code>: a dict mapping resource name to permit count. </code><code>1</code><code> declares an exclusive lock, </code><code>N</code><code> declares a shared resource with </code><code>N</code><code> simultaneous holders. The </code><code>ResourceManager</code><code> is populated at </code><code>World(name)</code>` construction.</li>
-<li>`<code>shared_state</code><code>: an initial dict the runtime copies into </code><code>world.shared_state</code><code> on every instance. Lives across in-process tool calls and is forwarded to sandbox workers via the </code><code>ENSEMBLE_SHARED_STATE</code>` environment variable. See the <a href="#sandbox-contract">sandbox contract</a>.</li>
-<li>`<code>python_package</code><code> and </code><code>package_dir</code><code>: explicit hooks the sandbox worker uses to re-create this exact world in a fresh interpreter. Set them when the world&#x27;s directory is not in </code><code>~/.ensemble/worlds.toml</code>`, when two installations of the same package coexist, or when you want the explicit path documented in code rather than in a user-local registry.</li>
-</ul>
-<p>`<code>register_world</code><code> is idempotent. A second call for the same name overwrites the prior </code><code>WorldDefinition</code>`, which lets a world package re-register itself after a hot reload during development.</p>
-<h2 id="tool-and-predicate-decorators">Tool and predicate decorators</h2>
-<p>The same `<code>tool</code><code> and </code><code>predicate</code>` helpers work as both factories and decorators. The factory forms remain:</p>
-<pre><code class="language-python">register_world(&quot;ktbench&quot;, tools=[
-    tool(&quot;submit_kernel&quot;, &quot;Submit the kernel.&quot;, schema, submit_fn),
+      <p>The keyword arguments:</p>
+      <ul>
+        <li><code>setup</code>: a zero-arg callable returning a
+          <code>(tools, predicates)</code> pair. Invoked once per
+          <code>World(name)</code> construction, so worlds with
+          per-instance state (a fresh in-memory SQLite database, a
+          new random seed) return a new batch each time. Mutually
+          exclusive with <code>tools</code> /
+          <code>predicates</code>.</li>
+        <li><code>tools</code>: a sequence of <code>PluginTool</code>
+          or <code>@tool</code>-decorated functions for stateless
+          worlds. The decorator-form entries are coerced into
+          <code>PluginTool</code> at registration time, so a
+          top-level
+          <code>@tool(name=..., description=..., parameters=...)</code>
+          function can be passed directly without a separate
+          <code>tool(...)</code> factory call.</li>
+        <li><code>predicates</code>: a sequence of
+          <code>PluginPredicate</code> or
+          <code>@predicate</code>-decorated functions; same coercion
+          rules as <code>tools</code>.</li>
+        <li><code>personas_dir</code>: a path the persona resolver
+          consults when a scenario passes <code>persona="..."</code>
+          to <code>spawn_user</code>.</li>
+        <li><code>resources</code>: a dict mapping resource name to
+          permit count. <code>1</code> declares an exclusive lock,
+          <code>N</code> declares a shared resource with
+          <code>N</code> simultaneous holders. The
+          <code>ResourceManager</code> is populated at
+          <code>World(name)</code> construction.</li>
+        <li><code>shared_state</code>: an initial dict the runtime
+          copies into <code>world.shared_state</code> on every
+          instance. Lives across in-process tool calls and is
+          forwarded to sandbox workers via the
+          <code>ENSEMBLE_SHARED_STATE</code> environment variable.
+          See the <a href="#sandbox-contract">sandbox contract</a>.</li>
+        <li><code>python_package</code> and <code>package_dir</code>:
+          explicit hooks the sandbox worker uses to re-create this
+          exact world in a fresh interpreter. Set them when the
+          world's directory is not in
+          <code>~/.ensemble/worlds.toml</code>, when two
+          installations of the same package coexist, or when you
+          want the explicit path documented in code rather than in a
+          user-local registry.</li>
+      </ul>
+      <p>
+        <code>register_world</code> is idempotent. A second call for
+        the same name overwrites the prior
+        <code>WorldDefinition</code>, which lets a world package
+        re-register itself after a hot reload during development.
+      </p>
+    </section>
+
+    <section>
+      <h2>Tool and predicate decorators</h2>
+      <p>
+        The same <code>tool</code> and <code>predicate</code> helpers
+        work as both factories and decorators. The factory forms
+        remain:
+      </p>
+<pre><code class="language-python">register_world("ktbench", tools=[
+    tool("submit_kernel", "Submit the kernel.", schema, submit_fn),
 ])
-register_world(&quot;ktbench&quot;, predicates=[
-    predicate(&quot;submit_called&quot;, submit_called_fn),
+register_world("ktbench", predicates=[
+    predicate("submit_called", submit_called_fn),
 ])</code></pre>
-<p>The decorator forms work both at module level and on a `<code>World</code>` subclass:</p>
+      <p>
+        The decorator forms work both at module level and on a
+        <code>World</code> subclass:
+      </p>
 <pre><code class="language-python"># module-level: decorated function is registered directly
 @tool(
-    name=&quot;lookup_user&quot;,
-    description=&quot;Look up a user by id.&quot;,
+    name="lookup_user",
+    description="Look up a user by id.",
     parameters={
-        &quot;type&quot;: &quot;object&quot;,
-        &quot;properties&quot;: {&quot;user_id&quot;: {&quot;type&quot;: &quot;string&quot;}},
-        &quot;required&quot;: [&quot;user_id&quot;],
+        "type": "object",
+        "properties": {"user_id": {"type": "string"}},
+        "required": ["user_id"],
     },
     timeout_ms=2000,
 )
 def lookup_user(user_id: str):
-    return {&quot;ok&quot;: True, &quot;user&quot;: db.lookup(user_id)}
+    return {"ok": True, "user": db.lookup(user_id)}
 
-register_world(&quot;my_world&quot;, tools=[lookup_user])</code></pre>
+register_world("my_world", tools=[lookup_user])</code></pre>
 <pre><code class="language-python"># subclass method: the runtime binds self when materialising the tool
 class PopcornWorld(World):
-    @predicate(name=&quot;submit_passed&quot;)
+    @predicate(name="submit_passed")
     def submit_passed(self, trace, args):
         return any(o.ok for o in self.submitted.values())</code></pre>
-<p>The decorator factory accepts the optional `<code>timeout_ms</code><code>, </code><code>resources</code><code>, </code><code>sandbox</code><code>, and </code><code>sandbox_world</code><code> keyword arguments. A decorated function is otherwise unchanged from the caller&#x27;s perspective (still callable, still has its original signature); the metadata lives on </code><code>fn._ensemble_tool_meta</code>` for the runtime to consume.</p>
-<h2 id="sandbox-contract">Sandbox contract</h2>
-<p>Tools marked `<code>sandbox=True</code><code> run in a fresh </code><code>python -m ensemble.tool_worker</code>` subprocess. The worker re-imports the world&#x27;s python package (rebuilding the entire tool list from scratch), looks the named tool up, calls it once with the JSON args the parent forwarded, prints the result envelope on stdout, and exits. This is the isolation path: a tool that compiles a CUDA kernel cannot poison the scheduler if it segfaults or leaves the GPU in a bad state.</p>
-<p>The cross-boundary contract is tight on purpose. The boundary is a fresh interpreter, so:</p>
-<ul>
-<li><strong>Environment variables cross.</strong> The parent&#x27;s `<code>os.environ</code><code> is inherited. The runtime adds </code><code>ENSEMBLE_SHARED_STATE</code><code> (a JSON dump of </code><code>world.shared_state</code><code>) and </code><code>ENSEMBLE_SANDBOX_PACKAGE</code><code> / </code><code>ENSEMBLE_SANDBOX_PACKAGE_DIR</code>` (the world&#x27;s importable name and the directory containing it), so the worker resolves the same world the parent loaded.</li>
-<li><strong>The file system crosses.</strong> A tool that wants to read a model weight, a problem definition, or a cache lives on disk.</li>
-<li><strong>Python closure state does NOT cross.</strong> A tool&#x27;s wrapper in the parent process is gone; the worker rebuilds the world from scratch. State the parent&#x27;s `<code>setup()</code><code> stashed on </code><code>self</code><code> is not visible in the worker&#x27;s </code><code>self</code>`.</li>
-<li><strong>State diffs are the only durable cross-boundary record.</strong> A sandboxed tool that needs the grader to read a result should return a `<code>diff</code><code> in its envelope so the runtime records a </code><code>state_diff</code>` event on the trace. Predicates that depend on per-tool ground truth walk the trace for these events instead of reading parent-process state.</li>
-</ul>
-<h3 id="shared-state">shared_state</h3>
-<p>`<code>world.shared_state</code><code> is a mutable dict on the live </code><code>World</code><code> instance. The runtime serialises it (JSON) into the </code><code>ENSEMBLE_SHARED_STATE</code><code> environment variable on every sandbox dispatch, so a sandboxed tool can read configuration the parent set without each world inventing its own env-var convention. The worker exposes it as </code><code>ensemble.tool_worker.SHARED_STATE</code><code>; a world&#x27;s </code><code>__init__</code><code> (which the worker re-imports) can consult it in its </code><code>setup</code>` factory:</p>
+      <p>
+        The decorator factory accepts the optional
+        <code>timeout_ms</code>, <code>resources</code>,
+        <code>sandbox</code>, and <code>sandbox_world</code> keyword
+        arguments. A decorated function is otherwise unchanged from
+        the caller's perspective (still callable, still has its
+        original signature); the metadata lives on
+        <code>fn._ensemble_tool_meta</code> for the runtime to
+        consume.
+      </p>
+    </section>
+
+    <section id="sandbox-contract">
+      <h2>Sandbox contract</h2>
+      <p>
+        Tools marked <code>sandbox=True</code> run in a fresh
+        <code>python -m ensemble.tool_worker</code> subprocess. The
+        worker re-imports the world's python package (rebuilding the
+        entire tool list from scratch), looks the named tool up,
+        calls it once with the JSON args the parent forwarded, prints
+        the result envelope on stdout, and exits. This is the
+        isolation path: a tool that compiles a CUDA kernel cannot
+        poison the scheduler if it segfaults or leaves the GPU in a
+        bad state.
+      </p>
+      <p>
+        The cross-boundary contract is tight on purpose. The boundary
+        is a fresh interpreter, so:
+      </p>
+      <ul>
+        <li><strong>Environment variables cross.</strong> The
+          parent's <code>os.environ</code> is inherited. The runtime
+          adds <code>ENSEMBLE_SHARED_STATE</code> (a JSON dump of
+          <code>world.shared_state</code>) and
+          <code>ENSEMBLE_SANDBOX_PACKAGE</code> /
+          <code>ENSEMBLE_SANDBOX_PACKAGE_DIR</code> (the world's
+          importable name and the directory containing it), so the
+          worker resolves the same world the parent loaded.</li>
+        <li><strong>The file system crosses.</strong> A tool that
+          wants to read a model weight, a problem definition, or a
+          cache lives on disk.</li>
+        <li><strong>Python closure state does NOT cross.</strong> A
+          tool's wrapper in the parent process is gone; the worker
+          rebuilds the world from scratch. State the parent's
+          <code>setup()</code> stashed on <code>self</code> is not
+          visible in the worker's <code>self</code>.</li>
+        <li><strong>State diffs are the only durable cross-boundary
+          record.</strong> A sandboxed tool that needs the grader to
+          read a result should return a <code>diff</code> in its
+          envelope so the runtime records a <code>state_diff</code>
+          event on the trace. Predicates that depend on per-tool
+          ground truth walk the trace for these events instead of
+          reading parent-process state.</li>
+      </ul>
+
+      <h3>shared_state</h3>
+      <p>
+        <code>world.shared_state</code> is a mutable dict on the
+        live <code>World</code> instance. The runtime serialises it
+        (JSON) into the <code>ENSEMBLE_SHARED_STATE</code>
+        environment variable on every sandbox dispatch, so a
+        sandboxed tool can read configuration the parent set without
+        each world inventing its own env-var convention. The worker
+        exposes it as <code>ensemble.tool_worker.SHARED_STATE</code>;
+        a world's <code>__init__</code> (which the worker re-imports)
+        can consult it in its <code>setup</code> factory:
+      </p>
 <pre><code class="language-python"># my_world/__init__.py
 import os, json
 from ensemble import register_world
 
 def _setup():
-    shared = json.loads(os.environ.get(&quot;ENSEMBLE_SHARED_STATE&quot;, &quot;{}&quot;))
-    runner = KernelRunner(device=shared.get(&quot;device&quot;, &quot;cuda&quot;))
+    shared = json.loads(os.environ.get("ENSEMBLE_SHARED_STATE", "{}"))
+    runner = KernelRunner(device=shared.get("device", "cuda"))
     return _build_tools(runner), _build_predicates(runner)
 
-register_world(&quot;my_world&quot;, setup=_setup, shared_state={&quot;device&quot;: &quot;cuda&quot;})</code></pre>
-<p>Mutations the worker makes to `<code>SHARED_STATE</code>` do not propagate back; the worker is exiting. Treat the channel as one-way configuration from parent to worker.</p>
-<h3 id="subprocess-world-resolution">Subprocess world resolution</h3>
-<p>When the parent dispatches a sandboxed tool, the worker is launched as:</p>
-<pre><code>python -m ensemble.tool_worker --world &lt;name&gt; --tool &lt;name&gt;</code></pre>
-<p>The worker resolves the world in this order:</p>
-<ol>
-<li>If `<code>ENSEMBLE_SANDBOX_PACKAGE</code><code> is set, import that package after adding </code><code>ENSEMBLE_SANDBOX_PACKAGE_DIR</code><code> (if set) to </code><code>sys.path</code><code>. This is the deterministic path the parent uses when </code><code>python_package</code><code> / </code><code>package_dir</code><code> were declared on </code><code>register_world</code><code> or when the world is a subclass (the subclass infers the package from </code><code>type(self).__module__</code>`).</li>
-<li>Fall back to importing the world name itself as a module.</li>
-<li>If neither works, exit with code 2 and a message naming the world that failed to import.</li>
-</ol>
-<p>The fallback to `<code>~/.ensemble/worlds.toml</code><code> that earlier worker versions used is gone: it was the source of the &quot;registry says one world, parent loaded another&quot; failure mode. Worlds that want the worker to see their package set </code><code>python_package</code><code> / </code><code>package_dir</code><code> on </code><code>register_world</code>`, or use the subclass form which derives both automatically.</p>
-<h2 id="worldapply">World.apply</h2>
-<p>`<code>World.apply(name, **kwargs)</code><code> runs a tool as a system-level mutation. The runtime records a </code><code>ToolCall</code><code>, the registered tool&#x27;s </code><code>ToolResult</code><code>, and an optional </code><code>StateDiff</code><code> in the trace with no actor attribution. The events carry </code><code>seed=true</code>` so a trace consumer can distinguish setup mutations from agent or user decisions made during the run.</p>
+register_world("my_world", setup=_setup, shared_state={"device": "cuda"})</code></pre>
+      <p>
+        Mutations the worker makes to <code>SHARED_STATE</code> do
+        not propagate back; the worker is exiting. Treat the channel
+        as one-way configuration from parent to worker.
+      </p>
+
+      <h3>Subprocess world resolution</h3>
+      <p>
+        When the parent dispatches a sandboxed tool, the worker is
+        launched as:
+      </p>
+<pre><code class="language-bash">python -m ensemble.tool_worker --world &lt;name&gt; --tool &lt;name&gt;</code></pre>
+      <p>The worker resolves the world in this order:</p>
+      <ul>
+        <li>If <code>ENSEMBLE_SANDBOX_PACKAGE</code> is set, import
+          that package after adding
+          <code>ENSEMBLE_SANDBOX_PACKAGE_DIR</code> (if set) to
+          <code>sys.path</code>. This is the deterministic path the
+          parent uses when <code>python_package</code> /
+          <code>package_dir</code> were declared on
+          <code>register_world</code> or when the world is a subclass
+          (the subclass infers the package from
+          <code>type(self).__module__</code>).</li>
+        <li>Fall back to importing the world name itself as a module.</li>
+        <li>If neither works, exit with code 2 and a message naming
+          the world that failed to import.</li>
+      </ul>
+      <p>
+        The fallback to <code>~/.ensemble/worlds.toml</code> that
+        earlier worker versions used is gone: it was the source of
+        the "registry says one world, parent loaded another" failure
+        mode. Worlds that want the worker to see their package set
+        <code>python_package</code> / <code>package_dir</code> on
+        <code>register_world</code>, or use the subclass form which
+        derives both automatically.
+      </p>
+    </section>
+
+    <section id="worldapply">
+      <h2>World.apply</h2>
+      <p>
+        <code>World.apply(name, **kwargs)</code> runs a tool as a
+        system-level mutation. The runtime records a
+        <code>ToolCall</code>, the registered tool's
+        <code>ToolResult</code>, and an optional
+        <code>StateDiff</code> in the trace with no actor
+        attribution. The events carry <code>seed=true</code> so a
+        trace consumer can distinguish setup mutations from agent or
+        user decisions made during the run.
+      </p>
 <pre><code class="language-python">from ensemble import World
 
-world = World(&quot;plank&quot;, backend=&quot;mock&quot;)
+world = World("plank", backend="mock")
 out = world.apply(
-    &quot;open_ticket&quot;,
-    ticket_id=&quot;t-seed-1&quot;,
-    user_id=&quot;u-alice&quot;,
-    subject=&quot;seeded by scenario setup&quot;,
+    "open_ticket",
+    ticket_id="t-seed-1",
+    user_id="u-alice",
+    subject="seeded by scenario setup",
 )
-# out is {&quot;effect&quot;: {...}, &quot;diff&quot;: [...]}</code></pre>
-<p>Use `<code>User.act(tool, **kwargs)</code><code> when the seeded action should be attributed to a simulated user; use </code><code>World.apply</code>` when the mutation has no actor.</p>
-<h2 id="worldstate-rust-trait">WorldState (rust trait)</h2>
-<p>The Rust trait is what worlds with a typed rust core implement. Plank reaches for this so its tool dispatch can keep typed `<code>PlankCall</code><code> enums and structured </code><code>Diff</code><code> types instead of the JSON-string ABI. The trait lives in </code><code>ensemble-core</code>`:</p>
+# out is {"effect": {...}, "diff": [...]}</code></pre>
+      <p>
+        Use <code>User.act(tool, **kwargs)</code> when the seeded
+        action should be attributed to a simulated user; use
+        <code>World.apply</code> when the mutation has no actor.
+      </p>
+    </section>
+
+    <section>
+      <h2>WorldState (rust trait)</h2>
+      <p>
+        The Rust trait is what worlds with a typed rust core
+        implement. Plank reaches for this so its tool dispatch can
+        keep typed <code>PlankCall</code> enums and structured
+        <code>Diff</code> types instead of the JSON-string ABI. The
+        trait lives in <code>ensemble-core</code>:
+      </p>
 <pre><code class="language-rust">// crates/ensemble-core/src/world.rs
-pub trait WorldState: Send + Sync + &#x27;static {
+pub trait WorldState: Send + Sync + 'static {
     type ToolCall: DeserializeOwned + Send;
     type ToolEffect: Serialize + Send;
     type Diff: Serialize + Send;
@@ -215,46 +422,128 @@ pub trait WorldState: Send + Sync + &#x27;static {
     fn snapshot(&amp;self) -&gt; Vec&lt;u8&gt;;
     fn restore(&amp;mut self, snapshot: &amp;[u8]) -&gt; Result&lt;(), RestoreError&gt;;
 }</code></pre>
-<p>`<code>apply</code><code> is the single mutation entry point. The runtime wraps the typed state in a </code><code>WorldHandle&lt;S&gt;</code><code> (cheap to clone, all clones share the same </code><code>tokio::sync::Mutex&lt;S&gt;</code><code>), and </code><code>WorldHandle::apply_and_log(bus, actor, call_id, name, call)</code><code> applies the call, emits </code><code>ToolResult</code><code> + </code><code>StateDiff</code>` events on the bus, and returns the typed effect.</p>
-<p>`<code>snapshot</code><code> and </code><code>restore</code>` exist so the runtime can checkpoint a world before a risky branch and roll back; they are not used by the scheduler today but are the contract for any future counterfactual-rollout path.</p>
-<p>The Rust trait is not directly reachable from Python; pyo3 cannot lower generic associated types cleanly. Worlds that want to expose a typed rust core to Python ship their own thin pyo3 wrapper (plank&#x27;s `<code>PlankDb</code><code> does this in </code><code>examples/plank/python_ext/</code>`).</p>
-<h2 id="worldtoml-manifest-schema">world.toml manifest schema</h2>
-<p>Every world ships a `<code>world.toml</code><code> at the root of its directory. The worlds registry (</code><code>~/.ensemble/worlds.toml</code><code>, managed by </code><code>ensemble worlds add</code>`) reads it to learn where the world&#x27;s python package and rust crate live, and what personas and resources the world expects.</p>
+      <p>
+        <code>apply</code> is the single mutation entry point. The
+        runtime wraps the typed state in a
+        <code>WorldHandle&lt;S&gt;</code> (cheap to clone, all clones
+        share the same <code>tokio::sync::Mutex&lt;S&gt;</code>), and
+        <code>WorldHandle::apply_and_log(bus, actor, call_id, name, call)</code>
+        applies the call, emits <code>ToolResult</code> +
+        <code>StateDiff</code> events on the bus, and returns the
+        typed effect.
+      </p>
+      <p>
+        <code>snapshot</code> and <code>restore</code> exist so the
+        runtime can checkpoint a world before a risky branch and
+        roll back; they are not used by the scheduler today but are
+        the contract for any future counterfactual-rollout path.
+      </p>
+      <p>
+        The Rust trait is not directly reachable from Python; pyo3
+        cannot lower generic associated types cleanly. Worlds that
+        want to expose a typed rust core to Python ship their own
+        thin pyo3 wrapper (plank's <code>PlankDb</code> does this in
+        <code>examples/plank/python_ext/</code>).
+      </p>
+    </section>
+
+    <section id="worldtoml-manifest-schema">
+      <h2>world.toml manifest schema</h2>
+      <p>
+        Every world ships a <code>world.toml</code> at the root of
+        its directory. The worlds registry
+        (<code>~/.ensemble/worlds.toml</code>, managed by
+        <code>ensemble worlds add</code>) reads it to learn where the
+        world's python package and rust crate live, and what personas
+        and resources the world expects.
+      </p>
 <pre><code class="language-toml"># examples/plank/world.toml
 [world]
-name = &quot;plank&quot;
-python_package = &quot;plank&quot;
-rust_crate = &quot;world&quot;
-personas_dir = &quot;personas&quot;
+name = "plank"
+python_package = "plank"
+rust_crate = "world"
+personas_dir = "personas"
+default_user_model = "claude-haiku-4-5"
+default_agent_model = "claude-sonnet-4-5"
 
 [[world.default_personas]]
-name = &quot;frustrated_power_user&quot;
+name = "frustrated_power_user"
 
 [[world.default_tools]]
-name = &quot;issue_refund&quot;
+name = "issue_refund"
 
 [world.resources]
 billing_db = { permits = 1 }
 inference_pool = { permits = 4 }</code></pre>
-<p>The fields:</p>
-<ul>
-<li>`<code>world.name</code><code> (required): the short name the registry and scenarios use to refer to the world. Must match the name the world&#x27;s python package passes to </code><code>register_world</code><code> (or </code><code>world_name</code><code> on the </code><code>World</code>` subclass).</li>
-<li>`<code>world.python_package</code><code>: the importable name of the world&#x27;s python package, defaulting to </code><code>world.name</code>`.</li>
-<li>`<code>world.rust_crate</code>`: the relative path (or crate name) of the world&#x27;s rust crate. Informational; the build system finds the crate through the maturin manifest, not this field.</li>
-<li>`<code>world.personas_dir</code><code>: directory holding </code><code>*.toml</code>` persona files relative to the manifest.</li>
-<li>`<code>world.default_personas</code><code> and </code><code>world.default_tools</code><code>: lists of names the world ships. Informational; used by </code><code>ensemble worlds show</code>`.</li>
-<li>`<code>world.resources</code><code>: table mapping resource name to a </code><code>{permits = N}</code>` declaration. Declared at world load time so a shared resource is actually shared rather than silently downgraded to exclusive on first use.</li>
-<li>`<code>world.cli</code>`: reserved for world-specific CLI subcommands.</li>
-</ul>
-<p>The manifest loader (`<code>ensemble.load_world_manifest</code><code>) returns a </code><code>WorldManifest</code><code> dataclass. The </code><code>ensemble worlds add</code>` command validates the manifest at registration time.</p>
+      <p>The fields:</p>
+      <ul>
+        <li><code>world.name</code> (required): the short name the
+          registry and scenarios use to refer to the world. Must
+          match the name the world's python package passes to
+          <code>register_world</code> (or <code>world_name</code> on
+          the <code>World</code> subclass).</li>
+        <li><code>world.python_package</code>: the importable name of
+          the world's python package, defaulting to
+          <code>world.name</code>.</li>
+        <li><code>world.rust_crate</code>: the relative path (or
+          crate name) of the world's rust crate. Informational; the
+          build system finds the crate through the maturin manifest,
+          not this field.</li>
+        <li><code>world.personas_dir</code>: directory holding
+          <code>*.toml</code> persona files relative to the manifest.</li>
+        <li><code>world.default_personas</code> and
+          <code>world.default_tools</code>: lists of names the world
+          ships. Informational; used by
+          <code>ensemble worlds show</code>.</li>
+        <li><code>world.default_user_model</code> and
+          <code>world.default_agent_model</code>: the models
+          <code>spawn_user()</code> and <code>spawn_agent()</code>
+          use when the scenario does not pass
+          <code>model=...</code> explicitly. Lets a world pick its
+          preferred defaults without every scenario repeating the
+          model identifier on every spawn line.</li>
+        <li><code>world.resources</code>: table mapping resource
+          name to a <code>{permits = N}</code> declaration. Declared
+          at world load time so a shared resource is actually shared
+          rather than silently downgraded to exclusive on first use.</li>
+        <li><code>world.cli</code>: reserved for world-specific CLI
+          subcommands.</li>
+      </ul>
+      <p>
+        <code>register_world</code> accepts the same two model fields
+        as kwargs for worlds that prefer to declare them in Python
+        rather than TOML:
+      </p>
+<pre><code class="language-python">register_world(
+    "my_world",
+    tools=[...],
+    default_user_model="claude-haiku-4-5",
+    default_agent_model="claude-sonnet-4-5",
+)</code></pre>
+      <p>
+        The manifest loader
+        (<code>ensemble.load_world_manifest</code>) returns a
+        <code>WorldManifest</code> dataclass. The
+        <code>ensemble worlds add</code> command validates the
+        manifest at registration time. The python entry point also
+        auto-discovers a <code>world.toml</code> in the cwd at run
+        time, so a scaffold-and-run flow does not require the manual
+        <code>ensemble worlds add</code> step.
+      </p>
+    </section>
+
+    <footer class="site">
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
+    </footer>
   </main>
 
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/rust.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/rust.min.js"></script>
   <script>hljs.highlightAll();</script>
 </body>
 </html>

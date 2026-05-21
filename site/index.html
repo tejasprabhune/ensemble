@@ -13,13 +13,20 @@
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
     <nav>
       <div class="nav-group">
-        <div class="nav-group-title">Site</div>
+        <div class="nav-group-title">Get started</div>
         <a href="index.html" class="active">Overview</a>
-        <a href="docs.html">Docs</a>
-        <a href="scenarios.html">Scenarios</a>
-        <a href="plank.html">Plank</a>
+        <a href="quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="worlds.html">Writing a world</a>
+        <a href="scenarios.html">Writing a scenario</a>
+        <a href="tools.html">Tools</a>
         <a href="personas.html">Personas</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
         <a href="mcp.html">MCP</a>
+        <a href="plank.html">Plank example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -27,29 +34,13 @@
         <a href="reference/world-api.html">World API</a>
         <a href="reference/scenarios.html">Scenarios</a>
         <a href="reference/tools.html">Tools</a>
+        <a href="reference/predicates.html">Predicates</a>
         <a href="reference/personas.html">Personas</a>
         <a href="reference/cli.html">CLI</a>
         <a href="reference/runtime.html">Runtime</a>
         <a href="reference/traces.html">Traces</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-title">Docs sections</div>
-        <a href="docs.html#what-it-is">What Ensemble is</a>
-        <a href="docs.html#mental-model">Mental model</a>
-        <a href="docs.html#install">Install</a>
-        <a href="docs.html#first-scenario">Your first scenario</a>
-        <a href="docs.html#first-world">Your first world</a>
-        <a href="docs.html#tools">Tools</a>
-        <a href="docs.html#users-personas">Users and personas</a>
-        <a href="docs.html#verification">Verification and reward</a>
-        <a href="docs.html#rl">As an RL environment</a>
-        <a href="docs.html#power-user">Mid-run intervention</a>
-        <a href="docs.html#toml">TOML scenarios</a>
-        <a href="docs.html#cli">CLI</a>
-        <a href="docs.html#training">Training personas</a>
-        <a href="docs.html#architecture">Architecture</a>
-        <a href="docs.html#trace-format">Trace format</a>
-        <a href="docs.html#contributing">Contributing</a>
+        <a href="reference/sweeps.html">Sweeps</a>
+        <a href="reference/observability.html">Observability</a>
       </div>
     </nav>
   </aside>
@@ -57,46 +48,46 @@
   <main class="wide">
     <h1>ensemble</h1>
     <p class="lead">
-      A framework for building RL environments where several simulated users
-      and several agents share one typed world. You describe the world in
-      Rust, you write the scenarios in Python, and the framework handles
-      message routing, tool dispatch, the trace log, and the grader that
-      turns each rollout into a reward.
+      A framework for building RL environments where several simulated
+      users and several agents share one typed world. You write the
+      world and the scenarios in Python; the framework handles
+      message routing, tool dispatch, the trace log, and the grader
+      that turns each rollout into a reward.
     </p>
 
     <section>
       <h2>Why it exists</h2>
       <p>
         Most agent benchmarks model one agent talking to one user in a
-        stateless sandbox. Production support, sales, customer success, and
-        operations all look very different. There are multiple users
-        contending for attention, multiple agents seeing each other's tool
-        calls, shared state that changes underfoot, and policies that only
-        become visible across many turns. Ensemble lets you build that, run
-        rollouts at scale, and turn the rollouts into training signal.
+        stateless sandbox. Production support, sales, customer success,
+        and operations all look very different. There are multiple
+        users contending for attention, multiple agents seeing each
+        other's tool calls, shared state that changes underfoot, and
+        policies that only become visible across many turns. Ensemble
+        lets you build that, run rollouts at scale, and turn the
+        rollouts into training signal.
       </p>
     </section>
 
     <section>
-      <h2>Install</h2>
+      <h2>What the on-ramp looks like</h2>
       <p>
-        From a clone of the repo, two commands set up both the Python
-        package (with the ensemble extension built via maturin) and
-        the <code>ensemble</code> binary:
+        From a fresh clone, three commands take you from nothing to a
+        working trace. The scaffold defaults to pure Python; the Rust
+        path is the upgrade for worlds that need typed state with
+        snapshot and restore semantics.
       </p>
 <pre><code class="language-bash">uv sync
-cargo build -p ensemble-cli</code></pre>
+cargo build -p ensemble-cli
+./target/debug/ensemble init my_world
+cd my_world
+./target/debug/ensemble run my_world.smoke</code></pre>
       <p>
-        Worlds are plugins now: each world ships its own Python
-        package, and you tell ensemble where to find it.
-      </p>
-<pre><code class="language-bash">./target/debug/ensemble worlds add plank examples/plank
-./target/debug/ensemble run plank.refund_storm --world plank</code></pre>
-      <p>
-        The <a href="docs.html">docs page</a> walks through writing a
-        new world from scratch. The <a href="mcp.html">MCP page</a>
-        covers running scenarios driven by an external MCP-aware
-        client.
+        The <a href="quickstart.html">Quickstart</a> walks the rest of
+        the way: pointing at a real model, looking at the trace,
+        writing your first tool, comparing many configurations with the
+        sweep runner, and the cross-run observability subcommands. The
+        guides on the left cover each surface in depth.
       </p>
     </section>
 
@@ -104,9 +95,9 @@ cargo build -p ensemble-cli</code></pre>
       <h2>Refund storm, replayed</h2>
       <p>
         The trace below is a deterministic mock run of
-        <code>plank.refund_storm</code>. Three users, two agents, one shared
-        SQLite world. Scrub the timeline to step through events. The right
-        panel shows tool effects on world state.
+        <code>plank.refund_storm</code>. Three users, two agents, one
+        shared SQLite world. Scrub the timeline to step through
+        events. The right panel shows tool effects on world state.
       </p>
 
       <div class="viewer-tabs">
@@ -134,13 +125,31 @@ cargo build -p ensemble-cli</code></pre>
       </div>
 
       <p class="muted">
-        In a real run the agents are language models. This baked transcript
-        uses the mock backend so the trace is identical across machines.
+        In a real run the agents are language models. This baked
+        transcript uses the mock backend so the trace is identical
+        across machines.
       </p>
     </section>
 
+    <section>
+      <h2>Where to go next</h2>
+      <ul>
+        <li><a href="quickstart.html">Quickstart</a> for the
+          one-command on-ramp.</li>
+        <li><a href="worlds.html">Writing a world</a> if you want to
+          build a new simulated environment.</li>
+        <li><a href="scenarios.html">Writing a scenario</a> for the
+          authoring patterns the framework rewards.</li>
+        <li><a href="plank.html">Plank example</a> for a worked
+          customer-support world end to end.</li>
+        <li><a href="reference/index.html">Reference</a> for the
+          contract behind every public symbol and CLI flag.</li>
+      </ul>
+    </section>
+
     <footer class="site">
-      [copy: source link once the repo is public]. Built in Rust and Python.
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
     </footer>
   </main>
 

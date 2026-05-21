@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble, writing a world</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Get started</div>
+        <a href="index.html">Overview</a>
+        <a href="quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="worlds.html" class="active">Writing a world</a>
+        <a href="scenarios.html">Writing a scenario</a>
+        <a href="tools.html">Tools</a>
+        <a href="personas.html">Personas</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
+        <a href="mcp.html">MCP</a>
+        <a href="plank.html">Plank example</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="reference/index.html">Reference home</a>
+        <a href="reference/world-api.html">World API</a>
+        <a href="reference/scenarios.html">Scenarios</a>
+        <a href="reference/tools.html">Tools</a>
+        <a href="reference/predicates.html">Predicates</a>
+        <a href="reference/personas.html">Personas</a>
+        <a href="reference/cli.html">CLI</a>
+        <a href="reference/runtime.html">Runtime</a>
+        <a href="reference/traces.html">Traces</a>
+        <a href="reference/sweeps.html">Sweeps</a>
+        <a href="reference/observability.html">Observability</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+    <h1>Writing a world</h1>
+    <p class="lead">
+      A world is the typed, mutable environment your scenarios run
+      inside. It owns the tools the agents call, the predicates the
+      graders ask, and any state that needs to persist across turns.
+      Most worlds are a single Python file; a small subset needs a
+      Rust core for typed snapshot and restore.
+    </p>
+
+    <section>
+      <h2>The pure-Python path</h2>
+      <p>
+        Reach for this first. The scaffold lays down a single
+        <code>my_world.py</code> with an example tool, a
+        <code>world.toml</code> manifest, and a runnable smoke
+        scenario. You add tools by decorating plain Python functions;
+        the framework infers the JSON schema from the type hints.
+      </p>
+<pre><code class="language-bash">ensemble init my_world
+cd my_world
+ensemble run my_world.smoke</code></pre>
+      <p>
+        The scaffolded module looks like this:
+      </p>
+<pre><code class="language-python"># my_world.py
+from ensemble import register_world, tool
+
+
+@tool
+def echo(text: str) -> str:
+    """Return the text back. Replace me with a real tool."""
+    return text
+
+
+register_world(
+    "my_world",
+    tools=[echo],
+    default_agent_model="claude-sonnet-4-5",
+)</code></pre>
+      <p>
+        A real world replaces <code>echo</code> with the tools your
+        scenarios need. Closure-captured state survives across
+        dispatches in the same process:
+      </p>
+<pre><code class="language-python">from ensemble import register_world, tool
+
+_db = {
+    "u-alice": {"name": "Alice Chen", "plan": "team"},
+    "u-bob":   {"name": "Bob Wong",   "plan": "starter"},
+}
+_tickets = {}
+
+
+@tool
+def lookup_user(user_id: str) -> dict:
+    """Return the user record by id."""
+    return _db.get(user_id, {"error": "unknown user"})
+
+
+@tool
+def open_ticket(user_id: str, subject: str) -> dict:
+    """Open a support ticket for a user."""
+    ticket_id = f"t-{len(_tickets) + 100}"
+    _tickets[ticket_id] = {"user_id": user_id, "subject": subject, "status": "open"}
+    return {"ticket_id": ticket_id, "status": "open"}
+
+
+register_world("my_world", tools=[lookup_user, open_ticket])</code></pre>
+      <p>
+        For stateful worlds that prefer encapsulation, subclass
+        <code>World</code> and decorate methods. The framework binds
+        <code>self</code>; <code>setup</code> runs once at
+        construction:
+      </p>
+<pre><code class="language-python">from ensemble import World, tool
+
+
+class MyWorld(World):
+    world_name = "my_world"
+
+    def setup(self):
+        self.db = load_db()
+        self.tickets = {}
+
+    @tool
+    def lookup_user(self, user_id: str) -> dict:
+        """Return the user record by id."""
+        return self.db.get(user_id, {"error": "unknown user"})</code></pre>
+    </section>
+
+    <section>
+      <h2>The world.toml manifest</h2>
+      <p>
+        Every world ships a <code>world.toml</code> at the root of
+        its directory. The CLI reads it to discover the world's
+        Python package, default models, default personas, and any
+        shared resources. The scaffold produces a minimal one; here
+        is the full schema:
+      </p>
+<pre><code class="language-toml">[world]
+name = "my_world"
+python_package = "my_world"
+default_user_model = "claude-haiku-4-5"
+default_agent_model = "claude-sonnet-4-5"
+personas_dir = "personas"     # optional, relative to manifest
+rust_crate = "world"          # optional, only when --with-rust
+
+[[world.default_personas]]
+name = "frustrated_customer"
+
+[world.resources]
+billing_db = { permits = 1 }
+inference_pool = { permits = 4 }</code></pre>
+      <p>
+        The default-model fields let you set per-world preferred
+        models so scenarios do not have to repeat the same
+        <code>model=</code> string on every spawn. The resources
+        table declares shared locks the runtime acquires before
+        dispatching a tool that names them.
+      </p>
+      <p>
+        When you run a scenario from inside the world's directory,
+        the CLI auto-discovers the manifest and registers the world.
+        No <code>ensemble worlds add</code> step is required for the
+        common flow. The <a href="reference/world-api.html">World API
+        reference</a> covers the full manifest schema and the
+        registry semantics for worlds that live outside the cwd.
+      </p>
+    </section>
+
+    <section>
+      <h2>Predicates</h2>
+      <p>
+        Predicates are the yes/no questions the world exposes for
+        scenarios and graders to ask. A predicate walks the trace
+        and returns a bool. Use them when the answer is "did the
+        scenario end in the state I consider good".
+      </p>
+<pre><code class="language-python">from ensemble import predicate, register_world, tool
+
+
+@tool
+def issue_refund(user_id: str, amount_cents: int) -> dict:
+    """Issue a refund for the named user."""
+    return {"refund_id": f"r-{user_id}", "amount_cents": amount_cents}
+
+
+@predicate(name="had_double_refund")
+def had_double_refund(trace, args):
+    """True iff issue_refund was called twice for the same user."""
+    seen = set()
+    for ev in trace:
+        if ev["payload"].get("name") == "issue_refund":
+            user_id = ev["payload"]["args"]["user_id"]
+            if user_id in seen:
+                return True
+            seen.add(user_id)
+    return False
+
+
+register_world(
+    "my_world",
+    tools=[issue_refund],
+    predicates=[had_double_refund],
+)</code></pre>
+      <p>
+        Scenarios reference predicates by name in graders and in
+        <code>until_predicate</code> stop conditions. See the
+        <a href="reference/predicates.html">Predicates reference</a>
+        for the contract, including how per-user predicates dispatch
+        on <code>args["user_id"]</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>When to reach for Rust</h2>
+      <p>
+        The pure-Python path covers the dominant case. The
+        heavyweight path adds a Rust crate that implements
+        <code>WorldState</code>, and is the right choice when:
+      </p>
+      <ul>
+        <li>The world's state needs strongly-typed snapshot and
+          restore semantics. Plank uses SQLite with typed tables;
+          checkpointing the simulation in Rust is straightforward.
+          Doing the same in pure Python means pickle, which is
+          fragile for cross-version replay.</li>
+        <li>The world's state is large enough that copying it across
+          the Python-Rust boundary on every tool call matters. The
+          rust-state path lets the runtime keep the canonical state
+          in Rust and hand back diffs.</li>
+        <li>You want the typed tool-call enum that <code>WorldState
+          ::ToolCall</code> gives you, with compile-time exhaustiveness
+          when the runtime adds a new tool kind.</li>
+      </ul>
+      <p>
+        Scaffold with <code>ensemble init my_world --with-rust</code>.
+        The result is the same Python plugin plus a Cargo crate at
+        <code>world/</code> with a <code>WorldState</code> impl
+        ready to fill in. The <a href="reference/world-api.html">World
+        API reference</a> walks through the trait and the Python
+        glue.
+      </p>
+    </section>
+
+    <section>
+      <h2>Shared state and sandboxed tools</h2>
+      <p>
+        <code>world.shared_state</code> is a mutable JSON-serialisable
+        dict that the runtime forwards to sandbox-mode tool workers.
+        Reach for it when a tool runs in a subprocess (because it
+        imports torch, or because it might segfault) and needs to
+        read configuration the parent set. Mutations in the worker
+        do not propagate back; the dict is a one-way configuration
+        channel.
+      </p>
+      <p>
+        Sandboxed tools run each dispatch in a fresh
+        <code>python -m ensemble.tool_worker</code> subprocess. The
+        worker reimports the world's package, looks up the tool, and
+        calls it once with the supplied JSON args. Use sandboxing for
+        tools that can crash the interpreter; the cost is process
+        startup per call. See the
+        <a href="reference/tools.html#sandboxed-tools">Tools reference</a>
+        for the full contract.
+      </p>
+    </section>
+
+    <section>
+      <h2>Where to go next</h2>
+      <ul>
+        <li><a href="scenarios.html">Writing a scenario</a> for how
+          to spawn users and agents in your world and assemble the
+          run.</li>
+        <li><a href="tools.html">Tools</a> for the
+          <code>@tool</code> decorator shapes, the inference rules,
+          and the optional capabilities (timeouts, resources,
+          progress, sandbox).</li>
+        <li><a href="reference/world-api.html">World API reference</a>
+          for the contract behind <code>register_world</code>, the
+          subclass form, the manifest schema, and the rust
+          <code>WorldState</code> trait.</li>
+      </ul>
+    </section>
+
+    <footer class="site">
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>

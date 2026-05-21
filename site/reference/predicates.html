@@ -13,13 +13,20 @@
     <p class="tagline">Multi-user, multi-agent RL environments.</p>
     <nav>
       <div class="nav-group">
-        <div class="nav-group-title">Site</div>
+        <div class="nav-group-title">Get started</div>
         <a href="../index.html">Overview</a>
-        <a href="../docs.html">Docs</a>
-        <a href="../scenarios.html">Scenarios overview</a>
-        <a href="../plank.html">Plank</a>
-        <a href="../personas.html">Personas overview</a>
+        <a href="../quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="../worlds.html">Writing a world</a>
+        <a href="../scenarios.html">Writing a scenario</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../personas.html">Personas</a>
+        <a href="../sweeps.html">Sweeps</a>
+        <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
+        <a href="../plank.html">Plank example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -32,53 +39,97 @@
         <a href="cli.html">CLI</a>
         <a href="runtime.html">Runtime</a>
         <a href="traces.html">Traces</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-group-title">On this page</div>
-        <a href="#pluginpredicate">PluginPredicate</a>
-        <a href="#registering-predicates-with-a-world">Registering predicates with a world</a>
-        <a href="#evaluating-predicates">Evaluating predicates</a>
-        <a href="#halt-on-predicate-in-until">Halt-on-predicate in until</a>
-        <a href="#how-predicates-fit-into-graders">How predicates fit into graders</a>
-        <a href="#input-shape-the-trace-and-the-args">Input shape: the trace and the args</a>
-        <a href="#worked-example-popcorn-world">Worked example: popcorn-world</a>
-        <a href="#idioms">Idioms</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
       </div>
     </nav>
   </aside>
 
   <main>
-<h1>Predicates</h1>
-<p>A predicate is a named, pure function a world publishes so scenarios can ask yes/no questions about a finished or in-flight run. The motivating problem is that a scenario should be able to score outcomes (&quot;did the agent ever issue a double refund?&quot;, &quot;did the user reach the upgrade pitch?&quot;, &quot;did the submitted kernel pass held-out correctness?&quot;) without coupling its grader code to the internals of the world or the agent loop. The world is the only piece that knows what &quot;double refund&quot; means in terms of its own tools and state, so the world owns the implementation. The scenario asks for it by name.</p>
-<p>Predicates are also the contract behind `<code>world.run(world.until(...))</code><code> and </code><code>run.wait_until(...)</code><code>: an </code><code>until</code>` expression that names a predicate is evaluated against the trace each turn, and the scheduler stops when the predicate fires. The same predicate value drives a grader at the end of the run.</p>
-<p>This page documents the predicate type, the registration surface, the evaluation surface, the halt-on-predicate path through `<code>until</code>`, and the conventions worlds follow so their predicates compose cleanly with scenarios.</p>
-<h2 id="pluginpredicate">PluginPredicate</h2>
+    <h1>Predicates</h1>
+    <p class="lead">
+      A predicate is a named, pure function a world publishes so
+      scenarios can ask yes/no questions about a finished or in-flight
+      run. The motivating problem is that a scenario should be able to
+      score outcomes ("did the agent ever issue a double refund?",
+      "did the user reach the upgrade pitch?", "did the submitted
+      kernel pass held-out correctness?") without coupling its grader
+      code to the internals of the world or the agent loop. The world
+      is the only piece that knows what "double refund" means in terms
+      of its own tools and state, so the world owns the implementation.
+      The scenario asks for it by name.
+    </p>
+    <p>
+      Predicates are also the contract behind
+      <code>world.run(world.until(...))</code> and
+      <code>run.wait_until(...)</code>: an <code>until</code> expression
+      that names a predicate is evaluated against the trace each turn,
+      and the scheduler stops when the predicate fires. The same
+      predicate value drives a grader at the end of the run.
+    </p>
+    <p>
+      This page documents the predicate type, the registration surface,
+      the evaluation surface, the halt-on-predicate path through
+      <code>until</code>, and the conventions worlds follow so their
+      predicates compose cleanly with scenarios.
+    </p>
+
+    <section>
+      <h2>PluginPredicate</h2>
 <pre><code class="language-python"># python/ensemble/world.py
 @dataclass
 class PluginPredicate:
     name: str
     fn: Callable[[str, str], bool]</code></pre>
-<p>A `<code>PluginPredicate</code><code> is a name and a function. The function takes two JSON strings (the trace and the args) and returns a bool. The raw-string ABI matches the Rust side, which is what makes the same predicate registry serve both Python plugins and the typed </code><code>WorldState</code>` path without a second registration mechanism.</p>
-<p>Most predicates do not want to handle JSON strings by hand. The `<code>predicate</code>` helper wraps a function that takes deserialised values. It works in three shapes:</p>
+      <p>
+        A <code>PluginPredicate</code> is a name and a function. The
+        function takes two JSON strings (the trace and the args) and
+        returns a bool. The raw-string ABI matches the Rust side,
+        which is what makes the same predicate registry serve both
+        Python plugins and the typed <code>WorldState</code> path
+        without a second registration mechanism.
+      </p>
+      <p>
+        Most predicates do not want to handle JSON strings by hand.
+        The <code>predicate</code> helper wraps a function that takes
+        deserialised values. It works in three shapes:
+      </p>
 <pre><code class="language-python"># factory form (legacy): predicate(name, fn)
-register_world(&quot;tiny&quot;, predicates=[predicate(&quot;saw_refund&quot;, saw_refund)])
+register_world("tiny", predicates=[predicate("saw_refund", saw_refund)])
 
 # decorator-factory form, module level
-@predicate(name=&quot;saw_refund&quot;)
+@predicate(name="saw_refund")
 def saw_refund(trace, args):
-    return any(e[&quot;payload&quot;].get(&quot;name&quot;) == &quot;issue_refund&quot; for e in trace)
+    return any(e["payload"].get("name") == "issue_refund" for e in trace)
 
-register_world(&quot;tiny&quot;, predicates=[saw_refund])
+register_world("tiny", predicates=[saw_refund])
 
 # decorator-factory form, World subclass method
 class TinyWorld(World):
-    @predicate(name=&quot;saw_refund&quot;)
+    @predicate(name="saw_refund")
     def saw_refund(self, trace, args):
-        return any(e[&quot;payload&quot;].get(&quot;name&quot;) == &quot;issue_refund&quot; for e in trace)</code></pre>
-<p>In every case the wrapper does the `<code>json.loads</code><code> on the way in, calls the function with the deserialised </code><code>(trace, args)</code><code> (plus </code><code>self</code><code> for the subclass case), and coerces the return to </code><code>bool</code>`.</p>
-<h2 id="registering-predicates-with-a-world">Registering predicates with a world</h2>
-<p>A world&#x27;s `<code>register_world</code><code> call hands the runtime a list of predicates the same way it hands over a list of tools. Both </code><code>PluginPredicate</code><code> objects and </code><code>@predicate</code>`-decorated functions are accepted; the runtime coerces them at registration time.</p>
-<p>Worlds with per-instance state (an in-memory database, a per-run seed) either use the `<code>setup</code>` factory:</p>
+        return any(e["payload"].get("name") == "issue_refund" for e in trace)</code></pre>
+      <p>
+        In every case the wrapper does the <code>json.loads</code> on
+        the way in, calls the function with the deserialised
+        <code>(trace, args)</code> (plus <code>self</code> for the
+        subclass case), and coerces the return to <code>bool</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>Registering predicates with a world</h2>
+      <p>
+        A world's <code>register_world</code> call hands the runtime a
+        list of predicates the same way it hands over a list of tools.
+        Both <code>PluginPredicate</code> objects and
+        <code>@predicate</code>-decorated functions are accepted; the
+        runtime coerces them at registration time.
+      </p>
+      <p>
+        Worlds with per-instance state (an in-memory database, a
+        per-run seed) either use the <code>setup</code> factory:
+      </p>
 <pre><code class="language-python"># examples/plank/plank/__init__.py
 def _setup():
     db = _native.PlankDb()
@@ -86,60 +137,174 @@ def _setup():
     predicates = [_predicate(db, name) for name in db.predicate_names()]
     return tools, predicates
 
-register_world(&quot;plank&quot;, setup=_setup, personas_dir=PERSONAS_DIR)</code></pre>
-<p>...or the subclass form, which makes per-instance state available as `<code>self</code>` inside the decorated method:</p>
+register_world("plank", setup=_setup, personas_dir=PERSONAS_DIR)</code></pre>
+      <p>
+        ...or the subclass form, which makes per-instance state
+        available as <code>self</code> inside the decorated method:
+      </p>
 <pre><code class="language-python">class PopcornWorld(World):
     def setup(self):
         self.submitted = {}
 
-    @predicate(name=&quot;any_submission_passed&quot;)
+    @predicate(name="any_submission_passed")
     def any_submission_passed(self, trace, args):
         return any(o.ok for o in self.submitted.values())</code></pre>
-<p>Plank&#x27;s `<code>_predicate</code>` delegates to the typed Rust core: the database knows what each predicate means in terms of its own tables, and the Python wrapper just hands the trace and args back to it. A pure-Python world doesn&#x27;t have this asymmetry; its predicates walk the trace directly. See the <a href="#worked-example-popcorn-world">worked example</a> below.</p>
-<h2 id="evaluating-predicates">Evaluating predicates</h2>
-<p>Once a world is constructed, predicates resolve through three call sites.</p>
-<p>`<code>world.evaluate_predicate(name, args=None, *, default=...)</code><code> runs a registered predicate by name against the current trace and returns the bool. Unknown predicate names raise </code><code>PredicateError</code><code> (a </code><code>KeyError</code><code> subclass) by default, so typos in your own world&#x27;s predicate names fail loudly in CI rather than silently scoring zero. Pass </code><code>default=False</code>` (or any other value) for portability across worlds with different predicate sets:</p>
+      <p>
+        Plank's <code>_predicate</code> delegates to the typed Rust
+        core: the database knows what each predicate means in terms
+        of its own tables, and the Python wrapper just hands the
+        trace and args back to it. A pure-Python world doesn't have
+        this asymmetry; its predicates walk the trace directly. See
+        the <a href="#worked-example-popcorn-world">worked example</a>
+        below.
+      </p>
+    </section>
+
+    <section>
+      <h2>Evaluating predicates</h2>
+      <p>
+        Once a world is constructed, predicates resolve through three
+        call sites.
+      </p>
+      <p>
+        <code>world.evaluate_predicate(name, args=None, *,
+        default=...)</code> runs a registered predicate by name
+        against the current trace and returns the bool. Unknown
+        predicate names raise <code>PredicateError</code> (a
+        <code>KeyError</code> subclass) by default, so typos in your
+        own world's predicate names fail loudly in CI rather than
+        silently scoring zero. Pass <code>default=False</code> (or any
+        other value) for portability across worlds with different
+        predicate sets:
+      </p>
 <pre><code class="language-python"># raises if the predicate is not registered
-world.evaluate_predicate(&quot;submit_called&quot;)
+world.evaluate_predicate("submit_called")
 
 # returns False for unknown predicates; useful for portable graders
-world.evaluate_predicate(&quot;submit_called&quot;, default=False)</code></pre>
-<p>`<code>world.predicate_names() -&gt; List[str]</code><code> returns every name the world has registered. </code><code>world.tool_names()</code>` is the equivalent for tools. Both are public.</p>
-<p>`<code>user.predicate(name, default=False)</code><code> is the per-user convenience: it calls </code><code>world.evaluate_predicate(name, {&quot;user_id&quot;: user.id})</code><code> and defaults to </code><code>False</code>` for unknown predicates so the convenience methods stay drop-in safe in portable graders.</p>
-<h2 id="halt-on-predicate-in-until">Halt-on-predicate in until</h2>
-<p>The scheduler evaluates registered predicates each tick against a trace snapshot, which is enough machinery to express &quot;stop when the agent submits&quot; as one `<code>until</code>`:</p>
+world.evaluate_predicate("submit_called", default=False)</code></pre>
+      <p>
+        <code>world.predicate_names() -&gt; List[str]</code> returns
+        every name the world has registered.
+        <code>world.tool_names()</code> is the equivalent for tools.
+        Both are public.
+      </p>
+      <p>
+        <code>user.predicate(name, default=False)</code> is the
+        per-user convenience: it calls
+        <code>world.evaluate_predicate(name, {"user_id": user.id})</code>
+        and defaults to <code>False</code> for unknown predicates so
+        the convenience methods stay drop-in safe in portable
+        graders.
+      </p>
+    </section>
+
+    <section>
+      <h2>Halt-on-predicate in until</h2>
+      <p>
+        The scheduler evaluates registered predicates each tick
+        against a trace snapshot, which is enough machinery to express
+        "stop when the agent submits" as one <code>until</code>:
+      </p>
 <pre><code class="language-python">from ensemble import until_predicate
 
-yield world.until_predicate(&quot;submit_called&quot;) | (world.turn_count &gt; 30)</code></pre>
-<p>The two forms in the snippet are equivalent: `<code>world.until_predicate(&quot;...&quot;)</code><code> additionally validates the name against the world&#x27;s registry (raising </code><code>PredicateError</code><code> if no such predicate exists), so a typo in the stop condition fails at scenario definition rather than silently never firing. </code><code>until_predicate(&quot;...&quot;)</code>` (module-level) skips the validation and is the right shape for predicates the world will register later in setup.</p>
-<p>Composes with `<code>turn_count</code><code> and other </code><code>Until</code><code>s via </code><code>|</code><code> / </code><code>&amp;</code><code> or </code><code>any_of</code><code> / </code><code>all_of</code><code>. The &quot;submit OR turn budget&quot; shape is the canonical &quot;give the agent room to finish but cap the cost&quot; expression; before the predicate kind existed every scenario either burned the turn budget or dropped into the async </code><code>world.simulate()</code>` path.</p>
-<h2 id="how-predicates-fit-into-graders">How predicates fit into graders</h2>
-<p>Graders are the only place predicates are usually surfaced in scenario code. A python scenario builds a dict whose values are `<code>0.0</code><code> or </code><code>1.0</code>`:</p>
-<pre><code class="language-python">@scenario(&quot;plank.refund_storm&quot;)
+yield world.until_predicate("submit_called") | (world.turn_count &gt; 30)</code></pre>
+      <p>
+        The two forms in the snippet are equivalent:
+        <code>world.until_predicate("...")</code> additionally
+        validates the name against the world's registry (raising
+        <code>PredicateError</code> if no such predicate exists), so a
+        typo in the stop condition fails at scenario definition rather
+        than silently never firing.
+        <code>until_predicate("...")</code> (module-level) skips the
+        validation and is the right shape for predicates the world
+        will register later in setup.
+      </p>
+      <p>
+        Composes with <code>turn_count</code> and other
+        <code>Until</code>s via <code>|</code> / <code>&amp;</code> or
+        <code>any_of</code> / <code>all_of</code>. The
+        "submit OR turn budget" shape is the canonical "give the
+        agent room to finish but cap the cost" expression; before the
+        predicate kind existed every scenario either burned the turn
+        budget or dropped into the async <code>world.simulate()</code>
+        path.
+      </p>
+    </section>
+
+    <section>
+      <h2>How predicates fit into graders</h2>
+      <p>
+        Graders are the only place predicates are usually surfaced in
+        scenario code. A python scenario builds a dict whose values
+        are <code>0.0</code> or <code>1.0</code>:
+      </p>
+<pre><code class="language-python">@scenario("plank.refund_storm")
 async def refund_storm(world: World):
-    alice = world.spawn_user(id=&quot;alice&quot;, persona=&quot;frustrated_power_user&quot;)
+    alice = world.spawn_user(id="alice", persona="frustrated_power_user")
     await world.run(world.until(world.turn_count &gt; 30))
     return {
-        &quot;alice_refund_resolved&quot;: float(alice.hidden_goal_resolved()),
-        &quot;global_no_double_refunds&quot;: float(not world.had_double_refund()),
+        "alice_refund_resolved": float(alice.hidden_goal_resolved()),
+        "global_no_double_refunds": float(not world.had_double_refund()),
     }</code></pre>
-<p>The declarative form factors the dict out into TOML and references predicates by name:</p>
+      <p>
+        The declarative form factors the dict out into TOML and
+        references predicates by name:
+      </p>
 <pre><code class="language-toml">[scenario.refund_storm.graders]
-alice_refund_resolved = &quot;alice_hidden_goal_resolved&quot;
-global_no_double_refunds = &quot;not had_double_refund&quot;</code></pre>
-<p>The loader at `<code>ensemble.scenario_toml._make_grader_context</code>` builds the expression namespace each grader is evaluated against. Three name shapes resolve:</p>
-<ul>
-<li>Bare predicate names like `<code>had_double_refund</code>` evaluate the world&#x27;s predicate with no args.</li>
-<li>Underscore-prefixed predicate names like `<code>alice_hidden_goal_resolved</code><code> split into a user id and a predicate name and evaluate with </code><code>args = {&quot;user_id&quot;: &quot;alice&quot;}</code>`.</li>
-<li>The literal shortcuts `<code>true</code><code>, </code><code>false</code><code>, </code><code>any_event</code><code>, and </code><code>turn_count</code>`.</li>
-</ul>
-<p>Anything else raises during evaluation.</p>
-<h2 id="input-shape-the-trace-and-the-args">Input shape: the trace and the args</h2>
-<p>The first argument every predicate receives is the trace. After `<code>json.loads</code><code> it is a list of event dicts in chronological order. Each event carries an actor id, a turn number, a </code><code>seed</code><code> flag, and a </code><code>payload</code><code>. The payload&#x27;s </code><code>kind</code><code> tells you what kind of event it is; for </code><code>tool_result</code><code> events the </code><code>name</code><code> field names the tool and the </code><code>result</code><code> field is the tool&#x27;s response envelope (</code><code>{&quot;effect&quot;: {...}, &quot;diff&quot;: [...], &quot;costs&quot;: {...}}</code>`).</p>
-<p>The convention is to walk the trace once, filter to the events the predicate cares about, and accumulate the answer.</p>
-<p>The second argument is the args dict. For user-scoped predicates it has `<code>user_id</code>`; for predicates that take parameters from a TOML grader (rare) it has whatever the grader passed.</p>
-<h2 id="worked-example-popcorn-world">Worked example: popcorn-world</h2>
-<p>Popcorn-world is a pure-Python world whose predicates mix trace-walking with reading the world&#x27;s in-memory ledger. The subclass shape:</p>
+alice_refund_resolved = "alice_hidden_goal_resolved"
+global_no_double_refunds = "not had_double_refund"</code></pre>
+      <p>
+        The loader at
+        <code>ensemble.scenario_toml._make_grader_context</code>
+        builds the expression namespace each grader is evaluated
+        against. Three name shapes resolve:
+      </p>
+      <ul>
+        <li>Bare predicate names like <code>had_double_refund</code>
+          evaluate the world's predicate with no args.</li>
+        <li>Underscore-prefixed predicate names like
+          <code>alice_hidden_goal_resolved</code> split into a user id
+          and a predicate name and evaluate with
+          <code>args = {"user_id": "alice"}</code>.</li>
+        <li>The literal shortcuts <code>true</code>,
+          <code>false</code>, <code>any_event</code>, and
+          <code>turn_count</code>.</li>
+      </ul>
+      <p>Anything else raises during evaluation.</p>
+    </section>
+
+    <section>
+      <h2>Input shape: the trace and the args</h2>
+      <p>
+        The first argument every predicate receives is the trace.
+        After <code>json.loads</code> it is a list of event dicts in
+        chronological order. Each event carries an actor id, a turn
+        number, a <code>seed</code> flag, and a <code>payload</code>.
+        The payload's <code>kind</code> tells you what kind of event
+        it is; for <code>tool_result</code> events the
+        <code>name</code> field names the tool and the
+        <code>result</code> field is the tool's response envelope
+        (<code>{"effect": {...}, "diff": [...], "costs": {...}}</code>).
+      </p>
+      <p>
+        The convention is to walk the trace once, filter to the
+        events the predicate cares about, and accumulate the answer.
+      </p>
+      <p>
+        The second argument is the args dict. For user-scoped
+        predicates it has <code>user_id</code>; for predicates that
+        take parameters from a TOML grader (rare) it has whatever the
+        grader passed.
+      </p>
+    </section>
+
+    <section id="worked-example-popcorn-world">
+      <h2>Worked example: popcorn-world</h2>
+      <p>
+        Popcorn-world is a pure-Python world whose predicates mix
+        trace-walking with reading the world's in-memory ledger. The
+        subclass shape:
+      </p>
 <pre><code class="language-python"># popcorn_world/world.py
 from ensemble import World, predicate, tool
 
@@ -148,43 +313,92 @@ class PopcornWorld(World):
     def setup(self):
         self.state = PopcornState()
 
-    @tool(name=&quot;submit_kernel&quot;, description=&quot;...&quot;, parameters=...)
+    @tool(name="submit_kernel", description="...", parameters=...)
     def submit_kernel(self, src: str):
         self.state.record(src)
-        return {&quot;ok&quot;: True}
+        return {"ok": True}
 
-    @predicate(name=&quot;submit_called&quot;)
+    @predicate(name="submit_called")
     def submit_called(self, trace, args):
         return any(
-            e.get(&quot;payload&quot;, {}).get(&quot;name&quot;) == &quot;submit_kernel&quot;
-            and e[&quot;payload&quot;].get(&quot;kind&quot;) == &quot;tool_result&quot;
+            e.get("payload", {}).get("name") == "submit_kernel"
+            and e["payload"].get("kind") == "tool_result"
             for e in trace
         )
 
-    @predicate(name=&quot;held_out_correctness_passed&quot;)
+    @predicate(name="held_out_correctness_passed")
     def held_out_correctness_passed(self, trace, args):
         # Held-out re-verification result is deliberately not on the
-        # trace (the agent doesn&#x27;t see it). The grader reads it from
+        # trace (the agent doesn't see it). The grader reads it from
         # self.state.
         return any(
             r.submitted and r.held_out_correctness
             for r in self.state.all_records()
         )</code></pre>
-<p>The pattern: predicates close over the state container the world&#x27;s setup built (which lives on `<code>self</code><code> for a subclass, in a closure for the factory form), walk the trace for sequenced questions (&quot;was static_check called before submit?&quot;), and consult </code><code>state.all_records()</code>` for hidden ground truth the agent was not told. Either source is fine.</p>
-<h2 id="idioms">Idioms</h2>
-<p>A few patterns worth knowing.</p>
-<p><strong>State-walking vs. trace-walking.</strong> Prefer the trace when the question is &quot;what did the actor do, in what order&quot;. Prefer state when the question is &quot;what is true about world ground truth that the actor may not have seen&quot;. Mixing is fine; the held-out correctness predicate above does both.</p>
-<p><strong>Args-driven predicates.</strong> When a single conceptual predicate applies to many subjects (per-user resolution, per-ticket refund, per-kernel correctness), publish it once and let the args dispatch. The grader DSL&#x27;s `<code>&lt;user_id&gt;_&lt;predicate&gt;</code>` convention is built on this.</p>
-<p><strong>Optional worlds.</strong> If a scenario should be portable across worlds that do not all publish the same predicates, pass `<code>default=False</code><code> to </code><code>world.evaluate_predicate</code><code> (or use the convenience methods on </code><code>User</code><code> / </code><code>World</code>`, which default to False). Without a default, unknown predicate names raise.</p>
-<p><strong>Predicates are pure.</strong> They are called repeatedly (every turn for `<code>until</code>`, plus once at grading). They must not mutate world state, increment counters, or write files. The runtime does not memoise predicate results across turns because the trace changes between calls.</p>
-<p><strong>Errors propagate.</strong> A predicate that raises does not silently return false; the run fails loudly at the call site. Catch the exceptions you mean to handle (KeyError on a missing field, JSONDecodeError on a malformed event) and let the rest blow up so a broken predicate surfaces in CI rather than in a misleading score.</p>
+      <p>
+        The pattern: predicates close over the state container the
+        world's setup built (which lives on <code>self</code> for a
+        subclass, in a closure for the factory form), walk the trace
+        for sequenced questions ("was static_check called before
+        submit?"), and consult <code>state.all_records()</code> for
+        hidden ground truth the agent was not told. Either source is
+        fine.
+      </p>
+    </section>
+
+    <section>
+      <h2>Idioms</h2>
+      <p>A few patterns worth knowing.</p>
+      <p>
+        <strong>State-walking vs. trace-walking.</strong> Prefer the
+        trace when the question is "what did the actor do, in what
+        order". Prefer state when the question is "what is true about
+        world ground truth that the actor may not have seen". Mixing
+        is fine; the held-out correctness predicate above does both.
+      </p>
+      <p>
+        <strong>Args-driven predicates.</strong> When a single
+        conceptual predicate applies to many subjects (per-user
+        resolution, per-ticket refund, per-kernel correctness),
+        publish it once and let the args dispatch. The grader DSL's
+        <code>&lt;user_id&gt;_&lt;predicate&gt;</code> convention is
+        built on this.
+      </p>
+      <p>
+        <strong>Optional worlds.</strong> If a scenario should be
+        portable across worlds that do not all publish the same
+        predicates, pass <code>default=False</code> to
+        <code>world.evaluate_predicate</code> (or use the convenience
+        methods on <code>User</code> / <code>World</code>, which
+        default to False). Without a default, unknown predicate names
+        raise.
+      </p>
+      <p>
+        <strong>Predicates are pure.</strong> They are called
+        repeatedly (every turn for <code>until</code>, plus once at
+        grading). They must not mutate world state, increment
+        counters, or write files. The runtime does not memoise
+        predicate results across turns because the trace changes
+        between calls.
+      </p>
+      <p>
+        <strong>Errors propagate.</strong> A predicate that raises
+        does not silently return false; the run fails loudly at the
+        call site. Catch the exceptions you mean to handle (KeyError
+        on a missing field, JSONDecodeError on a malformed event) and
+        let the rest blow up so a broken predicate surfaces in CI
+        rather than in a misleading score.
+      </p>
+    </section>
+
+    <footer class="site">
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
+    </footer>
   </main>
 
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/rust.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
   <script>hljs.highlightAll();</script>
 </body>

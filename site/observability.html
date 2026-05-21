@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble, observability</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Get started</div>
+        <a href="index.html">Overview</a>
+        <a href="quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="worlds.html">Writing a world</a>
+        <a href="scenarios.html">Writing a scenario</a>
+        <a href="tools.html">Tools</a>
+        <a href="personas.html">Personas</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html" class="active">Observability</a>
+        <a href="mcp.html">MCP</a>
+        <a href="plank.html">Plank example</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="reference/index.html">Reference home</a>
+        <a href="reference/world-api.html">World API</a>
+        <a href="reference/scenarios.html">Scenarios</a>
+        <a href="reference/tools.html">Tools</a>
+        <a href="reference/predicates.html">Predicates</a>
+        <a href="reference/personas.html">Personas</a>
+        <a href="reference/cli.html">CLI</a>
+        <a href="reference/runtime.html">Runtime</a>
+        <a href="reference/traces.html">Traces</a>
+        <a href="reference/sweeps.html">Sweeps</a>
+        <a href="reference/observability.html">Observability</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+    <h1>Observability</h1>
+    <p class="lead">
+      Every <code>ensemble run</code> lands in its own directory and
+      appends one row to a flat <code>traces/runs.jsonl</code> index.
+      Once that is true, cross-run questions become cheap: list recent
+      runs, dump one run's meta, diff two runs' scores side by side,
+      open two traces scroll-synced by tick, or export the index to
+      JSON or CSV for downstream analysis. This guide walks through
+      the on-disk layout and the subcommands that read it.
+    </p>
+
+    <section>
+      <h2>The on-disk layout</h2>
+      <p>
+        A run produces a per-run directory under <code>traces/</code>
+        and appends one row to the shared index. A flat symlink at
+        the old path keeps the README quickstart and any tooling that
+        hard-codes <code>traces/&lt;scenario&gt;.jsonl</code>
+        working.
+      </p>
+<pre><code class="language-text">traces/
+  runs.jsonl                                                # append-only index, one row per run
+  20260520T143022_my_world_smoke_a1b2c3d4/                  # per-run directory
+    trace.jsonl                                             # the events the viewer reads
+    meta.json                                               # the row above, duplicated for offline use
+  my_world_smoke.jsonl -> 20260520T143022_my_world_smoke_a1b2c3d4/trace.jsonl</code></pre>
+      <p>
+        The run id is a sortable timestamp plus an 8-hex
+        disambiguator. <code>ls traces/</code> shows the newest run
+        last, and tab completion still distinguishes runs of the same
+        scenario at the same second.
+      </p>
+    </section>
+
+    <section>
+      <h2>A row in runs.jsonl</h2>
+      <p>
+        The index is one JSON object per line. Each row carries the
+        fields you need to filter, sort, and compare without opening
+        the per-run <code>meta.json</code>:
+      </p>
+<pre><code class="language-json">{
+  "run_id": "20260520T143022_my_world_smoke_a1b2c3d4",
+  "scenario": "my_world.smoke",
+  "world": "my_world",
+  "backend": "mock",
+  "started_at": 1779326173.89,
+  "finished_at": 1779326175.90,
+  "duration_s": 2.01,
+  "scores": {"ok": 1.0},
+  "costs": {},
+  "trace_path": "traces/20260520T143022_my_world_smoke_a1b2c3d4/trace.jsonl"
+}</code></pre>
+      <p>
+        The per-run <code>meta.json</code> carries the same fields,
+        so a single run is self-describing even if you copy its
+        directory out of the project.
+      </p>
+    </section>
+
+    <section>
+      <h2>Listing runs</h2>
+      <p>
+        <code>ensemble runs list</code> prints recent runs as a table
+        sorted oldest-first. <code>--scenario</code> filters by
+        scenario name; <code>--limit</code> caps the number of rows.
+      </p>
+<pre><code class="language-bash">ensemble runs list                                  # everything
+ensemble runs list --scenario my_world.smoke        # one scenario
+ensemble runs list --scenario my_world.smoke --limit 5</code></pre>
+<pre><code class="language-text">run_id                                                   scenario          when                 scores
+-----------------------------------------------------------------------------------------------------------
+20260520T143022_my_world_smoke_a1b2c3d4                  my_world.smoke    2026-05-20 14:30:22  ok=1.0
+20260520T144210_my_world_smoke_b2c3d4e5                  my_world.smoke    2026-05-20 14:42:10  ok=0.5</code></pre>
+      <p>
+        The global <code>--traces-dir</code> flag points at a
+        directory other than <code>./traces</code>. Pass a sweep's
+        directory to list its cells the same way.
+      </p>
+    </section>
+
+    <section>
+      <h2>Showing one run</h2>
+      <p>
+        <code>ensemble runs show</code> prints one run's meta as
+        pretty-printed JSON. The argument is the full run id or any
+        unique prefix. If the prefix matches more than one run, the
+        command reports the matches and exits non-zero so you can
+        retry with a longer prefix.
+      </p>
+<pre><code class="language-bash">ensemble runs show 20260520T143022           # full id
+ensemble runs show a1b2c3d4                  # unique suffix works too
+ensemble runs show 2026                      # ambiguous, lists matches and exits non-zero</code></pre>
+    </section>
+
+    <section>
+      <h2>Comparing two runs</h2>
+      <p>
+        <code>ensemble runs compare</code> diffs two runs' scores
+        side by side. Each metric appears once with the A value, the
+        B value, and the signed delta. The bottom section repeats the
+        cost dicts verbatim so you can spot token or USD swings.
+      </p>
+<pre><code class="language-bash">ensemble runs compare a1b2c3d4 b2c3d4e5</code></pre>
+<pre><code class="language-text">A: 20260520T143022_my_world_smoke_a1b2c3d4  scenario=my_world.smoke  when=2026-05-20 14:30:22
+B: 20260520T144210_my_world_smoke_b2c3d4e5  scenario=my_world.smoke  when=2026-05-20 14:42:10
+
+metric                                       A               B  delta
+--------------------------------------------------------------------------------
+ok                                          1.0             0.5      -0.500
+speed                                       0.8             0.9      +0.100
+
+costs:
+  A: {"tokens_in": 4500, "usd": 0.013}
+  B: {"tokens_in": 4800, "usd": 0.014}</code></pre>
+      <p>
+        Pair the numeric diff with <code>ensemble trace compare</code>
+        below to see the actual messages that produced the score
+        delta.
+      </p>
+    </section>
+
+    <section>
+      <h2>Exporting the index</h2>
+      <p>
+        <code>ensemble runs export</code> emits the whole index in
+        one shot. <code>--format json</code> is the default and
+        writes a JSON array of meta records.
+        <code>--format csv</code> flattens <code>scores</code> into
+        one column per metric so the result loads into pandas without
+        re-parsing JSON.
+      </p>
+<pre><code class="language-bash">ensemble runs export --format json &gt; runs.json
+ensemble runs export --format csv  &gt; runs.csv</code></pre>
+<pre><code class="language-text">run_id,scenario,world,backend,finished_at,duration_s,score.ok,score.speed
+20260520T143022_my_world_smoke_a1b2c3d4,my_world.smoke,my_world,mock,1779326175.9,2.01,1.0,0.8
+20260520T144210_my_world_smoke_b2c3d4e5,my_world.smoke,my_world,mock,1779327730.1,2.05,0.5,0.9</code></pre>
+    </section>
+
+    <section>
+      <h2>The compare viewer</h2>
+      <p>
+        <code>ensemble trace compare</code> opens a two-column
+        browser view of two traces. Each column renders one trace's
+        message events (agent and user messages, tool calls, tool
+        results, system notes) as a chronological feed. The
+        sync-scroll toggle, on by default, ties the columns by tick
+        so equivalent moments in both runs sit at the same vertical
+        position.
+      </p>
+<pre><code class="language-bash">ensemble trace compare \
+  traces/20260520T143022_my_world_smoke_a1b2c3d4/trace.jsonl \
+  traces/20260520T144210_my_world_smoke_b2c3d4e5/trace.jsonl \
+  --port 8765</code></pre>
+      <p>
+        The compare assets ship embedded in the binary so the command
+        works offline without <code>--site</code>.
+        <code>--site &lt;dir&gt;</code> is still honoured for live
+        editing of the HTML and JS during development.
+      </p>
+    </section>
+
+    <section>
+      <h2>Filtering and ad-hoc analysis</h2>
+      <p>
+        The index is flat JSONL on purpose: a researcher can read it
+        directly in any language without going through the CLI. The
+        common pattern is to load the rows, filter to the scenario
+        you care about, and aggregate over the
+        <code>scores</code> dict:
+      </p>
+<pre><code class="language-python">import json
+from pathlib import Path
+
+rows = [
+    json.loads(line)
+    for line in Path("traces/runs.jsonl").read_text().splitlines()
+    if line.strip()
+]
+
+recent = [r for r in rows if r["scenario"] == "my_world.refund"][-20:]
+mean_refund = sum(r["scores"]["refund_issued"] for r in recent) / len(recent)
+print(f"refund_issued over last 20 runs: {mean_refund:.2f}")</code></pre>
+      <p>
+        Sweep results live in the same shape: each cell is a row in
+        the sweep's <code>index.jsonl</code>, so the same snippet
+        works against a sweep directory with one path change.
+      </p>
+    </section>
+
+    <section>
+      <h2>Where to go next</h2>
+      <ul>
+        <li><a href="sweeps.html">Sweeps</a> for fanning out runs
+          across a grid of parameters and aggregating the resulting
+          index.</li>
+        <li><a href="reference/observability.html">Observability
+          reference</a> for the full flag list on <code>ensemble
+          runs</code> and the exact schema of <code>runs.jsonl</code>
+          and <code>meta.json</code>.</li>
+        <li><a href="reference/traces.html">Traces reference</a> for
+          the underlying event format the viewer and compare mode
+          read.</li>
+      </ul>
+    </section>
+
+    <footer class="site">
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/json.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>

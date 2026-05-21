@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ensemble, tools</title>
+  <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="wordmark" href="index.html">ensemble</a>
+    <p class="tagline">Multi-user, multi-agent RL environments.</p>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-title">Get started</div>
+        <a href="index.html">Overview</a>
+        <a href="quickstart.html">Quickstart</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Guides</div>
+        <a href="worlds.html">Writing a world</a>
+        <a href="scenarios.html">Writing a scenario</a>
+        <a href="tools.html" class="active">Tools</a>
+        <a href="personas.html">Personas</a>
+        <a href="sweeps.html">Sweeps</a>
+        <a href="observability.html">Observability</a>
+        <a href="mcp.html">MCP</a>
+        <a href="plank.html">Plank example</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">Reference</div>
+        <a href="reference/index.html">Reference home</a>
+        <a href="reference/world-api.html">World API</a>
+        <a href="reference/scenarios.html">Scenarios</a>
+        <a href="reference/tools.html">Tools</a>
+        <a href="reference/predicates.html">Predicates</a>
+        <a href="reference/personas.html">Personas</a>
+        <a href="reference/cli.html">CLI</a>
+        <a href="reference/runtime.html">Runtime</a>
+        <a href="reference/traces.html">Traces</a>
+        <a href="reference/sweeps.html">Sweeps</a>
+        <a href="reference/observability.html">Observability</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+    <h1>Tools</h1>
+    <p class="lead">
+      A tool is a Python function the agent can call. This guide
+      walks through the four shapes the <code>@tool</code> decorator
+      takes, the return-envelope choices, and the optional
+      capabilities a tool can opt into. Reach for it when you are
+      adding a new tool or deciding which decorator shape fits the
+      function you already have.
+    </p>
+
+    <section>
+      <h2>The bare decorator</h2>
+      <p>
+        Most tools want the bare form. Write a plain Python function
+        with type hints and a docstring, stick <code>@tool</code> on
+        top, and hand it to <code>register_world</code>. The
+        decorator infers the tool's name from the function's
+        <code>__name__</code>, the description from the first
+        paragraph of the docstring, and the JSON-Schema
+        <code>parameters</code> from the type hints. There is no
+        configuration to repeat.
+      </p>
+<pre><code class="language-python">from ensemble import register_world, tool
+
+
+@tool
+def lookup_user(user_id: str) -> dict:
+    """Return the user record by id."""
+    return {"id": user_id, "name": "Alice", "plan": "team"}
+
+
+@tool
+def search_kb(query: str, tags: list[str] | None = None) -> list:
+    """Search the knowledge base. Tags filter the returned items."""
+    return kb.search(query, tags or [])
+
+
+register_world("my_world", tools=[lookup_user, search_kb])</code></pre>
+      <p>
+        Inference handles the parameter shapes you reach for most
+        often. A <code>str</code> becomes <code>{"type":
+        "string"}</code>, an <code>int</code> becomes
+        <code>{"type": "integer"}</code>, a <code>list[str]</code>
+        becomes an array of strings, and
+        <code>Optional[T]</code> (or any parameter with a default of
+        <code>None</code>) drops out of the <code>required</code>
+        list while keeping its type. The inferred schema for
+        <code>search_kb</code> above looks like this:
+      </p>
+<pre><code class="language-json">{
+  "type": "object",
+  "properties": {
+    "query": {"type": "string"},
+    "tags": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["query"]
+}</code></pre>
+      <p>
+        Two rules cover the rest. Parameters without a default land
+        in <code>required</code>; parameters with a default do not.
+        <code>Literal["a", "b"]</code> becomes <code>{"enum": ["a",
+        "b"]}</code>. Anything the inferrer cannot recognise produces
+        an empty schema fragment, which the runtime treats as "any
+        JSON value". When you want a tighter contract than that,
+        reach for one of the override forms below.
+      </p>
+    </section>
+
+    <section>
+      <h2>The kwarg-override form</h2>
+      <p>
+        When inference is mostly right but one or two fields need a
+        custom value, call the decorator with keyword arguments and
+        leave the rest to inference. The common reasons are a tool
+        name that differs from the function name, a description that
+        is not the docstring's first paragraph, or a hand-rolled
+        schema for a parameter that inference cannot reach.
+      </p>
+<pre><code class="language-python">@tool(description="Submit the kernel for static checks and run.")
+def submit(src: str):
+    return runner.check_and_run(src)</code></pre>
+      <p>
+        Any of <code>name</code>, <code>description</code>,
+        <code>parameters</code>, <code>timeout_ms</code>,
+        <code>resources</code>, <code>sandbox</code>, and
+        <code>sandbox_world</code> can be passed this way. Anything
+        you omit is still inferred from the function. The kwarg form
+        is the right call when you want one override without giving
+        up the convenience of inference for everything else.
+      </p>
+    </section>
+
+    <section>
+      <h2>The four-argument factory</h2>
+      <p>
+        When the schema is already in hand, for example because it
+        was generated from a shared spec or pulled off a remote
+        server's tool list, call <code>tool</code> as a four-argument
+        factory. This form does no inference; every field is
+        explicit. It is also the right call for functions without
+        type hints, where there is nothing for the inferrer to read.
+      </p>
+<pre><code class="language-python">register_world("my_world", tools=[
+    tool(
+        "submit_kernel",
+        "Submit the kernel and run it.",
+        {"type": "object",
+         "properties": {"src": {"type": "string"}},
+         "required": ["src"]},
+        submit_kernel_fn,
+    ),
+])</code></pre>
+      <p>
+        The arguments are <code>name</code>,
+        <code>description</code>, the JSON-Schema
+        <code>parameters</code> object, and the callable. The result
+        is a <code>PluginTool</code> ready to drop into the
+        <code>tools=</code> list. Reach for this form sparingly; the
+        bare decorator is shorter for the cases where it works.
+      </p>
+    </section>
+
+    <section>
+      <h2>Subclass methods</h2>
+      <p>
+        Decorated methods on a <code>World</code> subclass behave the
+        same way. The subclass walker picks them up at construction
+        time and binds <code>self</code> automatically. The bare form
+        works because the walker skips <code>self</code> when it
+        infers the schema, so the parameters the agent sees are the
+        real arguments only.
+      </p>
+<pre><code class="language-python">from ensemble import World, tool
+
+
+class MyWorld(World):
+    def setup(self):
+        self.db = Db()
+
+    @tool
+    def lookup_user(self, user_id: str) -> dict:
+        """Return the user record by id."""
+        return {"ok": True, "data": self.db.lookup_user(user_id)}</code></pre>
+      <p>
+        Use the subclass form when the tools need shared mutable
+        state that is awkward to express with module-level closures.
+        See <a href="worlds.html">Writing a world</a> for the
+        trade-offs between the subclass form and the flat
+        <code>register_world</code> form.
+      </p>
+    </section>
+
+    <section>
+      <h2>Return shapes</h2>
+      <p>
+        A tool can return one of three shapes, and the wrapper
+        figures out which one it got. The simplest is a plain dict,
+        which the runtime sends back as the tool's effect. The next
+        is an <code>(effect, diff)</code> tuple, where the diff is
+        emitted as a <code>state_diff</code> event alongside the
+        <code>tool_result</code>; reach for this when the tool
+        mutates world state and you want the trace to record the
+        delta.
+      </p>
+<pre><code class="language-python">@tool
+def issue_refund(user_id: str, amount_cents: int):
+    """Issue a refund for the named user."""
+    record = {"refund_id": f"r-{user_id}", "amount_cents": amount_cents}
+    diff = {"refunds": {"+": [record]}}
+    return record, diff</code></pre>
+      <p>
+        The third shape is the structured envelope, a dict that
+        contains one or more of <code>effect</code>,
+        <code>diff</code>, <code>costs</code>, and
+        <code>progress</code>. The structured envelope is the right
+        choice when the tool wants to annotate cost or emit progress
+        without using the <code>emit_progress</code> injection path
+        described below.
+      </p>
+<pre><code class="language-python">@tool
+def heavy_op(target: str):
+    result = run(target)
+    return {
+        "effect": {"ok": True, "result": result},
+        "costs": {"gpu_seconds": 4.2, "usd": 0.03},
+    }</code></pre>
+      <p>
+        Argument routing tries <code>fn(**args)</code> first and
+        falls back to <code>fn(args)</code> if the function rejects
+        keyword expansion. The fallback is useful when the schema
+        names a parameter that is not a legal Python identifier.
+      </p>
+    </section>
+
+    <section>
+      <h2>Optional capabilities</h2>
+      <p>
+        Five capabilities are available when a tool needs more than
+        the bare contract. Each one is opt-in; tools that do not
+        declare them pay no cost. The
+        <a href="reference/tools.html">Tools reference</a> covers
+        the full contracts.
+      </p>
+
+      <h3>Timeouts</h3>
+      <p>
+        Pass <code>timeout_ms</code> when a single dispatch should
+        cap at a known duration. The runtime emits a
+        <code>tool_timeout</code> event when the deadline fires, the
+        calling agent sees a tool error, and the scenario continues
+        without waiting for the closure to finish. Pair timeouts with
+        progress emission so the trace stays observable during the
+        wait.
+      </p>
+<pre><code class="language-python">@tool(timeout_ms=2000)
+def slow(query: str) -> dict:
+    """Search a remote index that occasionally hangs."""
+    return remote.search(query)</code></pre>
+
+      <h3>Resources</h3>
+      <p>
+        Pass <code>resources=[...]</code> when a tool needs to
+        serialise with other dispatches against a shared lock, like a
+        billing database or a GPU lane. Each name is a permit the
+        runtime acquires before the closure runs and releases when it
+        returns. Two dispatches that share a resource name serialise
+        through the world's <code>ResourceManager</code>; unrelated
+        names run in parallel. Declare permits up front in the world
+        manifest to allow more than one concurrent holder.
+      </p>
+<pre><code class="language-python">@tool(resources=["billing_db"])
+def lookup(user_id: str) -> dict:
+    """Read the billing record. Holds the billing_db permit."""
+    return billing.lookup(user_id)</code></pre>
+
+      <h3>Progress</h3>
+      <p>
+        Declare an <code>emit_progress</code> parameter to receive a
+        callable that records progress events. Each invocation logs
+        one <code>(fraction, message)</code> pair, which the runtime
+        flushes to the trace as a <code>progress</code> event right
+        before the trailing <code>tool_result</code>. The helper
+        inspects the function's signature, so tools that do not need
+        progress reporting simply omit the parameter.
+      </p>
+<pre><code class="language-python">@tool
+def reconcile_billing(user_id: str, months: int, emit_progress) -> dict:
+    """Walk a user's billing history month by month."""
+    for i in range(1, months + 1):
+        emit_progress(i / months, f"scanned month {i}/{months}")
+        reconcile_one(user_id, i)
+    return {"ok": True, "months_reconciled": months}</code></pre>
+
+      <h3>Costs</h3>
+      <p>
+        Annotate cost by returning a <code>costs</code> dict in the
+        structured envelope. Units are open strings, each entry
+        becomes one <code>cost</code> event on the trace attributed
+        to the calling actor, and the runtime maintains running
+        totals per unit. A budget declared via
+        <code>world.set_budget(unit, amount, actor=...)</code> halts
+        the scheduler when a recorded cost would push the total past
+        the cap.
+      </p>
+<pre><code class="language-python">@tool
+def render_video(frames: int) -> dict:
+    """Render a clip. Reports gpu seconds against the calling actor."""
+    duration = render(frames)
+    return {
+        "effect": {"ok": True, "frames": frames},
+        "costs": {"gpu_seconds": duration},
+    }</code></pre>
+
+      <h3>Sandbox</h3>
+      <p>
+        Pass <code>sandbox=True</code> when a tool runs untrusted
+        code, leaves CUDA contexts in a bad state, or imports a
+        binary that occasionally segfaults. Each dispatch runs in a
+        fresh <code>python -m ensemble.tool_worker</code> subprocess
+        that reimports the world's package, calls the tool with the
+        JSON args, prints the result, and exits. A crash in the
+        worker surfaces as a structured error envelope rather than
+        killing the scheduler. The cost is process startup per call,
+        so sandbox mode pays off only when isolation is worth more
+        than the latency.
+      </p>
+<pre><code class="language-python">@tool(sandbox=True)
+def compile_kernel(src: str) -> dict:
+    """Compile and load a CUDA kernel. Sandboxed to survive crashes."""
+    return kernel.compile(src)</code></pre>
+      <p>
+        A sandboxed tool must encode its entire input in its JSON
+        args and its entire output in its JSON return. State the
+        parent's closures held is not shared with the worker; for
+        configuration the worker needs to read, use
+        <code>world.shared_state</code>, which the runtime serialises
+        into <code>ENSEMBLE_SHARED_STATE</code> on every dispatch.
+      </p>
+    </section>
+
+    <section>
+      <h2>Where to go next</h2>
+      <ul>
+        <li><a href="reference/tools.html">Tools reference</a> for
+          the contract-grade detail behind the decorator, the
+          <code>PluginTool</code> dataclass, and the full sandbox
+          cross-boundary table.</li>
+        <li><a href="worlds.html">Writing a world</a> for where
+          tools live, how the manifest declares shared resources,
+          and when to reach for the subclass form.</li>
+        <li><a href="scenarios.html">Writing a scenario</a> for how
+          tools get exposed to agents via
+          <code>world.spawn_agent(tools=[...])</code> and how their
+          results show up in the trace.</li>
+      </ul>
+    </section>
+
+    <footer class="site">
+      Built in Rust and Python.
+      <a href="https://github.com/tejasprabhune/ensemble">Source on GitHub</a>.
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/languages/ini.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>
