@@ -27,8 +27,28 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+import time as _time
+import uuid as _uuid
+
 from .worlds_registry import find_world
 from .world_manifest import ManifestError, load_manifest as _load_world_manifest
+
+
+def _new_run_id(scenario: str) -> str:
+    """A short, sortable, filesystem-safe id for one scenario run.
+    Format: YYYYMMDDTHHMMSS_<safe-scenario>_<8-hex>. Sortable by
+    creation time so `ls traces/` shows newest last."""
+    stamp = _time.strftime("%Y%m%dT%H%M%S", _time.gmtime())
+    safe = scenario.replace("/", "_").replace(".", "_")
+    return f"{stamp}_{safe}_{_uuid.uuid4().hex[:8]}"
+
+
+def _append_runs_index(traces_dir: Path, row: dict) -> None:
+    """Append a single-line JSON record to traces/runs.jsonl. The
+    cross-run subcommands read this file."""
+    index = traces_dir / "runs.jsonl"
+    with index.open("a") as f:
+        f.write(json.dumps(row) + "\n")
 
 
 def _autodiscover_cwd_world() -> Optional[tuple[str, Path]]:
@@ -240,16 +260,20 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args.traces_dir.mkdir(parents=True, exist_ok=True)
     safe = args.scenario.replace("/", "_").replace(".", "_")
-    trace_path = args.traces_dir / f"{safe}.jsonl"
+    flat_trace_path = args.traces_dir / f"{safe}.jsonl"
 
-    # Each `ensemble run` starts from a clean trace file. The sink
-    # itself appends so an interactive session that reattaches to a
-    # path mid-run does not discard earlier events; the CLI handles
-    # the "fresh run wants the prior trace gone" case by unlinking
-    # before the scenario constructs its World.
-    if trace_path.exists():
-        trace_path.unlink()
+    # E1: every run writes a directory traces/<run_id>/ holding the
+    # trace and a meta.json. The flat traces/<scenario>.jsonl is
+    # kept as a symlink to the latest run so the README quickstart
+    # and any existing tooling that points at the flat path keeps
+    # working. The runs.jsonl index gets a row appended on
+    # completion; the runs subcommands read it.
+    run_id = _new_run_id(args.scenario)
+    run_dir = args.traces_dir / run_id
+    run_dir.mkdir(parents=True, exist_ok=False)
+    trace_path = run_dir / "trace.jsonl"
 
+    started_ts = _time.time()
     result = asyncio.run(
         _REGISTRY[args.scenario](
             world_name,
@@ -257,18 +281,43 @@ def main(argv: Optional[List[str]] = None) -> int:
             trace_path=str(trace_path),
         )
     )
+    finished_ts = _time.time()
+
+    meta = {
+        "run_id": run_id,
+        "scenario": args.scenario,
+        "world": world_name,
+        "backend": args.backend,
+        "started_at": started_ts,
+        "finished_at": finished_ts,
+        "duration_s": finished_ts - started_ts,
+        "scores": result.scores,
+        "costs": result.costs,
+        "trace_path": str(trace_path),
+    }
+    (run_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+    _append_runs_index(args.traces_dir, meta)
+
+    # Keep the flat path as a symlink to the latest run so the
+    # README quickstart and the trace viewer's flat-path examples
+    # keep working without per-user surgery.
+    try:
+        if flat_trace_path.exists() or flat_trace_path.is_symlink():
+            flat_trace_path.unlink()
+        flat_trace_path.symlink_to(trace_path.relative_to(args.traces_dir))
+    except OSError:
+        # Symlinks may fail on filesystems that disallow them. Fall
+        # back to a plain copy so the flat path still resolves.
+        import shutil
+        shutil.copyfile(trace_path, flat_trace_path)
 
     summary: dict = {
         "scenario": args.scenario,
+        "run_id": run_id,
         "scores": result.scores,
         "trace_path": str(trace_path),
     }
     if result.costs:
-        # Only include costs when there is something to report. The
-        # mock backend records nothing, so the line stays clean for
-        # smoke runs but real-backend runs surface tokens (and USD
-        # when the model is in the pricing table) without the user
-        # having to read the trace.
         summary["costs"] = result.costs
     print(json.dumps(summary))
     return 0
