@@ -26,7 +26,7 @@
         <a href="sweeps.html">Sweeps</a>
         <a href="observability.html">Observability</a>
         <a href="mcp.html" class="active">MCP</a>
-        <a href="plank.html">Plank example</a>
+        <a href="agora.html">Agora example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -70,7 +70,7 @@
         agent (Claude Code, Claude Desktop, Codex, a custom MCP host)
         to exercise the world's tool surface directly.
       </p>
-<pre><code class="language-bash">ensemble mcp serve --world plank</code></pre>
+<pre><code class="language-bash">ensemble mcp serve --world agora</code></pre>
       <p>
         Per-tool timeouts and resource locks still apply, since
         dispatch goes through the same <code>ResourceManager</code>
@@ -90,8 +90,8 @@
         under its actor id, so a grader written against a normal
         rollout still works against an MCP-driven one.
       </p>
-<pre><code class="language-bash">ensemble worlds add plank examples/plank
-ensemble mcp serve --world plank --scenario plank.refund_storm --as-agent rep1</code></pre>
+<pre><code class="language-bash">ensemble worlds add agora examples/agora
+ensemble mcp serve --world agora --scenario agora.refund_storm --as-agent rep1</code></pre>
       <p>
         With <code>--backend mock</code> (the default) the other
         actors use scripted responses; pass
@@ -129,8 +129,8 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 params = StdioServerParameters(
     command="ensemble",
     args=["mcp", "serve",
-          "--world", "plank",
-          "--scenario", "plank.refund_storm",
+          "--world", "agora",
+          "--scenario", "agora.refund_storm",
           "--as-agent", "rep1"],
 )
 

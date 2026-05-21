@@ -380,8 +380,8 @@ class World:
 
     Used in two shapes:
 
-    1. ``World("plank")`` references a world registered via
-       ``register_world("plank", ...)``.
+    1. ``World("agora")`` references a world registered via
+       ``register_world("agora", ...)``.
     2. ``class PopcornWorld(World)`` with ``@tool`` / ``@predicate``
        decorated methods and an optional ``setup(self)``. Subclasses
        auto-derive a world name from ``world_name`` (a class

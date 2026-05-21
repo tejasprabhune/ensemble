@@ -3,11 +3,11 @@ use serde::{Deserialize, Serialize};
 
 use ensemble_core::error::ToolError;
 
-/// In-memory SQLite database holding all of Plank's state. Each world
+/// In-memory SQLite database holding all of Agora's state. Each world
 /// instance owns its own connection. Snapshot/restore is backed by
 /// `serialize`/`deserialize` if needed; for the MVP we just dump rows
 /// to JSON, which is enough for the trace viewer.
-pub struct PlankState {
+pub struct AgoraState {
     pub conn: Connection,
 }
 
@@ -41,7 +41,7 @@ pub struct Subscription {
     pub plan: String,
 }
 
-impl PlankState {
+impl AgoraState {
     pub fn new() -> Self {
         let conn = Connection::open_in_memory().expect("sqlite open in memory");
         Self::install_schema(&conn);
@@ -305,7 +305,7 @@ impl PlankState {
     }
 }
 
-impl Default for PlankState {
+impl Default for AgoraState {
     fn default() -> Self {
         Self::new()
     }

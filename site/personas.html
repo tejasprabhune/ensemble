@@ -26,7 +26,7 @@
         <a href="sweeps.html">Sweeps</a>
         <a href="observability.html">Observability</a>
         <a href="mcp.html">MCP</a>
-        <a href="plank.html">Plank example</a>
+        <a href="agora.html">Agora example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -93,7 +93,7 @@ You are a long-tenured customer. You want a refund for the last three months.
 base_model = "Qwen/Qwen2.5-7B-Instruct"
 backend = "modal"
 dataset = "spec_only"
-adapter_name = "ensemble-plank-frustrated-power-user"
+adapter_name = "ensemble-agora-frustrated-power-user"
 
 [persona.training.lora]
 r = 16
@@ -172,7 +172,7 @@ learning_rate = 5e-6</code></pre>
       </p>
 <pre><code class="language-bash">vllm serve Qwen/Qwen2.5-7B-Instruct \
   --enable-lora \
-  --lora-modules trained-adapter=hf-username/ensemble-plank-frustrated-power-user</code></pre>
+  --lora-modules trained-adapter=hf-username/ensemble-agora-frustrated-power-user</code></pre>
       <p>
         Scenarios construct the world normally and call
         <code>spawn_user</code> with the persona name. The per-user
@@ -180,7 +180,7 @@ learning_rate = 5e-6</code></pre>
       </p>
 <pre><code class="language-python">from ensemble import World
 
-world = World("plank", backend="auto")
+world = World("agora", backend="auto")
 alice = world.spawn_user(id="alice", persona="frustrated_power_user")
 alice.backend_info
 # {"kind": "vllm", "base_url": "http://...", "adapter": "..."}</code></pre>
@@ -196,7 +196,7 @@ alice.backend_info
         scenarios. Install the extras when you actually want to train:
       </p>
 <pre><code class="language-bash">uv pip install 'ensemble-train[torch]'
-ensemble train examples/plank/personas/frustrated_power_user.toml --backend modal</code></pre>
+ensemble train examples/agora/personas/frustrated_power_user.toml --backend modal</code></pre>
       <p>
         With <code>dataset = "spec_only"</code> the pipeline runs a
         self-play loop to build a preference dataset before training
@@ -225,7 +225,7 @@ ensemble train examples/plank/personas/frustrated_power_user.toml --backend moda
           rules.</li>
         <li><a href="scenarios.html">Writing a scenario</a> for how
           <code>spawn_user</code> fits into the run.</li>
-        <li><a href="plank.html">Plank example</a> for the five
+        <li><a href="agora.html">Agora example</a> for the five
           personas (one trained, four prompted) that ship with the
           worked example.</li>
       </ul>

@@ -66,8 +66,8 @@ def test_runs_list_merges_local_and_stage(tmp_path, monkeypatch):
     traces_dir = tmp_path / "traces"
     _make_local_index(traces_dir, [{
         "run_id": local_id,
-        "scenario": "plank.smoke",
-        "world": "plank",
+        "scenario": "agora.smoke",
+        "world": "agora",
         "backend": "mock",
         "started_at": 1700000000.0,
         "finished_at": 1700000010.0,
@@ -82,8 +82,8 @@ def test_runs_list_merges_local_and_stage(tmp_path, monkeypatch):
             "runs": [
                 {
                     "id": stage_only_id,
-                    "scenario": "plank.smoke",
-                    "world": "plank",
+                    "scenario": "agora.smoke",
+                    "world": "agora",
                     "backend": "anthropic",
                     "status": "completed",
                     "started_at": "2023-11-15T00:00:30Z",
@@ -131,8 +131,8 @@ def test_same_id_collapses_to_single_row(tmp_path, monkeypatch):
     traces_dir = tmp_path / "traces"
     _make_local_index(traces_dir, [{
         "run_id": shared_id,
-        "scenario": "plank.smoke",
-        "world": "plank",
+        "scenario": "agora.smoke",
+        "world": "agora",
         "backend": "mock",
         "started_at": 1700000000.0,
         "finished_at": 1700000010.0,
@@ -146,8 +146,8 @@ def test_same_id_collapses_to_single_row(tmp_path, monkeypatch):
         "/v1/projects/myorg/myproj/runs?limit=50&sort=created_at:desc": {
             "runs": [{
                 "id": shared_id,
-                "scenario": "plank.smoke",
-                "world": "plank",
+                "scenario": "agora.smoke",
+                "world": "agora",
                 "backend": "mock",
                 "status": "completed",
                 "started_at": "2023-11-15T00:00:00Z",
@@ -189,8 +189,8 @@ def test_compare_handles_mixed_sources(tmp_path, monkeypatch):
     traces_dir = tmp_path / "traces"
     _make_local_index(traces_dir, [{
         "run_id": local_id,
-        "scenario": "plank.smoke",
-        "world": "plank",
+        "scenario": "agora.smoke",
+        "world": "agora",
         "backend": "mock",
         "started_at": 1700000000.0,
         "finished_at": 1700000010.0,
@@ -203,8 +203,8 @@ def test_compare_handles_mixed_sources(tmp_path, monkeypatch):
     responses = {
         f"/v1/runs/{stage_id}": {
             "id": stage_id,
-            "scenario": "plank.smoke",
-            "world": "plank",
+            "scenario": "agora.smoke",
+            "world": "agora",
             "backend": "anthropic",
             "status": "completed",
             "started_at": "2023-11-15T00:00:00Z",

@@ -7,8 +7,8 @@ package on disk.
 
 The registry lives at ``~/.ensemble/worlds.toml``:
 
-    [worlds.plank]
-    path = "/Users/jane/code/ensemble/examples/plank"
+    [worlds.agora]
+    path = "/Users/jane/code/ensemble/examples/agora"
 
     [worlds.kern]
     path = "/Users/jane/code/kern"

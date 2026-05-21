@@ -6,7 +6,7 @@ from ensemble_train import generate_preferences, load_persona
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PERSONAS = REPO_ROOT / "examples/plank/personas"
+PERSONAS = REPO_ROOT / "examples/agora/personas"
 
 
 def test_load_trained_persona():

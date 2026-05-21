@@ -1,4 +1,4 @@
-//! Predicates Plank publishes for use in graders. They run against the
+//! Predicates Agora publishes for use in graders. They run against the
 //! trace (and, when needed, against world state captured via the Arc
 //! they close over).
 
@@ -9,15 +9,15 @@ use parking_lot::Mutex;
 use ensemble_core::event::EventPayload;
 use ensemble_core::predicate::PredicateRegistry;
 
-use crate::state::PlankState;
+use crate::state::AgoraState;
 
-/// Register every predicate Plank exposes. Graders reference them by
+/// Register every predicate Agora exposes. Graders reference them by
 /// name, e.g. `not had_double_refund` in a TOML manifest, or via
 /// `world.evaluate_predicate("had_double_refund")` from Python.
-pub fn register_all(state: &Arc<Mutex<PlankState>>, preds: &PredicateRegistry) {
+pub fn register_all(state: &Arc<Mutex<AgoraState>>, preds: &PredicateRegistry) {
     let _ = state; // most predicates compute from the trace; some will use state later.
 
-    // Plank inherits the core defaults (had_double_refund, any_event).
+    // Agora inherits the core defaults (had_double_refund, any_event).
     let defaults = PredicateRegistry::with_defaults();
     for name in defaults.names() {
         // Copy each default into this registry. The closures are Arc'd
@@ -63,14 +63,14 @@ pub fn register_all(state: &Arc<Mutex<PlankState>>, preds: &PredicateRegistry) {
     });
 
     // The per-user predicates take args = {"user_id": "<actor_id>"}.
-    // They walk the trace to find the plank user_id ("u-...") that the
+    // They walk the trace to find the agora user_id ("u-...") that the
     // actor opened a ticket as, then check what happened to that user.
 
     preds.register("hidden_goal_resolved", |ctx| {
         let Some(actor_id) = ctx.args.get("user_id").and_then(|v| v.as_str()) else {
             return false;
         };
-        let Some(plank_uid) = plank_user_id_for_actor(ctx.trace, actor_id) else {
+        let Some(agora_uid) = agora_user_id_for_actor(ctx.trace, actor_id) else {
             return false;
         };
         // Resolved if the agent issued a refund or escalated the ticket
@@ -86,7 +86,7 @@ pub fn register_all(state: &Arc<Mutex<PlankState>>, preds: &PredicateRegistry) {
                 .get("data")
                 .and_then(|d| d.get("user_id"))
                 .and_then(|v| v.as_str())
-                .map(|u| u == plank_uid)
+                .map(|u| u == agora_uid)
                 .unwrap_or(false),
             EventPayload::ToolResult {
                 name,
@@ -94,7 +94,7 @@ pub fn register_all(state: &Arc<Mutex<PlankState>>, preds: &PredicateRegistry) {
                 is_error,
                 ..
             } if name == "escalate" && !is_error => {
-                ticket_belongs_to(ctx.trace, result, &plank_uid)
+                ticket_belongs_to(ctx.trace, result, &agora_uid)
             }
             _ => false,
         })
@@ -117,9 +117,9 @@ pub fn register_all(state: &Arc<Mutex<PlankState>>, preds: &PredicateRegistry) {
     });
 }
 
-/// Find the plank `u-...` id the actor opened a ticket as. Returns the
+/// Find the agora `u-...` id the actor opened a ticket as. Returns the
 /// `user_id` from the actor's first `open_ticket` ToolCall, or None.
-fn plank_user_id_for_actor(trace: &[ensemble_core::event::Event], actor: &str) -> Option<String> {
+fn agora_user_id_for_actor(trace: &[ensemble_core::event::Event], actor: &str) -> Option<String> {
     for e in trace {
         let Some(a) = e.actor.as_ref() else { continue };
         if a.as_str() != actor {
@@ -137,11 +137,11 @@ fn plank_user_id_for_actor(trace: &[ensemble_core::event::Event], actor: &str) -
 }
 
 /// True if the ticket referenced by `escalate`'s result belongs to the
-/// given plank user.
+/// given agora user.
 fn ticket_belongs_to(
     trace: &[ensemble_core::event::Event],
     escalate_result: &serde_json::Value,
-    plank_uid: &str,
+    agora_uid: &str,
 ) -> bool {
     let Some(ticket_id) = escalate_result
         .get("data")
@@ -156,7 +156,7 @@ fn ticket_belongs_to(
             EventPayload::ToolCall { name, args, .. }
                 if name == "open_ticket"
                     && args.get("ticket_id").and_then(|v| v.as_str()) == Some(ticket_id)
-                    && args.get("user_id").and_then(|v| v.as_str()) == Some(plank_uid)
+                    && args.get("user_id").and_then(|v| v.as_str()) == Some(agora_uid)
         )
     })
 }

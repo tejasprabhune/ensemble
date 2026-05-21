@@ -26,7 +26,7 @@
         <a href="../sweeps.html">Sweeps</a>
         <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
-        <a href="../plank.html">Plank example</a>
+        <a href="../agora.html">Agora example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -131,14 +131,14 @@ class TinyWorld(World):
         Worlds with per-instance state (an in-memory database, a
         per-run seed) either use the <code>setup</code> factory:
       </p>
-<pre><code class="language-python"># examples/plank/plank/__init__.py
+<pre><code class="language-python"># examples/agora/agora/__init__.py
 def _setup():
-    db = _native.PlankDb()
+    db = _native.AgoraDb()
     tools = [...]
     predicates = [_predicate(db, name) for name in db.predicate_names()]
     return tools, predicates
 
-register_world("plank", setup=_setup, personas_dir=PERSONAS_DIR)</code></pre>
+register_world("agora", setup=_setup, personas_dir=PERSONAS_DIR)</code></pre>
       <p>
         ...or the subclass form, which makes per-instance state
         available as <code>self</code> inside the decorated method:
@@ -151,7 +151,7 @@ register_world("plank", setup=_setup, personas_dir=PERSONAS_DIR)</code></pre>
     def any_submission_passed(self, trace, args):
         return any(o.ok for o in self.submitted.values())</code></pre>
       <p>
-        Plank's <code>_predicate</code> delegates to the typed Rust
+        Agora's <code>_predicate</code> delegates to the typed Rust
         core: the database knows what each predicate means in terms
         of its own tables, and the Python wrapper just hands the
         trace and args back to it. A pure-Python world doesn't have
@@ -239,7 +239,7 @@ yield world.until_predicate("submit_called") | (world.turn_count &gt; 30)</code>
         scenario code. A python scenario builds a dict whose values
         are <code>0.0</code> or <code>1.0</code>:
       </p>
-<pre><code class="language-python">@scenario("plank.refund_storm")
+<pre><code class="language-python">@scenario("agora.refund_storm")
 async def refund_storm(world: World):
     alice = world.spawn_user(id="alice", persona="frustrated_power_user")
     await world.run(world.until(world.turn_count &gt; 30))

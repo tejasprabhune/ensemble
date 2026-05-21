@@ -5,7 +5,7 @@ from ensemble_train import load_persona
 
 PERSONA_PATH = (
     Path(__file__).resolve().parent.parent
-    / "examples/plank/personas/frustrated_power_user.toml"
+    / "examples/agora/personas/frustrated_power_user.toml"
 )
 
 
@@ -24,7 +24,7 @@ async def persona_demo(world: World):
         id="rep",
         model="gpt-5.4",
         system_prompt=(
-            "You are a customer support agent for Plank, a small SaaS "
+            "You are a customer support agent for Agora, a small SaaS "
             "tool. Be concise, helpful, and stick to what policy allows. "
             "Do not promise refunds you cannot deliver."
         ),

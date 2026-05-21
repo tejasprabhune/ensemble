@@ -1,10 +1,10 @@
 [package]
-name = "plank-py"
+name = "agora-py"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish = false
-description = "Plank's python extension. Exposes plank::PlankState as a PlankDb pyclass plus per-tool dispatch entry points."
+description = "Agora's python extension. Exposes agora::AgoraState as an AgoraDb pyclass plus per-tool dispatch entry points."
 
 [lib]
 name = "_native"
@@ -16,7 +16,7 @@ default = []
 extension-module = ["pyo3/extension-module"]
 
 [dependencies]
-plank = { path = "../world" }
+agora = { path = "../world" }
 ensemble-core = { path = "../../../crates/ensemble-core" }
 ensemble-runtime = { path = "../../../crates/ensemble-runtime" }
 pyo3 = { workspace = true }

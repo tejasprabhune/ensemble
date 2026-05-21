@@ -26,7 +26,7 @@
         <a href="../sweeps.html">Sweeps</a>
         <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
-        <a href="../plank.html">Plank example</a>
+        <a href="../agora.html">Agora example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -90,7 +90,7 @@ backend = ["mock", "anthropic"]
 [sweep.env]
 # Each key is exported as an env var for the scenario subprocess.
 # Use this when the dimension you want to sweep is not a CLI flag.
-PLANK_SEED = ["1", "2", "3"]
+AGORA_SEED = ["1", "2", "3"]
 MY_TEMPERATURE = ["0.0", "0.7"]</code></pre>
       <p>
         The two axis tables are independent:
@@ -112,20 +112,20 @@ MY_TEMPERATURE = ["0.0", "0.7"]</code></pre>
         filesystem-safe id that becomes the cell's directory name.
         With the sweep above and the axes
         <code>backend = ["mock", "anthropic"]</code> x
-        <code>PLANK_SEED = ["1", "2"]</code>, the runner produces:
+        <code>AGORA_SEED = ["1", "2"]</code>, the runner produces:
       </p>
 <pre><code class="language-bash">traces/refund_sweep/
   index.jsonl
-  backend-anthropic__PLANK_SEED-1/
+  backend-anthropic__AGORA_SEED-1/
     trace.jsonl
     meta.json
-  backend-anthropic__PLANK_SEED-2/
+  backend-anthropic__AGORA_SEED-2/
     trace.jsonl
     meta.json
-  backend-mock__PLANK_SEED-1/
+  backend-mock__AGORA_SEED-1/
     trace.jsonl
     meta.json
-  backend-mock__PLANK_SEED-2/
+  backend-mock__AGORA_SEED-2/
     trace.jsonl
     meta.json</code></pre>
       <p>
@@ -150,9 +150,9 @@ MY_TEMPERATURE = ["0.0", "0.7"]</code></pre>
         up to <code>max_parallel</code> concurrently, and prints one
         line per cell to stderr as cells complete:
       </p>
-<pre><code class="language-bash">[ok] backend-mock__PLANK_SEED-1  scores: refund_issued=1.0
-[fail] backend-anthropic__PLANK_SEED-2  scores: &lt;none&gt;
-[skipped] backend-mock__PLANK_SEED-2  scores: refund_issued=1.0</code></pre>
+<pre><code class="language-bash">[ok] backend-mock__AGORA_SEED-1  scores: refund_issued=1.0
+[fail] backend-anthropic__AGORA_SEED-2  scores: &lt;none&gt;
+[skipped] backend-mock__AGORA_SEED-2  scores: refund_issued=1.0</code></pre>
       <p>
         <code>max_parallel = 1</code> (the default) serialises
         cells; higher values run cells concurrently. Pick the limit

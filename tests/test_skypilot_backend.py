@@ -5,7 +5,7 @@ from ensemble_train import load_persona
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PERSONA = REPO_ROOT / "examples/plank/personas/frustrated_power_user.toml"
+PERSONA = REPO_ROOT / "examples/agora/personas/frustrated_power_user.toml"
 
 
 def test_render_task_yaml():

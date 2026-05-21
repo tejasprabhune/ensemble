@@ -1,10 +1,10 @@
 """Sanity-check scenario: one user opens one ticket, one agent helps."""
 
-import plank  # noqa: F401  registers plank personas with ensemble
+import agora  # noqa: F401  registers agora personas with ensemble
 from ensemble import scenario
 
 
-@scenario("plank.single_ticket", world="plank")
+@scenario("agora.single_ticket", world="agora")
 async def single_ticket(world):
     user = world.spawn_user(
         id="user-1",

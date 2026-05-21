@@ -2,7 +2,7 @@
 # Useful for scenarios that don't need mid-run intervention.
 
 [scenario.single_ticket]
-world = "plank"
+world = "agora"
 duration_turns = 12
 seed = 1
 
@@ -23,7 +23,7 @@ no_double_refunds = "not had_double_refund"
 
 
 [scenario.refund_storm]
-world = "plank"
+world = "agora"
 duration_turns = 30
 seed = 42
 

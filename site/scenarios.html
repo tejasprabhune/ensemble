@@ -26,7 +26,7 @@
         <a href="sweeps.html">Sweeps</a>
         <a href="observability.html">Observability</a>
         <a href="mcp.html">MCP</a>
-        <a href="plank.html">Plank example</a>
+        <a href="agora.html">Agora example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -210,7 +210,7 @@ yield world.until((world.turn_count >= 4) & until_predicate("hit_goal"))</code><
         this whenever the scenario commits to a single stop
         condition before the run starts.
       </p>
-<pre><code class="language-python">@scenario("plank.smoke", world="plank")
+<pre><code class="language-python">@scenario("agora.smoke", world="agora")
 async def smoke(world):
     user = world.spawn_user(persona="patient_retail")
     rep = world.spawn_agent(tools=["search_kb"])
@@ -230,7 +230,7 @@ async def smoke(world):
         Pick this when the scenario needs to react to what already
         happened.
       </p>
-<pre><code class="language-python">@scenario("plank.audit", world="plank")
+<pre><code class="language-python">@scenario("agora.audit", world="agora")
 async def audit(world):
     carol = world.spawn_user(persona="enterprise_admin")
     rep = world.spawn_agent(tools=["escalate"])
@@ -293,9 +293,9 @@ async def audit(world):
         registers one scenario per entry, so the same runner code
         drives both Python and TOML scenarios.
       </p>
-<pre><code class="language-toml"># examples/plank/scenarios.toml
+<pre><code class="language-toml"># examples/agora/scenarios.toml
 [scenario.refund_storm]
-world = "plank"
+world = "agora"
 duration_turns = 30
 seed = 42
 

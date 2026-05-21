@@ -93,7 +93,7 @@ class WorldDefinition:
     # Per-world default models. When set, spawn_user() and
     # spawn_agent() consult these before falling back to the
     # framework-wide sentinels. The audit called out the repetition
-    # of model="claude-sonnet-4-5" on every spawn line in plank.
+    # of model="claude-sonnet-4-5" on every spawn line in agora.
     default_user_model: Optional[str] = None
     default_agent_model: Optional[str] = None
 

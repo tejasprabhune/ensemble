@@ -8,7 +8,7 @@ use serde_json::json;
 use ensemble_core::error::ToolError;
 use ensemble_runtime::{Tool, ToolRegistry};
 
-use crate::state::PlankState;
+use crate::state::AgoraState;
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -43,7 +43,7 @@ fn ok<T: Serialize>(data: T) -> serde_json::Value {
 /// Useful for exercising the progress-event + timeout machinery on
 /// realistic workloads. Sleeps 100ms x `steps` (default 5) emitting
 /// fractional progress after each chunk.
-pub fn slow_billing_check(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
+pub fn slow_billing_check(state: &Arc<Mutex<AgoraState>>, tools: &ToolRegistry) {
     let _ = state;
     tools.register(Tool::new_with_progress(
         "slow_billing_check",
@@ -81,7 +81,7 @@ pub fn slow_billing_check(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) 
     ));
 }
 
-pub fn open_ticket(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
+pub fn open_ticket(state: &Arc<Mutex<AgoraState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new_with_diff(
         "open_ticket",
@@ -120,7 +120,7 @@ pub fn open_ticket(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     ));
 }
 
-pub fn lookup_user(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
+pub fn lookup_user(state: &Arc<Mutex<AgoraState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new(
         "lookup_user",
@@ -145,7 +145,7 @@ pub fn lookup_user(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     ));
 }
 
-pub fn lookup_ticket(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
+pub fn lookup_ticket(state: &Arc<Mutex<AgoraState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new(
         "lookup_ticket",
@@ -170,7 +170,7 @@ pub fn lookup_ticket(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     ));
 }
 
-pub fn issue_refund(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
+pub fn issue_refund(state: &Arc<Mutex<AgoraState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(
         Tool::new_with_diff(
@@ -225,7 +225,7 @@ pub fn issue_refund(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     );
 }
 
-pub fn escalate(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
+pub fn escalate(state: &Arc<Mutex<AgoraState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new_with_diff(
         "escalate",
@@ -270,7 +270,7 @@ pub fn escalate(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     ));
 }
 
-pub fn search_kb(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
+pub fn search_kb(state: &Arc<Mutex<AgoraState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new(
         "search_kb",
@@ -290,7 +290,7 @@ pub fn search_kb(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
     ));
 }
 
-pub fn update_subscription(state: &Arc<Mutex<PlankState>>, tools: &ToolRegistry) {
+pub fn update_subscription(state: &Arc<Mutex<AgoraState>>, tools: &ToolRegistry) {
     let state = state.clone();
     tools.register(Tool::new_with_diff(
         "update_subscription",

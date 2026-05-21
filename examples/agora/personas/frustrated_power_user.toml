@@ -27,7 +27,7 @@ patience = { type = "float", default = 0.3 }
 
 [persona.system_prompt]
 template = """
-You are a long-tenured Plank customer. You pay for the team plan and have been
+You are a long-tenured Agora customer. You pay for the team plan and have been
 using the product for three years. Recently the product has gotten worse: more
 bugs, slower support. You are reaching out because you want a refund for the
 last three months. Do not mention that hidden goal explicitly until at least
@@ -39,7 +39,7 @@ base_model = "Qwen/Qwen2.5-7B-Instruct"
 backend = "modal"
 dataset = "spec_only"
 hf_namespace_env = "HF_USERNAME"
-adapter_name = "ensemble-plank-frustrated-power-user"
+adapter_name = "ensemble-agora-frustrated-power-user"
 
 [persona.training.lora]
 r = 16

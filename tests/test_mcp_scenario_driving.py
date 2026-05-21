@@ -23,11 +23,11 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
 @pytest.fixture
-def registered_plank(tmp_path, monkeypatch):
+def registered_agora(tmp_path, monkeypatch):
     monkeypatch.setenv("ENSEMBLE_HOME", str(tmp_path))
     from ensemble import worlds_registry
 
-    worlds_registry.add_world("plank", Path("examples/plank"))
+    worlds_registry.add_world("agora", Path("examples/agora"))
     # Write a tiny scenarios package the cli_mcp can import.
     pkg = tmp_path / "scenarios"
     pkg.mkdir()
@@ -37,11 +37,11 @@ def registered_plank(tmp_path, monkeypatch):
             """
             \"\"\"Smallest scenario that exercises MCP-mode scenario driving.\"\"\"
 
-            import plank  # noqa: F401  registers plank
+            import agora  # noqa: F401  registers agora
             from ensemble import scenario
 
 
-            @scenario("mcp.smoke", world="plank")
+            @scenario("mcp.smoke", world="agora")
             async def s(world):
                 alice = world.spawn_user(id="alice", model="user-model")
                 rep = world.spawn_agent(
@@ -59,8 +59,8 @@ def registered_plank(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_external_agent_drives_slot(registered_plank):
-    env = {**os.environ, "ENSEMBLE_HOME": str(registered_plank["registry_home"])}
+async def test_external_agent_drives_slot(registered_agora):
+    env = {**os.environ, "ENSEMBLE_HOME": str(registered_agora["registry_home"])}
     params = StdioServerParameters(
         command=sys.executable,
         args=[
@@ -68,13 +68,13 @@ async def test_external_agent_drives_slot(registered_plank):
             "ensemble.cli_mcp",
             "serve",
             "--world",
-            "plank",
+            "agora",
             "--scenario",
             "mcp.smoke",
             "--as-agent",
             "rep_mcp",
             "--package-dir",
-            str(registered_plank["package_dir"]),
+            str(registered_agora["package_dir"]),
         ],
         env=env,
     )
@@ -122,7 +122,7 @@ async def test_scenario_without_as_agent_errors(tmp_path, monkeypatch):
     monkeypatch.setenv("ENSEMBLE_HOME", str(tmp_path))
     from ensemble import worlds_registry
 
-    worlds_registry.add_world("plank", Path("examples/plank"))
+    worlds_registry.add_world("agora", Path("examples/agora"))
 
     import subprocess
 
@@ -133,9 +133,9 @@ async def test_scenario_without_as_agent_errors(tmp_path, monkeypatch):
             "ensemble.cli_mcp",
             "serve",
             "--world",
-            "plank",
+            "agora",
             "--scenario",
-            "plank.refund_storm",
+            "agora.refund_storm",
         ],
         capture_output=True,
         text=True,
@@ -146,11 +146,11 @@ async def test_scenario_without_as_agent_errors(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unknown_tool_returns_error(registered_plank):
-    env = {**os.environ, "ENSEMBLE_HOME": str(registered_plank["registry_home"])}
+async def test_unknown_tool_returns_error(registered_agora):
+    env = {**os.environ, "ENSEMBLE_HOME": str(registered_agora["registry_home"])}
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "ensemble.cli_mcp", "serve", "--world", "plank"],
+        args=["-m", "ensemble.cli_mcp", "serve", "--world", "agora"],
         env=env,
     )
     async with stdio_client(params) as (read, write):

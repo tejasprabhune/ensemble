@@ -16,7 +16,7 @@ import asyncio
 import json
 from pathlib import Path
 
-import plank  # noqa: F401  registers plank personas with ensemble
+import agora  # noqa: F401  registers agora personas with ensemble
 from ensemble import RunResult, scenario
 from ensemble.scenario import _REGISTRY
 
@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_OUT = REPO_ROOT / "site" / "trace.jsonl"
 
 
-@scenario("plank.refund_storm.baked")
+@scenario("agora.refund_storm.baked")
 async def baked_refund_storm(world):
     # Rep1 plan: acknowledge + lookup, partial offer + policy lookup,
     # escalate, full refund, final confirmation. Each turn is one
@@ -68,7 +68,7 @@ async def baked_refund_storm(world):
     # turns total, the second has no tool call so the loop exits.
     world._native._mock_say_then_tool(
         "rep2-model",
-        "Hi Bob, welcome to Plank. Let me check our docs for you.",
+        "Hi Bob, welcome to Agora. Let me check our docs for you.",
         "search_kb",
         json.dumps({"query": "refund eligibility"}),
     )
@@ -140,7 +140,7 @@ async def baked_refund_storm(world):
 
 def main(out_path: Path = DEFAULT_OUT) -> Path:
     result: RunResult = asyncio.run(
-        _REGISTRY["plank.refund_storm.baked"]("plank", backend="mock")
+        _REGISTRY["agora.refund_storm.baked"]("agora", backend="mock")
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w") as f:

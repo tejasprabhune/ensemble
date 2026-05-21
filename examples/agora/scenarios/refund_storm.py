@@ -1,11 +1,11 @@
 """The hero demo: three users, two agents, shared world, contested
 refund policy. Uses the yield flavor."""
 
-import plank  # noqa: F401  registers plank personas with ensemble
+import agora  # noqa: F401  registers agora personas with ensemble
 from ensemble import scenario
 
 
-@scenario("plank.refund_storm", world="plank")
+@scenario("agora.refund_storm", world="agora")
 async def refund_storm(world):
     alice = world.spawn_user(
         id="alice",

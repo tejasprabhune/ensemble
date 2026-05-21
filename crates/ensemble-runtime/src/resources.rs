@@ -9,7 +9,7 @@
 //!
 //! Process-wide [`shared`] storage lets two worlds with the same name
 //! share semaphores, so two concurrent scenarios against the same
-//! Plank world queue on `billing_db` together.
+//! Agora world queue on `billing_db` together.
 
 use std::collections::HashMap;
 use std::sync::Arc;

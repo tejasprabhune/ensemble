@@ -1,9 +1,9 @@
-//! Plank's python extension.
+//! Agora's python extension.
 //!
-//! Exposes a `PlankDb` pyclass that wraps the Rust `PlankState` (a
+//! Exposes an `AgoraDb` pyclass that wraps the Rust `AgoraState` (a
 //! seeded SQLite database) and a single `dispatch` method routing tool
-//! names to plank's tool registry. Each `PlankDb` instance has its
-//! own state, so a python ensemble world that calls `PlankDb()` from
+//! names to agora's tool registry. Each `AgoraDb` instance has its
+//! own state, so a python ensemble world that calls `AgoraDb()` from
 //! a per-World setup factory gets isolated state per scenario run.
 
 use std::sync::Arc;
@@ -12,23 +12,23 @@ use parking_lot::Mutex;
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
-use plank::state::PlankState;
-use plank::{predicates, register_all};
+use agora::state::AgoraState;
+use agora::{predicates, register_all};
 
 use ensemble_core::predicate::{PredicateCtx, PredicateRegistry};
 use ensemble_runtime::ToolRegistry;
 
 #[pyclass]
-struct PlankDb {
+struct AgoraDb {
     tools: ToolRegistry,
     predicates: PredicateRegistry,
 }
 
 #[pymethods]
-impl PlankDb {
+impl AgoraDb {
     #[new]
     fn new() -> Self {
-        let state = Arc::new(Mutex::new(PlankState::seed_default()));
+        let state = Arc::new(Mutex::new(AgoraState::seed_default()));
         let tools = ToolRegistry::new();
         register_all(&state, &tools);
         let preds = PredicateRegistry::new();
@@ -39,12 +39,12 @@ impl PlankDb {
         }
     }
 
-    /// Names of the tools this PlankDb instance carries.
+    /// Names of the tools this AgoraDb instance carries.
     fn tool_names(&self) -> Vec<String> {
         self.tools.names()
     }
 
-    /// Names of the predicates this PlankDb instance carries.
+    /// Names of the predicates this AgoraDb instance carries.
     fn predicate_names(&self) -> Vec<String> {
         self.predicates.names()
     }
@@ -123,7 +123,7 @@ impl PlankDb {
 
 #[pymodule]
 fn _native(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<PlankDb>()?;
+    m.add_class::<AgoraDb>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

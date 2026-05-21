@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-import plank  # noqa: F401  registers the world
+import agora  # noqa: F401  registers the world
 from ensemble import World
 
 
@@ -24,7 +24,7 @@ def _count_events(path) -> int:
 def test_reattaching_sink_does_not_truncate(tmp_path):
     sink = tmp_path / "trace.jsonl"
 
-    world1 = World("plank", backend="mock", trace_path=str(sink))
+    world1 = World("agora", backend="mock", trace_path=str(sink))
     alice = world1.spawn_user(id="alice", model="user-model")
     alice.act("lookup_user", user_id="u-alice")
     first_count = _count_events(sink)
@@ -36,7 +36,7 @@ def test_reattaching_sink_does_not_truncate(tmp_path):
     world1.set_trace_path(None)
     assert _count_events(sink) == first_count
 
-    world2 = World("plank", backend="mock", trace_path=str(sink))
+    world2 = World("agora", backend="mock", trace_path=str(sink))
     bob = world2.spawn_user(id="bob", model="user-model")
     bob.act("lookup_user", user_id="u-bob")
     final_count = _count_events(sink)
@@ -60,7 +60,7 @@ def test_reattaching_sink_does_not_truncate(tmp_path):
 
 def test_set_trace_path_none_detaches(tmp_path):
     sink = tmp_path / "drop.jsonl"
-    world = World("plank", backend="mock", trace_path=str(sink))
+    world = World("agora", backend="mock", trace_path=str(sink))
     assert world.trace_path == str(sink)
     world.set_trace_path(None)
     assert world.trace_path is None

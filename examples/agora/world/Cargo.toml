@@ -1,10 +1,10 @@
 [package]
-name = "plank"
+name = "agora"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish = false
-description = "Plank: a worked example world for Ensemble (fake project management SaaS)."
+description = "Agora: a worked example world for Ensemble (fake customer service SaaS)."
 
 [dependencies]
 ensemble-core = { path = "../../../crates/ensemble-core" }

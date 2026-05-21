@@ -26,7 +26,7 @@
         <a href="../sweeps.html">Sweeps</a>
         <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
-        <a href="../plank.html">Plank example</a>
+        <a href="../agora.html">Agora example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -280,7 +280,7 @@
       <p>The simplest path: each line is one JSON object.</p>
 <pre><code class="language-python">import json
 
-with open("traces/plank_refund_storm.jsonl") as f:
+with open("traces/agora_refund_storm.jsonl") as f:
     events = [json.loads(line) for line in f if line.strip()]
 
 tool_calls = [e for e in events if e["payload"]["kind"] == "tool_call"]
@@ -292,7 +292,7 @@ non_seed = [c for c in tool_calls if not c["payload"]["seed"]]</code></pre>
       </p>
 <pre><code class="language-python">from ensemble import run_scenario
 
-result = run_scenario("plank.refund_storm", backend="mock")
+result = run_scenario("agora.refund_storm", backend="mock")
 result.trace      # already parsed
 result.scores     # the grader dict</code></pre>
       <p>A scenario can also pull the trace mid-run:</p>

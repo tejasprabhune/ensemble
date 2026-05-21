@@ -1,8 +1,8 @@
-"""End-to-end predicate evaluation against a baked plank trace."""
+"""End-to-end predicate evaluation against a baked agora trace."""
 
 import pytest
 
-import plank  # noqa: F401
+import agora  # noqa: F401
 from ensemble import scenario
 from ensemble.scenario import _REGISTRY
 
@@ -30,7 +30,7 @@ async def test_hidden_goal_resolved_fires_when_refund_succeeds():
             "no_double": 0.0 if world.had_double_refund() else 1.0,
         }
 
-    result = await _REGISTRY["predicates.refund_path"]("plank")
+    result = await _REGISTRY["predicates.refund_path"]("agora")
     assert result.scores["alice_goal"] == 1.0
     assert result.scores["no_double"] == 1.0
 
@@ -53,5 +53,5 @@ async def test_had_double_refund_fires_on_repeat():
         yield world.until(world.turn_count > 8)
         yield {"double": 1.0 if world.had_double_refund() else 0.0}
 
-    result = await _REGISTRY["predicates.double_refund"]("plank")
+    result = await _REGISTRY["predicates.double_refund"]("agora")
     assert result.scores["double"] == 1.0

@@ -26,7 +26,7 @@
         <a href="../sweeps.html">Sweeps</a>
         <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
-        <a href="../plank.html">Plank example</a>
+        <a href="../agora.html">Agora example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -66,7 +66,7 @@
         simulation itself and returns the grader dict.
       </p>
 <pre><code class="language-python"># yield flavor; the typical case
-@scenario("plank.smoke", world="plank")
+@scenario("agora.smoke", world="agora")
 async def smoke(world):
     user = world.spawn_user(id="alice", persona="patient_retail")
     world.spawn_agent(id="rep", model="claude-sonnet-4-5", tools=["search_kb"])
@@ -74,7 +74,7 @@ async def smoke(world):
     yield world.until(world.turn_count > 8)
     yield {"saw_event": 1.0}</code></pre>
 <pre><code class="language-python"># async-def flavor; required when the scenario drives the run itself
-@scenario("plank.audit", world="plank")
+@scenario("agora.audit", world="agora")
 async def audit(world):
     carol = world.spawn_user(id="carol", persona="enterprise_admin")
     world.spawn_agent(id="rep", model="claude-sonnet-4-5", tools=["escalate"])
@@ -140,8 +140,8 @@ async def audit(world):
         Construction is what triggers the world plugin to register
         itself: the python package named in <code>world.toml</code>
         must already have been imported (a common pattern is
-        <code>import plank</code> at the top of the scenario module
-        so plank's <code>register_world</code> runs before the World
+        <code>import agora</code> at the top of the scenario module
+        so agora's <code>register_world</code> runs before the World
         is built).
       </p>
       <p>
@@ -514,9 +514,9 @@ return {"verdict_was_reject": float(verdict == "reject")}</code></pre>
         global registry, so the same runner code drives both python
         <code>@scenario</code> and TOML scenarios.
       </p>
-<pre><code class="language-toml"># examples/plank/scenarios.toml
+<pre><code class="language-toml"># examples/agora/scenarios.toml
 [scenario.refund_storm]
-world = "plank"
+world = "agora"
 duration_turns = 30
 seed = 42
 

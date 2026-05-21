@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import plank  # noqa: F401  registers the world
+import agora  # noqa: F401  registers the world
 import pytest
 from ensemble import scenario
 from ensemble.scenario import _REGISTRY
@@ -15,7 +15,7 @@ async def test_agent_with_restricted_tools_blocks_excluded_call():
     in the trace as an is_error tool result, never reach the registry.
     """
 
-    @scenario("filter.refund_blocked", world="plank")
+    @scenario("filter.refund_blocked", world="agora")
     async def s(world):
         world._native._mock_say_then_tool(
             "agent-model",
@@ -34,7 +34,7 @@ async def test_agent_with_restricted_tools_blocks_excluded_call():
         yield world.until(world.turn_count > 6)
         yield {"ok": 1.0}
 
-    result = await _REGISTRY["filter.refund_blocked"]("plank")
+    result = await _REGISTRY["filter.refund_blocked"]("agora")
     tool_results = [
         e for e in result.trace if e["payload"]["kind"] == "tool_result"
     ]
@@ -58,7 +58,7 @@ async def test_agent_with_restricted_tools_blocks_excluded_call():
 async def test_agent_with_empty_tool_list_blocks_all_dispatches():
     """tools=[] is the bare-NPC case: no tool calls accepted."""
 
-    @scenario("filter.empty_list_blocks_all", world="plank")
+    @scenario("filter.empty_list_blocks_all", world="agora")
     async def s(world):
         world._native._mock_say_then_tool(
             "agent-model",
@@ -73,7 +73,7 @@ async def test_agent_with_empty_tool_list_blocks_all_dispatches():
         yield world.until(world.turn_count > 6)
         yield {"ok": 1.0}
 
-    result = await _REGISTRY["filter.empty_list_blocks_all"]("plank")
+    result = await _REGISTRY["filter.empty_list_blocks_all"]("agora")
     blocked = [
         t for t in result.trace
         if t["payload"]["kind"] == "tool_result"
@@ -89,7 +89,7 @@ async def test_agent_with_no_tools_arg_sees_full_registry():
     unrestricted default, so the worked-example scenarios that omit
     the field continue to work."""
 
-    @scenario("filter.unrestricted_default", world="plank")
+    @scenario("filter.unrestricted_default", world="agora")
     async def s(world):
         world._native._mock_say_then_tool(
             "agent-model",
@@ -104,7 +104,7 @@ async def test_agent_with_no_tools_arg_sees_full_registry():
         yield world.until(world.turn_count > 6)
         yield {"ok": 1.0}
 
-    result = await _REGISTRY["filter.unrestricted_default"]("plank")
+    result = await _REGISTRY["filter.unrestricted_default"]("agora")
     successes = [
         t for t in result.trace
         if t["payload"]["kind"] == "tool_result"

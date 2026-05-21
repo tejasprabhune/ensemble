@@ -7,7 +7,7 @@ behind an environment variable so it does not run as part of
 
 ## What they cover
 
-- `test_anthropic_single_agent.py` — one Plank scenario with a
+- `test_anthropic_single_agent.py` — one Agora scenario with a
   `claude-haiku-4-5-20251001` agent. Verifies the Anthropic content-block
   shape is parsed correctly and the `lookup_user` tool is routed
   through the world registry.

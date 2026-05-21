@@ -1,11 +1,11 @@
 """Power-user scenario: enterprise admin pushes for an audit log export.
 Mid-run intervention demonstrates the `async with world.simulate()` path."""
 
-import plank  # noqa: F401  registers plank personas with ensemble
+import agora  # noqa: F401  registers agora personas with ensemble
 from ensemble import scenario
 
 
-@scenario("plank.enterprise_audit", world="plank")
+@scenario("agora.enterprise_audit", world="agora")
 async def enterprise_audit(world):
     carol = world.spawn_user(
         id="carol",

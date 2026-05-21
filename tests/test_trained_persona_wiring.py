@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import textwrap
 
-import plank  # noqa: F401  registers plank's personas dir
+import agora  # noqa: F401  registers agora's personas dir
 import pytest
 from ensemble import World
 
@@ -128,6 +128,6 @@ def test_trained_persona_without_serve_url_or_env_falls_back(
 def test_prompted_persona_keeps_world_backend(trained_persona):
     """Sanity check that a non-trained persona is unaffected: the
     user shares the world's backend, backend_info is None."""
-    world = World("plank", backend="mock")
+    world = World("agora", backend="mock")
     alice = world.spawn_user(id="alice", persona="patient_retail")
     assert alice.backend_info is None

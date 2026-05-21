@@ -1,13 +1,13 @@
-"""Plank: a worked example world for Ensemble.
+"""Agora: a worked example world for Ensemble.
 
-Importing this package registers the plank world with the ensemble
-plugin registry. The rust state and tools live in the plank._native
+Importing this package registers the agora world with the ensemble
+plugin registry. The rust state and tools live in the agora._native
 extension; this module wires them up as a ``WorldDefinition`` keyed
-by the name ``"plank"``.
+by the name ``"agora"``.
 
-A scenario that uses plank should ``import plank`` once near the top
-so that ``World("plank")`` finds the registered definition. The
-``setup`` factory builds a fresh ``PlankDb`` for each World instance,
+A scenario that uses agora should ``import agora`` once near the top
+so that ``World("agora")`` finds the registered definition. The
+``setup`` factory builds a fresh ``AgoraDb`` for each World instance,
 keeping per-scenario state isolated.
 """
 
@@ -27,7 +27,7 @@ PERSONAS_DIR = Path(__file__).resolve().parent.parent / "personas"
 
 
 def _tool(db, name, description, parameters, *, timeout_ms=None, resources=None):
-    """Bind a plank rust tool to the JSON-string ABI ensemble expects."""
+    """Bind an agora rust tool to the JSON-string ABI ensemble expects."""
 
     def fn(args_json: str) -> str:
         return db.dispatch(name, args_json)
@@ -53,7 +53,7 @@ def _predicate(db, name):
 
 
 def _setup():
-    db = _native.PlankDb()
+    db = _native.AgoraDb()
     tools = [
         _tool(
             db,
@@ -161,7 +161,7 @@ def _setup():
     return tools, predicates
 
 
-register_world("plank", setup=_setup, personas_dir=PERSONAS_DIR)
+register_world("agora", setup=_setup, personas_dir=PERSONAS_DIR)
 
 
 __all__ = ["PERSONAS_DIR"]

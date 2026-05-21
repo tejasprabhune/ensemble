@@ -3,7 +3,7 @@
 The manifest schema:
 
     [scenario.refund_storm]
-    world = "plank"
+    world = "agora"
     duration_turns = 30
     seed = 42
 

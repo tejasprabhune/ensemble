@@ -26,7 +26,7 @@
         <a href="../sweeps.html">Sweeps</a>
         <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
-        <a href="../plank.html">Plank example</a>
+        <a href="../agora.html">Agora example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -111,8 +111,8 @@
 ensemble init my_world --with-rust
 # heavyweight scaffold with a Rust crate
 
-ensemble init smoke_only --world plank
-# scaffolds smoke_only/scenarios/ pointing at the already-installed plank</code></pre>
+ensemble init smoke_only --world agora
+# scaffolds smoke_only/scenarios/ pointing at the already-installed agora</code></pre>
     </section>
 
     <section>
@@ -138,7 +138,7 @@ ensemble init smoke_only --world plank
         and auto-registers it (the audit's two-step ceremony fix),
         and finally the worlds registry at
         <code>~/.ensemble/worlds.toml</code> is consulted. The
-        <code>examples/plank</code> directory is the final fallback
+        <code>examples/agora</code> directory is the final fallback
         for the README quickstart from the repo root.
       </p>
       <p>Arguments:</p>
@@ -225,7 +225,7 @@ ensemble init smoke_only --world plank
         when <code>--site</code> is provided.
       </p>
       <p>Example:</p>
-<pre><code class="language-bash">ensemble trace view traces/plank_refund_storm.jsonl
+<pre><code class="language-bash">ensemble trace view traces/agora_refund_storm.jsonl
 # serving embedded viewer on http://127.0.0.1:8765
 
 ensemble trace view site/trace.jsonl --site site --port 8765
@@ -393,7 +393,7 @@ ensemble trace view site/trace.jsonl --site site --port 8765
       </p>
       <p>Example:</p>
 <pre><code class="language-bash">ensemble worlds list
-# plank  /Users/jane/code/ensemble/examples/plank</code></pre>
+# agora  /Users/jane/code/ensemble/examples/agora</code></pre>
 
       <h3>worlds add</h3>
 <pre><code class="language-bash">ensemble worlds add &lt;name&gt; &lt;path&gt; [--git URL]</code></pre>
@@ -415,8 +415,8 @@ ensemble trace view site/trace.jsonl --site site --port 8765
         <code>~/.ensemble/worlds.toml</code>.
       </p>
       <p>Example:</p>
-<pre><code class="language-bash">ensemble worlds add plank examples/plank
-# registered plank -&gt; /Users/jane/code/ensemble/examples/plank</code></pre>
+<pre><code class="language-bash">ensemble worlds add agora examples/agora
+# registered agora -&gt; /Users/jane/code/ensemble/examples/agora</code></pre>
 
       <h3>worlds remove</h3>
 <pre><code class="language-bash">ensemble worlds remove &lt;name&gt;</code></pre>
@@ -478,11 +478,11 @@ ensemble mcp serve --world W --scenario S --as-agent A
         <code>--scenario</code> is set.
       </p>
       <p>Example:</p>
-<pre><code class="language-bash">ensemble mcp serve --world plank
-# expose plank's tools to whatever stdio client connects
+<pre><code class="language-bash">ensemble mcp serve --world agora
+# expose agora's tools to whatever stdio client connects
 
-ensemble mcp serve --world plank \
-  --scenario plank.refund_storm --as-agent rep1
+ensemble mcp serve --world agora \
+  --scenario agora.refund_storm --as-agent rep1
 # rep1 is now driven by the connected client</code></pre>
     </section>
 
@@ -519,7 +519,7 @@ ensemble mcp serve --world plank \
         <code>sky</code> or prints the manual command.
       </p>
       <p>Example:</p>
-<pre><code class="language-bash">ensemble train examples/plank/personas/frustrated_power_user.toml --backend modal</code></pre>
+<pre><code class="language-bash">ensemble train examples/agora/personas/frustrated_power_user.toml --backend modal</code></pre>
     </section>
 
     <section>

@@ -28,7 +28,7 @@ async def test_two_users_one_agent_with_tool_dispatch():
         yield world.until(world.turn_count > 6)
         yield {"completed": 1.0}
 
-    result = await _REGISTRY["integration.basic"]("plank")
+    result = await _REGISTRY["integration.basic"]("agora")
 
     # Grader output.
     assert result.scores == {"completed": 1.0}
@@ -41,7 +41,7 @@ async def test_two_users_one_agent_with_tool_dispatch():
         assert "kind" in e["payload"]
 
     # State-diff completeness: agent's lookup_user tool call produced a
-    # tool_result. Plank tools don't currently emit a typed Diff through
+    # tool_result. Agora tools don't currently emit a typed Diff through
     # the registry; the StateDiff event is reserved for the
     # WorldState::apply path used by world authors writing in Rust.
     # The tool dispatch path emits a ToolResult, which is what the

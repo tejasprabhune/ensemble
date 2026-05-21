@@ -2,7 +2,7 @@
 
 import pytest
 
-import plank  # noqa: F401
+import agora  # noqa: F401
 from ensemble import scenario
 from ensemble.scenario import _REGISTRY
 
@@ -34,7 +34,7 @@ async def test_failed_tool_call_lands_as_is_error_result():
         yield world.until(world.turn_count > 10)
         yield {"ok": 1.0}
 
-    result = await _REGISTRY["errors.double_refund_replies"]("plank")
+    result = await _REGISTRY["errors.double_refund_replies"]("agora")
     tool_results = [
         e for e in result.trace if e["payload"]["kind"] == "tool_result"
     ]

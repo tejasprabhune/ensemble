@@ -26,7 +26,7 @@
         <a href="../sweeps.html">Sweeps</a>
         <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
-        <a href="../plank.html">Plank example</a>
+        <a href="../agora.html">Agora example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -149,21 +149,21 @@ class PopcornWorld(World):
 
     <section>
       <h2>register_world (factory form)</h2>
-<pre><code class="language-python"># examples/plank/plank/__init__.py
+<pre><code class="language-python"># examples/agora/agora/__init__.py
 from ensemble import register_world
 
 def _setup():
-    db = _native.PlankDb()
+    db = _native.AgoraDb()
     tools = [...]      # list of PluginTool or @tool-decorated fns
     predicates = [...] # list of PluginPredicate or @predicate-decorated fns
     return tools, predicates
 
 register_world(
-    "plank",
+    "agora",
     setup=_setup,
     personas_dir=PERSONAS_DIR,
     resources={"billing_db": 1},
-    python_package="plank",
+    python_package="agora",
     package_dir=PACKAGE_DIR,
 )</code></pre>
       <p>The keyword arguments:</p>
@@ -385,7 +385,7 @@ register_world("my_world", setup=_setup, shared_state={"device": "cuda"})</code>
       </p>
 <pre><code class="language-python">from ensemble import World
 
-world = World("plank", backend="mock")
+world = World("agora", backend="mock")
 out = world.apply(
     "open_ticket",
     ticket_id="t-seed-1",
@@ -404,8 +404,8 @@ out = world.apply(
       <h2>WorldState (rust trait)</h2>
       <p>
         The Rust trait is what worlds with a typed rust core
-        implement. Plank reaches for this so its tool dispatch can
-        keep typed <code>PlankCall</code> enums and structured
+        implement. Agora reaches for this so its tool dispatch can
+        keep typed <code>AgoraCall</code> enums and structured
         <code>Diff</code> types instead of the JSON-string ABI. The
         trait lives in <code>ensemble-core</code>:
       </p>
@@ -443,8 +443,8 @@ pub trait WorldState: Send + Sync + 'static {
         The Rust trait is not directly reachable from Python; pyo3
         cannot lower generic associated types cleanly. Worlds that
         want to expose a typed rust core to Python ship their own
-        thin pyo3 wrapper (plank's <code>PlankDb</code> does this in
-        <code>examples/plank/python_ext/</code>).
+        thin pyo3 wrapper (agora's <code>AgoraDb</code> does this in
+        <code>examples/agora/python_ext/</code>).
       </p>
     </section>
 
@@ -458,10 +458,10 @@ pub trait WorldState: Send + Sync + 'static {
         world's python package and rust crate live, and what personas
         and resources the world expects.
       </p>
-<pre><code class="language-toml"># examples/plank/world.toml
+<pre><code class="language-toml"># examples/agora/world.toml
 [world]
-name = "plank"
-python_package = "plank"
+name = "agora"
+python_package = "agora"
 rust_crate = "world"
 personas_dir = "personas"
 default_user_model = "claude-haiku-4-5"

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ensemble, plank example</title>
+  <title>ensemble, agora example</title>
   <link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -26,7 +26,7 @@
         <a href="sweeps.html">Sweeps</a>
         <a href="observability.html">Observability</a>
         <a href="mcp.html">MCP</a>
-        <a href="plank.html" class="active">Plank example</a>
+        <a href="agora.html" class="active">Agora example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -46,7 +46,7 @@
   </aside>
 
   <main>
-    <h1>Plank example</h1>
+    <h1>Agora example</h1>
     <p class="lead">
       Agora is a small fake SaaS customer-support world that ships with
       Ensemble. It is the worked example the hero demo runs against and
@@ -60,11 +60,11 @@
     <section>
       <h2>State</h2>
       <p>
-        Plank's world is an in-memory SQLite database with six tables.
-        The database lives inside <code>plank::PlankState</code> and is
+        Agora's world is an in-memory SQLite database with six tables.
+        The database lives inside <code>agora::AgoraState</code> and is
         shared by every tool closure through an
         <code>Arc&lt;Mutex&lt;_&gt;&gt;</code>. Each
-        <code>World("plank")</code> instance gets its own fresh
+        <code>World("agora")</code> instance gets its own fresh
         database, which is what makes runs reproducible.
       </p>
 <pre><code class="language-sql">users         (id, name, email, plan)
@@ -117,12 +117,12 @@ refunds       (id, user_id, amount_cents, reason, ts)</code></pre>
     <section>
       <h2>Scenarios shipped</h2>
       <ul>
-        <li><code>plank.single_ticket</code> is the sanity check. One
+        <li><code>agora.single_ticket</code> is the sanity check. One
           user, one agent, one ticket.</li>
-        <li><code>plank.refund_storm</code> is the hero demo on the
+        <li><code>agora.refund_storm</code> is the hero demo on the
           front page. Three users, two agents, contended refund
           policy.</li>
-        <li><code>plank.enterprise_audit</code> uses the
+        <li><code>agora.enterprise_audit</code> uses the
           <code>async with</code> path with mid-run intervention.</li>
       </ul>
     </section>
@@ -132,23 +132,23 @@ refunds       (id, user_id, amount_cents, reason, ts)</code></pre>
       <p>
         Agora is a plugin, so register it the first time you run
         ensemble against it. After that, scenarios reach it via
-        <code>--world plank</code>:
+        <code>--world agora</code>:
       </p>
 <pre><code class="language-bash">cargo build -p ensemble-cli
-./target/debug/ensemble worlds add plank examples/plank
+./target/debug/ensemble worlds add agora examples/agora
 export ANTHROPIC_API_KEY=sk-ant-...
-./target/debug/ensemble run plank.refund_storm --world plank
-./target/debug/ensemble trace view traces/plank_refund_storm.jsonl \
+./target/debug/ensemble run agora.refund_storm --world agora
+./target/debug/ensemble trace view traces/agora_refund_storm.jsonl \
   --site site --port 8765</code></pre>
       <p>
         The Rust world (state and tool implementations) lives at
-        <code>examples/plank/world/src/</code>, the Python extension at
-        <code>examples/plank/python_ext/</code>, the Python package and
+        <code>examples/agora/world/src/</code>, the Python extension at
+        <code>examples/agora/python_ext/</code>, the Python package and
         <code>register_world</code> call at
-        <code>examples/plank/plank/</code>, the scenarios at
-        <code>examples/plank/scenarios/</code>, the personas at
-        <code>examples/plank/personas/</code>, and the manifest at
-        <code>examples/plank/world.toml</code>.
+        <code>examples/agora/agora/</code>, the scenarios at
+        <code>examples/agora/scenarios/</code>, the personas at
+        <code>examples/agora/personas/</code>, and the manifest at
+        <code>examples/agora/world.toml</code>.
       </p>
     </section>
 
@@ -159,7 +159,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
           decisions Agora made (Rust-backed state, typed tool calls)
           translated into the general pattern.</li>
         <li><a href="scenarios.html">Writing a scenario</a> for how
-          <code>plank.refund_storm</code> wires three users and two
+          <code>agora.refund_storm</code> wires three users and two
           agents together.</li>
         <li><a href="personas.html">Personas</a> for the schema behind
           the five personas Agora ships.</li>

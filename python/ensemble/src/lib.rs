@@ -1380,7 +1380,7 @@ impl World {
 
     /// Evaluate a named predicate against the current trace. Returns
     /// `None` if the predicate is not registered. Predicates are
-    /// world-supplied: a Plank world exposes things like
+    /// world-supplied: an Agora world exposes things like
     /// `had_double_refund` and `agent_recommended_upgrade`.
     #[pyo3(signature = (name, args_json=None))]
     fn evaluate_predicate(&self, name: &str, args_json: Option<&str>) -> PyResult<Option<bool>> {

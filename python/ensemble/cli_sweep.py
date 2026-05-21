@@ -9,7 +9,7 @@ index file the observability subcommands read.
 Minimum config (one axis, one value):
 
     [sweep]
-    scenario = "plank.refund_storm"
+    scenario = "agora.refund_storm"
 
     [sweep.flags]
     backend = ["mock"]
@@ -17,8 +17,8 @@ Minimum config (one axis, one value):
 Typical config (cartesian product):
 
     [sweep]
-    scenario = "plank.refund_storm"
-    world = "plank"
+    scenario = "agora.refund_storm"
+    world = "agora"
     max_parallel = 4
     traces_dir = "traces/refund_sweep"
 
@@ -26,7 +26,7 @@ Typical config (cartesian product):
     backend = ["mock", "auto"]
 
     [sweep.env]
-    PLANK_SEED = ["1", "2", "3"]
+    AGORA_SEED = ["1", "2", "3"]
 
 Resume semantics: cells whose meta.json already exists are skipped
 unless --no-resume is passed.

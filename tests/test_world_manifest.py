@@ -5,10 +5,10 @@ import pytest
 from ensemble import ManifestError, load_world_manifest
 
 
-def test_plank_manifest_parses():
-    m = load_world_manifest("examples/plank")
-    assert m.name == "plank"
-    assert m.python_package == "plank"
+def test_agora_manifest_parses():
+    m = load_world_manifest("examples/agora")
+    assert m.name == "agora"
+    assert m.python_package == "agora"
     assert m.rust_crate == "world"
     assert m.personas_dir is not None and m.personas_dir.name == "personas"
     assert "frustrated_power_user" in m.default_personas

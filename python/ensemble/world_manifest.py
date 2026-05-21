@@ -5,7 +5,7 @@ root of the world's directory. The manifest declares the world's name,
 where the rust crate and python package live, and small declarative
 extras (default personas, default tools, resources). Loading a manifest
 does not import the python package; the worlds registry does that
-separately when a scenario asks for ``World("plank")``.
+separately when a scenario asks for ``World("agora")``.
 
 The schema is intentionally small. Fields that downstream phases need
 (``resources`` for phase 5, ``cli`` for world-specific subcommands)
@@ -14,8 +14,8 @@ are tolerated but unused by this loader.
 A minimal manifest::
 
     [world]
-    name = "plank"
-    python_package = "plank"
+    name = "agora"
+    python_package = "agora"
     rust_crate = "world"
     personas_dir = "personas"
 

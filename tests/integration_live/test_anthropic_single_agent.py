@@ -1,4 +1,4 @@
-"""Single-agent plank scenario against the real Anthropic API.
+"""Single-agent agora scenario against the real Anthropic API.
 
 Cheapest claude model + a short prompt; expect a few hundred tokens
 total. Verifies the runtime correctly extracts tool calls from
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 
-import plank  # noqa: F401  registers the world
+import agora  # noqa: F401  registers the world
 import pytest
 from ensemble import scenario
 from ensemble.scenario import _REGISTRY
@@ -21,7 +21,7 @@ CHEAP_MODEL = "claude-haiku-4-5-20251001"
 
 @pytest.mark.asyncio
 async def test_anthropic_runs_a_lookup(have_anthropic):
-    @scenario("live.anthropic_single", world="plank")
+    @scenario("live.anthropic_single", world="agora")
     async def s(world):
         rep = world.spawn_agent(
             id="rep",
@@ -39,7 +39,7 @@ async def test_anthropic_runs_a_lookup(have_anthropic):
         yield world.until(world.turn_count > 12)
         yield {"ok": 1.0}
 
-    result = await _REGISTRY["live.anthropic_single"]("plank", backend="anthropic")
+    result = await _REGISTRY["live.anthropic_single"]("agora", backend="anthropic")
     tool_calls = [
         e for e in result.trace if e["payload"]["kind"] == "tool_call"
     ]

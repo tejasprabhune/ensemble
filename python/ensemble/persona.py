@@ -7,7 +7,7 @@ system prompt template and the default hidden state, and threads both
 into the native side so the user actor's backend is wrapped in a
 PromptedPersona.
 
-The schema is the one documented in ``examples/plank/personas/*.toml``:
+The schema is the one documented in ``examples/agora/personas/*.toml``:
 
     [persona]
     name = "frustrated_power_user"

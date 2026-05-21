@@ -1,4 +1,4 @@
-"""Phase 5 tool primitives exercised against the plank example.
+"""Phase 5 tool primitives exercised against the agora example.
 
 Covers: slow_billing_check emits progress; the same tool times out
 when wrapped with a short cap; concurrent issue_refund attempts
@@ -12,14 +12,14 @@ import asyncio
 import json
 import time
 
-import plank  # noqa: F401  registers the world
+import agora  # noqa: F401  registers the world
 import pytest
 from ensemble import World, scenario
 from ensemble.scenario import _REGISTRY
 
 
 def test_slow_billing_check_emits_progress():
-    world = World("plank", backend="mock")
+    world = World("agora", backend="mock")
     alice = world.spawn_user(id="alice", model="user-model")
     alice.act("slow_billing_check", user_id="u-alice", steps=3)
 
@@ -35,7 +35,7 @@ def test_slow_billing_check_emits_progress():
 
 @pytest.mark.asyncio
 async def test_concurrent_refunds_serialize_on_billing_db():
-    """Two concurrent World('plank') instances share a billing_db
+    """Two concurrent World('agora') instances share a billing_db
     semaphore. Issuing a refund on one should not race against issuing
     one on the other (different users, so the per-run double-refund
     policy doesn't kick in)."""
@@ -44,9 +44,9 @@ async def test_concurrent_refunds_serialize_on_billing_db():
     ended: list[float] = []
 
     async def attempt(user_id: str, ticket_id: str):
-        world = World("plank", backend="mock")
+        world = World("agora", backend="mock")
         user = world.spawn_user(id=user_id, model="user-model")
-        # Open the ticket so plank's audit log has a record.
+        # Open the ticket so agora's audit log has a record.
         user.act("open_ticket", ticket_id=ticket_id, user_id=user_id, subject="x")
         # Run the (synchronous) act_json on a thread so the two
         # attempts truly overlap; the rust resource manager is what
@@ -65,7 +65,7 @@ async def test_concurrent_refunds_serialize_on_billing_db():
         await loop.run_in_executor(None, go)
 
     # Two independent World instances on the same world name share
-    # the process-wide ResourceManager keyed by "plank".
+    # the process-wide ResourceManager keyed by "agora".
     await asyncio.gather(
         attempt("u-bob", "t-bob"),
         attempt("u-carol", "t-carol"),
@@ -85,7 +85,7 @@ async def test_concurrent_refunds_serialize_on_billing_db():
 
 @pytest.mark.asyncio
 async def test_budget_exceeded_halts_scenario():
-    @scenario("plank.budget_demo", world="plank")
+    @scenario("agora.budget_demo", world="agora")
     async def s(world):
         world.set_budget("usd", 0.05)
         # Record costs that cross the cap mid-run.
@@ -98,7 +98,7 @@ async def test_budget_exceeded_halts_scenario():
         yield world.until(world.turn_count > 200)
         yield {"final_usd": world.cost_total("usd")}
 
-    result = await _REGISTRY["plank.budget_demo"]("plank")
+    result = await _REGISTRY["agora.budget_demo"]("agora")
     # The scheduler halted on the budget; the trace's terminal system
     # note records it.
     sys_notes = [
@@ -118,7 +118,7 @@ async def test_budget_exceeded_halts_scenario():
 def test_slow_billing_check_progress_appears_in_trace():
     """Direct dispatch (no scheduler involvement) still surfaces
     progress entries on the trace."""
-    world = World("plank", backend="mock")
+    world = World("agora", backend="mock")
     alice = world.spawn_user(id="alice", model="user-model")
     alice.act("slow_billing_check", user_id="u-alice", steps=2)
     trace = world.trace()

@@ -26,7 +26,7 @@
         <a href="../sweeps.html">Sweeps</a>
         <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
-        <a href="../plank.html">Plank example</a>
+        <a href="../agora.html">Agora example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -66,7 +66,7 @@
         <code>spawn_user</code>. The full schema, with the optional
         sections filled in:
       </p>
-<pre><code class="language-toml"># examples/plank/personas/frustrated_power_user.toml
+<pre><code class="language-toml"># examples/agora/personas/frustrated_power_user.toml
 [persona]
 name = "frustrated_power_user"
 mode = "trained"
@@ -90,14 +90,14 @@ frustration = { type = "float", default = 0.4 }
 
 [persona.system_prompt]
 template = """
-You are a long-tenured Plank customer ...
+You are a long-tenured Agora customer ...
 """
 
 [persona.training]
 base_model = "Qwen/Qwen2.5-7B-Instruct"
 backend = "modal"
 dataset = "spec_only"
-adapter_name = "ensemble-plank-frustrated-power-user"
+adapter_name = "ensemble-agora-frustrated-power-user"
 serve_url = "http://127.0.0.1:8000/v1"
 
 [persona.training.lora]
@@ -163,7 +163,7 @@ break_judge = "claude-sonnet-4-5"</code></pre>
         <code>&lt;hidden_state&gt;...&lt;/hidden_state&gt;</code>
         block on every turn, with a trailing instruction to the model
         not to reveal it. The persona can mutate the state by
-        emitting tool calls that write back; the default plank tools
+        emitting tool calls that write back; the default agora tools
         do not, but a world that wants stateful users can register
         tools that take an <code>actor_id</code> arg and update the
         slot's hidden state through <code>world._native</code> calls.
@@ -318,7 +318,7 @@ alice.backend_info
 <pre><code class="language-bash"># one off, on a GPU host
 vllm serve Qwen/Qwen2.5-7B-Instruct \
   --enable-lora \
-  --lora-modules trained-adapter=hf-username/ensemble-plank-frustrated-power-user</code></pre>
+  --lora-modules trained-adapter=hf-username/ensemble-agora-frustrated-power-user</code></pre>
         </li>
         <li>
           The persona TOML's
@@ -333,7 +333,7 @@ vllm serve Qwen/Qwen2.5-7B-Instruct \
           <p>The scenario constructed normally:</p>
 <pre><code class="language-python">from ensemble import World
 
-world = World("plank", backend="auto")
+world = World("agora", backend="auto")
 alice = world.spawn_user(id="alice", persona="frustrated_power_user")</code></pre>
           <p>
             The <code>auto</code> backend resolves the world's shared

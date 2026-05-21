@@ -26,7 +26,7 @@
         <a href="../sweeps.html">Sweeps</a>
         <a href="../observability.html">Observability</a>
         <a href="../mcp.html">MCP</a>
-        <a href="../plank.html">Plank example</a>
+        <a href="../agora.html">Agora example</a>
       </div>
       <div class="nav-group">
         <div class="nav-group-title">Reference</div>
@@ -150,7 +150,7 @@ curl -s -H "Authorization: Bearer $ENSEMBLE_STAGE_API_KEY" \
       </p>
 <pre><code class="language-bash">export ENSEMBLE_STAGE_API_KEY=stage_sk_...
 export ENSEMBLE_STAGE_PROJECT=myorg/popcornbench
-ensemble run plank.refund_storm</code></pre>
+ensemble run agora.refund_storm</code></pre>
       <p>
         For a project where everyone should target the same Stage
         project, write <code>.stage.toml</code> at the repository root
@@ -168,7 +168,7 @@ project = "myorg/popcornbench"</code></pre>
         To disable Stage for one command while it is otherwise
         configured, set <code>ENSEMBLE_STAGE_ENABLED=0</code>:
       </p>
-<pre><code class="language-bash">ENSEMBLE_STAGE_ENABLED=0 ensemble run plank.refund_storm</code></pre>
+<pre><code class="language-bash">ENSEMBLE_STAGE_ENABLED=0 ensemble run agora.refund_storm</code></pre>
       <p>
         To configure Stage explicitly in Python:
       </p>
@@ -176,7 +176,7 @@ project = "myorg/popcornbench"</code></pre>
 from ensemble import World
 
 stage = Stage(project="myorg/popcornbench", api_key="stage_sk_...")
-world = World("plank", stage=stage)</code></pre>
+world = World("agora", stage=stage)</code></pre>
     </section>
 
     <section>

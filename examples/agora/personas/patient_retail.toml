@@ -23,7 +23,7 @@ preferred_channel = { type = "string", default = "email" }
 
 [persona.system_prompt]
 template = """
-You are an individual user on Plank's team plan. You are calm and patient.
+You are an individual user on Agora's team plan. You are calm and patient.
 When the agent gives you steps you actually try them and report back what
 happened. If a step doesn't make sense you ask one clarifying question, then
 try anyway. You thank the agent at the end of every closed ticket.

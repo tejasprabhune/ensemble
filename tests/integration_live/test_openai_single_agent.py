@@ -1,4 +1,4 @@
-"""Single-agent plank scenario against the real OpenAI API.
+"""Single-agent agora scenario against the real OpenAI API.
 
 Cheapest model + short prompt. Verifies the runtime correctly
 extracts tool calls from OpenAI's `function_calling` shape and
@@ -7,7 +7,7 @@ routes them to the world's tool registry.
 
 from __future__ import annotations
 
-import plank  # noqa: F401
+import agora  # noqa: F401
 import pytest
 from ensemble import scenario
 from ensemble.scenario import _REGISTRY
@@ -18,7 +18,7 @@ CHEAP_MODEL = "gpt-4o-mini"
 
 @pytest.mark.asyncio
 async def test_openai_runs_a_lookup(have_openai):
-    @scenario("live.openai_single", world="plank")
+    @scenario("live.openai_single", world="agora")
     async def s(world):
         rep = world.spawn_agent(
             id="rep",
@@ -35,7 +35,7 @@ async def test_openai_runs_a_lookup(have_openai):
         yield world.until(world.turn_count > 12)
         yield {"ok": 1.0}
 
-    result = await _REGISTRY["live.openai_single"]("plank", backend="openai")
+    result = await _REGISTRY["live.openai_single"]("agora", backend="openai")
     tool_calls = [
         e for e in result.trace if e["payload"]["kind"] == "tool_call"
     ]

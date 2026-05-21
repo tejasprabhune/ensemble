@@ -16,12 +16,12 @@ dev = [
     "pytest-asyncio>=0.23",
     "maturin>=1.7,<2.0",
     "ensemble-train",
-    "plank",
+    "agora",
 ]
 
 [tool.uv.sources]
 ensemble-train = { workspace = true }
-plank = { workspace = true }
+agora = { workspace = true }
 
 [tool.maturin]
 manifest-path = "python/ensemble/Cargo.toml"
@@ -42,7 +42,7 @@ cache-keys = [
 ]
 
 [tool.uv.workspace]
-members = ["train", "examples/plank"]
+members = ["train", "examples/agora"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

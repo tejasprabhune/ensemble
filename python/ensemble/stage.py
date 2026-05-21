@@ -53,7 +53,7 @@ class Stage:
 
     Usage:
         stage = Stage(project="myorg/popcornbench", api_key="stage_sk_...")
-        world = World("plank", stage=stage)
+        world = World("agora", stage=stage)
     """
 
     def __init__(

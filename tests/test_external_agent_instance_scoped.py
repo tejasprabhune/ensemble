@@ -12,20 +12,20 @@ from __future__ import annotations
 import asyncio
 import textwrap
 
-import plank  # noqa: F401  registers plank
+import agora  # noqa: F401  registers agora
 import pytest
 from ensemble import World, scenario
 
 
 @pytest.mark.asyncio
 async def test_concurrent_external_agents_do_not_leak():
-    @scenario("ext.concurrent_alpha", world="plank")
+    @scenario("ext.concurrent_alpha", world="agora")
     async def alpha(world):
         world.spawn_agent(id="alpha_slot", model="agent-model")
         yield world.until(world.turn_count > 1)
         yield {"ok": 1.0}
 
-    @scenario("ext.concurrent_beta", world="plank")
+    @scenario("ext.concurrent_beta", world="agora")
     async def beta(world):
         world.spawn_agent(id="beta_slot", model="agent-model")
         yield world.until(world.turn_count > 1)
@@ -43,12 +43,12 @@ async def test_concurrent_external_agents_do_not_leak():
 
     results = await asyncio.gather(
         _REGISTRY["ext.concurrent_alpha"](
-            "plank",
+            "agora",
             external_agent_id="alpha_slot",
             on_world_constructed=capture_alpha,
         ),
         _REGISTRY["ext.concurrent_beta"](
-            "plank",
+            "agora",
             external_agent_id="beta_slot",
             on_world_constructed=capture_beta,
         ),

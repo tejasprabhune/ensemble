@@ -1,9 +1,9 @@
-"""End-to-end test of `ensemble.cli_mcp serve` exposing plank's tools.
+"""End-to-end test of `ensemble.cli_mcp serve` exposing agora's tools.
 
 Spawns the MCP server as a subprocess with a tmp registry pointing at
-the plank example, connects to it via the official MCP client SDK
-over stdio, and verifies that tools/list returns plank's tools and
-that tools/call routes through to plank's SQLite-backed rust code.
+the agora example, connects to it via the official MCP client SDK
+over stdio, and verifies that tools/list returns agora's tools and
+that tools/call routes through to agora's SQLite-backed rust code.
 """
 
 from __future__ import annotations
@@ -21,21 +21,21 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
 @pytest.fixture
-def registered_plank(tmp_path, monkeypatch):
-    """Register plank under a tmp ENSEMBLE_HOME so the test does not
+def registered_agora(tmp_path, monkeypatch):
+    """Register agora under a tmp ENSEMBLE_HOME so the test does not
     pollute the developer's machine."""
     monkeypatch.setenv("ENSEMBLE_HOME", str(tmp_path))
     from ensemble import worlds_registry
 
-    worlds_registry.add_world("plank", Path("examples/plank"))
+    worlds_registry.add_world("agora", Path("examples/agora"))
     yield
 
 
 @pytest.mark.asyncio
-async def test_tools_list_returns_plank_tools(registered_plank):
+async def test_tools_list_returns_agora_tools(registered_agora):
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "ensemble.cli_mcp", "serve", "--world", "plank"],
+        args=["-m", "ensemble.cli_mcp", "serve", "--world", "agora"],
         env={**os.environ},
     )
     async with stdio_client(params) as (read, write):
@@ -57,10 +57,10 @@ async def test_tools_list_returns_plank_tools(registered_plank):
 
 
 @pytest.mark.asyncio
-async def test_tools_call_routes_to_plank(registered_plank):
+async def test_tools_call_routes_to_agora(registered_agora):
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "ensemble.cli_mcp", "serve", "--world", "plank"],
+        args=["-m", "ensemble.cli_mcp", "serve", "--world", "agora"],
         env={**os.environ},
     )
     async with stdio_client(params) as (read, write):
@@ -75,10 +75,10 @@ async def test_tools_call_routes_to_plank(registered_plank):
 
 
 @pytest.mark.asyncio
-async def test_tools_call_emits_diff(registered_plank):
+async def test_tools_call_emits_diff(registered_agora):
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "ensemble.cli_mcp", "serve", "--world", "plank"],
+        args=["-m", "ensemble.cli_mcp", "serve", "--world", "agora"],
         env={**os.environ},
     )
     async with stdio_client(params) as (read, write):

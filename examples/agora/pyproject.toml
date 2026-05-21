@@ -1,7 +1,7 @@
 [project]
-name = "plank"
+name = "agora"
 version = "0.1.0"
-description = "Plank: worked example world for Ensemble."
+description = "Agora: worked example world for Ensemble."
 requires-python = ">=3.10"
 dependencies = ["ensemble"]
 
@@ -11,9 +11,9 @@ build-backend = "maturin"
 
 [tool.maturin]
 manifest-path = "python_ext/Cargo.toml"
-module-name = "plank._native"
+module-name = "agora._native"
 python-source = "."
-python-packages = ["plank"]
+python-packages = ["agora"]
 features = ["pyo3/extension-module"]
 
 [tool.uv]

@@ -8,9 +8,9 @@ of opaque string-formatting failures and the flag surface is real
 Usage from the CLI side:
 
     python -m ensemble.cli_run \
-        --scenario plank.refund_storm \
-        --world plank \
-        --package-dir examples/plank
+        --scenario agora.refund_storm \
+        --world agora \
+        --package-dir examples/agora
 
 The output line is a single JSON object with the chosen scenario name,
 the grader scores, and the path the trace was written to.
@@ -90,7 +90,7 @@ def _import_scenarios_package(package_dir: Optional[Path]) -> None:
     scenario.
 
     Two-step import. First try the conventional package import so any
-    ``__init__.py`` side effects fire (plank lists its scenarios
+    ``__init__.py`` side effects fire (agora lists its scenarios
     there). Then walk the directory and import any module the
     ``__init__`` did not list, so dropping a new ``scenarios/foo.py``
     is enough to register a new scenario without editing the
@@ -228,11 +228,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             package_dir = world_root
 
     # Final fallback: the README quickstart runs from the repo root with
-    # no flags; examples/plank is the bundled world there.
-    if package_dir is None and Path("examples/plank/world.toml").is_file():
-        package_dir = Path("examples/plank")
+    # no flags; examples/agora is the bundled world there.
+    if package_dir is None and Path("examples/agora/world.toml").is_file():
+        package_dir = Path("examples/agora")
         if world_name is None:
-            world_name = "plank"
+            world_name = "agora"
 
     _import_scenarios_package(package_dir)
 

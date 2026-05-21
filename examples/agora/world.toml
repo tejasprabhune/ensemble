@@ -1,11 +1,11 @@
-# Plank world manifest. ensemble.worlds_registry reads this when a
-# scenario constructs World("plank") so it knows where the python
+# Agora world manifest. ensemble.worlds_registry reads this when a
+# scenario constructs World("agora") so it knows where the python
 # package and rust crate live, plus which personas and tools to
 # expose by default.
 
 [world]
-name = "plank"
-python_package = "plank"
+name = "agora"
+python_package = "agora"
 rust_crate = "world"
 personas_dir = "personas"
 

@@ -35,7 +35,7 @@ async def test_claude_drives_slot_via_mcp(have_anthropic, tmp_path, monkeypatch)
     monkeypatch.setenv("ENSEMBLE_HOME", str(tmp_path))
     from ensemble import worlds_registry
 
-    worlds_registry.add_world("plank", Path("examples/plank"))
+    worlds_registry.add_world("agora", Path("examples/agora"))
 
     pkg = tmp_path / "scenarios"
     pkg.mkdir()
@@ -43,11 +43,11 @@ async def test_claude_drives_slot_via_mcp(have_anthropic, tmp_path, monkeypatch)
     (pkg / "live_mcp.py").write_text(
         textwrap.dedent(
             """
-            import plank  # noqa: F401
+            import agora  # noqa: F401
             from ensemble import scenario
 
 
-            @scenario("live.mcp", world="plank")
+            @scenario("live.mcp", world="agora")
             async def s(world):
                 alice = world.spawn_user(id="alice", model="user-model")
                 rep = world.spawn_agent(
@@ -67,7 +67,7 @@ async def test_claude_drives_slot_via_mcp(have_anthropic, tmp_path, monkeypatch)
             "ensemble.cli_mcp",
             "serve",
             "--world",
-            "plank",
+            "agora",
             "--scenario",
             "live.mcp",
             "--as-agent",

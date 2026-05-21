@@ -9,14 +9,14 @@ on tool id.
 
 from __future__ import annotations
 
-import plank  # noqa: F401  registers the world
+import agora  # noqa: F401  registers the world
 import pytest
 from ensemble import World, scenario
 from ensemble.scenario import _REGISTRY
 
 
 def test_user_act_marks_events_as_seed():
-    world = World("plank", backend="mock")
+    world = World("agora", backend="mock")
     alice = world.spawn_user(id="alice", model="user-model")
     alice.act(
         "open_ticket",
@@ -34,7 +34,7 @@ def test_user_act_marks_events_as_seed():
 
 
 def test_world_apply_marks_events_as_seed():
-    world = World("plank", backend="mock")
+    world = World("agora", backend="mock")
     world.apply(
         "open_ticket",
         ticket_id="t-apply-2",
@@ -52,7 +52,7 @@ async def test_agent_actor_dispatches_are_not_marked_seed():
     """An AgentActor runtime turn produces unseeded events: the
     agent decided to call the tool, no scenario seed is in play."""
 
-    @scenario("seed.agent_runtime", world="plank")
+    @scenario("seed.agent_runtime", world="agora")
     async def s(world):
         world._native._mock_say_then_tool(
             "agent-model",
@@ -67,7 +67,7 @@ async def test_agent_actor_dispatches_are_not_marked_seed():
         yield world.until(world.turn_count > 6)
         yield {"ok": 1.0}
 
-    result = await _REGISTRY["seed.agent_runtime"]("plank")
+    result = await _REGISTRY["seed.agent_runtime"]("agora")
     calls = [
         e for e in result.trace
         if e["payload"]["kind"] == "tool_call"

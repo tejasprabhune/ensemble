@@ -421,7 +421,7 @@ fn run_scenario(
 ) -> Result<()> {
     // Package-dir discovery lives in python (cli_run.py): it picks the
     // cwd if a world.toml is there, falls back to the worlds registry
-    // entry, and finally to examples/plank for the README quickstart.
+    // entry, and finally to examples/agora for the README quickstart.
     // The CLI only forwards an explicit --package-dir.
     let mut cmd = python_command(no_sync);
     cmd.args(["-m", "ensemble.cli_run"])

@@ -7,7 +7,7 @@ still exercising the multi-user, multi-actor scheduler and grader path.
 
 from __future__ import annotations
 
-import plank  # noqa: F401
+import agora  # noqa: F401
 import pytest
 from ensemble import scenario
 from ensemble.scenario import _REGISTRY
@@ -18,14 +18,14 @@ CHEAP_MODEL = "claude-haiku-4-5-20251001"
 
 @pytest.mark.asyncio
 async def test_refund_storm_two_users_one_agent(have_anthropic):
-    @scenario("live.refund_storm_small", world="plank")
+    @scenario("live.refund_storm_small", world="agora")
     async def s(world):
         rep = world.spawn_agent(
             id="rep",
             model=CHEAP_MODEL,
             tools=["lookup_user", "issue_refund", "escalate"],
             system_prompt=(
-                "You are a Plank support rep. Be terse. For refund "
+                "You are an Agora support rep. Be terse. For refund "
                 "requests, call issue_refund with the user's id and a "
                 "small amount (1000 cents). For complex disputes call "
                 "escalate to retention. Reply in one sentence."
@@ -51,7 +51,7 @@ async def test_refund_storm_two_users_one_agent(have_anthropic):
             "no_double_refunds": 0.0 if world.had_double_refund() else 1.0,
         }
 
-    result = await _REGISTRY["live.refund_storm_small"]("plank", backend="anthropic")
+    result = await _REGISTRY["live.refund_storm_small"]("agora", backend="anthropic")
     # We make no claim about whether claude actually refunded; the
     # important thing is the run completed and the grader values are
     # well-formed booleans.

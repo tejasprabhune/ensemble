@@ -8,12 +8,12 @@ ToolResult, and StateDiff events with no actor attribution.
 
 from __future__ import annotations
 
-import plank  # noqa: F401  registers plank's tool registry
+import agora  # noqa: F401  registers agora's tool registry
 from ensemble import World
 
 
 def test_apply_emits_tool_call_result_and_diff_with_no_actor():
-    world = World("plank", backend="mock")
+    world = World("agora", backend="mock")
     out = world.apply(
         "open_ticket",
         ticket_id="t-apply-1",
@@ -38,7 +38,7 @@ def test_apply_emits_tool_call_result_and_diff_with_no_actor():
 
 
 def test_apply_propagates_tool_errors_as_is_error_envelope():
-    world = World("plank", backend="mock")
+    world = World("agora", backend="mock")
     world.apply(
         "issue_refund",
         user_id="u-bob",
@@ -56,7 +56,7 @@ def test_apply_propagates_tool_errors_as_is_error_envelope():
 
 
 def test_apply_unknown_tool_returns_error_envelope():
-    world = World("plank", backend="mock")
+    world = World("agora", backend="mock")
     out = world.apply("does_not_exist")
     assert out["is_error"] is True
     assert "unknown tool" in out["effect"]["error"]
@@ -67,7 +67,7 @@ def test_apply_then_scheduler_run():
     that the scheduler then continues to extend. The seed mutation
     stays visible to predicates evaluated after the run."""
 
-    world = World("plank", backend="mock")
+    world = World("agora", backend="mock")
     world.apply(
         "open_ticket",
         ticket_id="t-seed",

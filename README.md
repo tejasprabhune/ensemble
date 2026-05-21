@@ -2,7 +2,7 @@
 
 A private monorepo for building multi-user, multi-agent RL environments.
 Ensemble provides the core simulation framework (Rust), a Python SDK for
-authoring scenarios, a CLI, and a post-training pipeline. Plank is the
+authoring scenarios, a CLI, and a post-training pipeline. Agora is the
 worked example world, demonstrating the framework in a small SaaS
 customer-support setting.
 
@@ -15,7 +15,7 @@ crates/
   ensemble-cli/       the `ensemble` binary
 python/ensemble/      pyo3 bindings + scenario decorators
 train/                ensemble_train: persona post-training
-examples/plank/       worked example world (Rust + Python + personas)
+examples/agora/       worked example world (Rust + Python + personas)
 site/                 static multi-page site, no framework
 tests/                python integration tests
 ```
@@ -43,7 +43,7 @@ puts the binary at `./target/debug/ensemble`; use that path explicitly
 in place of bare `ensemble` in every command below.
 
 `uv sync` builds the `ensemble` extension module via maturin, installs
-the `plank` example package, and installs the `ensemble-train` training
+the `agora` example package, and installs the `ensemble-train` training
 package. Optional torch extras for training are not installed by default:
 
 ```sh
@@ -63,7 +63,7 @@ cd my_world
 ./target/debug/ensemble run my_world.smoke
 
 # Run a registered scenario from the repo root; writes per-run dirs to ./traces/.
-./target/debug/ensemble run plank.refund_storm --world plank
+./target/debug/ensemble run agora.refund_storm --world agora
 
 # See what backends and models are available, plus key status.
 ./target/debug/ensemble models list
@@ -73,17 +73,17 @@ cd my_world
 ./target/debug/ensemble runs compare <run_id_a> <run_id_b>
 
 # Open one trace in the browser, or compare two side by side.
-./target/debug/ensemble trace view traces/plank_refund_storm.jsonl
+./target/debug/ensemble trace view traces/agora_refund_storm.jsonl
 ./target/debug/ensemble trace compare traces/<run_a>/trace.jsonl traces/<run_b>/trace.jsonl
 
 # Run a matrix of configurations (see the Sweeps page on the docs site).
 ./target/debug/ensemble sweep run sweep.toml
 
 # Re-bake the deterministic mock trace used on the site.
-uv run python examples/plank/bake_trace.py
+uv run python examples/agora/bake_trace.py
 
 # Kick off persona training (modal by default).
-./target/debug/ensemble train examples/plank/personas/frustrated_power_user.toml \
+./target/debug/ensemble train examples/agora/personas/frustrated_power_user.toml \
   --backend modal
 ```
 
@@ -98,7 +98,7 @@ export ENSEMBLE_STAGE_API_KEY=stage_sk_...
 export ENSEMBLE_STAGE_PROJECT=myorg/popcornbench
 
 # Runs now print a Stage URL alongside the run id:
-./target/debug/ensemble run plank.refund_storm
+./target/debug/ensemble run agora.refund_storm
 # Run id: 019542a3-4e7b-7000-8e1d-3f9a1c2d5e6f
 # Stage:  https://ensemble-stage.fly.dev/myorg/popcornbench/runs/019542a3-...
 

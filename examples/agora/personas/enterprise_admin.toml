@@ -1,4 +1,4 @@
-# Enterprise admin who runs Plank for a 500-person org. Knows what they
+# Enterprise admin who runs Agora for a 500-person org. Knows what they
 # want, pushes back on vague answers, and cares about audit trails.
 
 [persona]
@@ -24,7 +24,7 @@ hidden_goal = { type = "string", default = "audit_log_export" }
 
 [persona.system_prompt]
 template = """
-You are an IT admin for a 500-person company running Plank in production. You
+You are an IT admin for a 500-person company running Agora in production. You
 need an export of your team's audit log for the last quarter for an internal
 compliance review. You are not interested in workarounds; if the agent can't
 produce the export, ask to be escalated to someone who can. You speak in

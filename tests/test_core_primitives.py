@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-import plank  # noqa: F401
+import agora  # noqa: F401
 from ensemble import World, all_of, any_of
 
 
@@ -42,7 +42,7 @@ def test_set_budget_does_not_halt_when_within_cap():
 
 
 def test_eventlog_jsonl_roundtrip_via_trace():
-    world = World("plank", backend="mock")
+    world = World("agora", backend="mock")
     alice = world.spawn_user(id="alice", model="user-model")
     alice.act("lookup_user", user_id="u-alice")
     raw = json.dumps(world.trace())
@@ -63,7 +63,7 @@ def test_sandbox_tool_dispatches_via_subprocess(tmp_path):
     import subprocess
     import sys
     # Run the worker directly so we exercise the entry point without
-    # also depending on a world plugin. Plank ships sandbox=False
+    # also depending on a world plugin. Agora ships sandbox=False
     # tools, so we drive the worker against the noop world after
     # registering a one-off sandbox tool.
     proc = subprocess.run(
@@ -103,7 +103,7 @@ def test_set_actor_budget_isolated_from_world_total():
 def test_trace_path_writes_live_jsonl(tmp_path):
     """The live trace sink writes each event as it is appended."""
     sink = tmp_path / "live.jsonl"
-    world = World("plank", backend="mock", trace_path=str(sink))
+    world = World("agora", backend="mock", trace_path=str(sink))
     assert world.trace_path == str(sink)
     alice = world.spawn_user(id="alice", model="user-model")
     alice.act("lookup_user", user_id="u-alice")
@@ -116,7 +116,7 @@ def test_trace_path_writes_live_jsonl(tmp_path):
 
 def test_trace_path_detach(tmp_path):
     sink = tmp_path / "drop.jsonl"
-    world = World("plank", backend="mock")
+    world = World("agora", backend="mock")
     world.set_trace_path(str(sink))
     world.set_trace_path(None)
     assert world.trace_path is None
