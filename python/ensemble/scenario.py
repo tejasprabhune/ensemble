@@ -588,26 +588,44 @@ class World:
                 key_hint = f" key={raw[:6]}..."
 
         note: str
+        loud_banner = False
         if requested is None and chosen == "mock":
             note = (
                 "ensemble: backend=mock (default). "
                 "Pass backend='auto' to pick anthropic/openai from the env, "
                 "or backend='anthropic' / 'openai' / 'vllm' explicitly."
             )
+            loud_banner = True
         elif requested == "auto" and chosen == "mock":
             note = (
                 "ensemble: backend=mock (no ANTHROPIC_API_KEY or OPENAI_API_KEY "
                 "found in env or .env; falling back to deterministic mock)"
             )
+            loud_banner = True
+        elif requested == "mock":
+            note = "ensemble: backend=mock (explicit)"
         elif requested == "auto":
             note = f"ensemble: backend={chosen} (auto-detected from environment){key_hint}"
         else:
             note = f"ensemble: backend={chosen}{key_hint}"
         # Print BEFORE the first LLM call so the user can see what
         # backend is about to do work, not after it has already
-        # silently fallen back to mock.
+        # silently fallen back to mock. The audit called out that the
+        # mock-fallback line was easy to miss when buried in setup
+        # output; the loud bracketed banner is impossible to skim
+        # past, and only fires for the dangerous case (the user did
+        # not explicitly ask for mock).
         if verbose:
-            print(note, file=sys.stderr)
+            if loud_banner:
+                bar = "=" * 70
+                print(
+                    f"\n{bar}\n{note}\nAgent replies are canned deterministic stubs, not a real model.\n"
+                    f"Set ANTHROPIC_API_KEY or OPENAI_API_KEY in your shell or .env,\n"
+                    f"then re-run with backend='auto' (or pass --backend anthropic).\n{bar}\n",
+                    file=sys.stderr,
+                )
+            else:
+                print(note, file=sys.stderr)
         try:
             self._native.log_note(note)
         except AttributeError:
