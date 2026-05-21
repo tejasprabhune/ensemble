@@ -637,6 +637,10 @@ class World:
         return self._native.name
 
     @property
+    def run_id(self) -> str:
+        return self._native.run_id
+
+    @property
     def backend(self) -> str:
         return self._native.backend
 

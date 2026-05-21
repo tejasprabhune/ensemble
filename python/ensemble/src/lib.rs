@@ -1,6 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+use uuid::Uuid;
+
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -42,6 +44,10 @@ fn empty_world_bundle() -> WorldBundle {
 /// `run()` time (wired up in a later commit).
 pub(crate) struct WorldInner {
     pub(crate) name: String,
+    /// UUID v7 generated at construction. Stable for the lifetime of
+    /// the world and used as the trace directory name and the Stage
+    /// run identifier.
+    pub(crate) run_id: Uuid,
     pub(crate) bus: Bus,
     pub(crate) log: EventLog,
     pub(crate) backend: SharedBackend,
@@ -221,6 +227,7 @@ impl World {
         base_url: Option<&str>,
     ) -> PyResult<Self> {
         let name = name.unwrap_or("noop").to_string();
+        let run_id = Uuid::now_v7();
         // Worlds are no longer registered in rust; the python layer
         // owns the plugin registry and calls register_tool /
         // register_predicate to populate this world after construction.
@@ -257,6 +264,7 @@ impl World {
         Ok(Self {
             inner: Arc::new(Mutex::new(WorldInner {
                 name,
+                run_id,
                 bus,
                 log,
                 backend,
@@ -285,6 +293,11 @@ impl World {
     #[getter]
     fn name(&self) -> String {
         self.inner.lock().name.clone()
+    }
+
+    #[getter]
+    fn run_id(&self) -> String {
+        self.inner.lock().run_id.to_string()
     }
 
     /// Count of actors registered on this world.

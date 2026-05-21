@@ -25,5 +25,6 @@ pyo3-async-runtimes = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }
 once_cell = "1"
 parking_lot = "0.12"
