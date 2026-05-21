@@ -5,16 +5,21 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-// The viewer ships as three files embedded directly in the binary.
+// The viewer ships as embedded files baked into the binary.
 // `ensemble trace view <path>` works without --site or any extra
-// assets on disk; --site is still honoured for development when you
-// want to edit the html or css and refresh.
+// assets on disk; --site is still honoured for development.
 const EMBEDDED_VIEWER_HTML: &str =
     include_str!("../../../site/viewer.html");
 const EMBEDDED_VIEWER_JS: &str = include_str!("../../../site/viewer.js");
 const EMBEDDED_VIEWER_CSS: &str = include_str!("../../../site/style.css");
-// Compare-mode viewer: two traces side by side, scroll-synced by
-// tick. Same embedded-or-overlay story as the single-trace view.
+// Shared viewer modules (DataSource abstraction + LocalJsonlSource).
+const EMBEDDED_SHARED_VIEWER_JS: &str =
+    include_str!("../../../shared/trace-viewer/viewer.js");
+const EMBEDDED_SHARED_LOCAL_JS: &str =
+    include_str!("../../../shared/trace-viewer/sources/local-jsonl.js");
+const EMBEDDED_SHARED_STAGE_JS: &str =
+    include_str!("../../../shared/trace-viewer/sources/stage-polling.js");
+// Compare-mode viewer: two traces side by side, scroll-synced by tick.
 const EMBEDDED_COMPARE_HTML: &str =
     include_str!("../../../site/compare.html");
 const EMBEDDED_COMPARE_JS: &str =
@@ -162,6 +167,18 @@ fn serve_one(
         )),
         "compare.js" => Some((
             EMBEDDED_COMPARE_JS.as_bytes().to_vec(),
+            "application/javascript; charset=utf-8",
+        )),
+        "shared/trace-viewer/viewer.js" => Some((
+            EMBEDDED_SHARED_VIEWER_JS.as_bytes().to_vec(),
+            "application/javascript; charset=utf-8",
+        )),
+        "shared/trace-viewer/sources/local-jsonl.js" => Some((
+            EMBEDDED_SHARED_LOCAL_JS.as_bytes().to_vec(),
+            "application/javascript; charset=utf-8",
+        )),
+        "shared/trace-viewer/sources/stage-polling.js" => Some((
+            EMBEDDED_SHARED_STAGE_JS.as_bytes().to_vec(),
             "application/javascript; charset=utf-8",
         )),
         _ => None,
