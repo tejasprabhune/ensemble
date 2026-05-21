@@ -49,6 +49,7 @@ mod inner {
         run_id: String,
         buffer: Arc<Mutex<Buffer>>,
         notify: Arc<Notify>,
+        created_at_ms: u64,
     }
 
     impl StageSink {
@@ -102,6 +103,7 @@ mod inner {
                 run_id: run_id.clone(),
                 buffer: buffer.clone(),
                 notify: notify.clone(),
+                created_at_ms: wall_time_ms(),
             });
 
             let flush_config = config.clone();
@@ -127,8 +129,8 @@ mod inner {
         /// Async shutdown: signals the flush task, waits for the buffer
         /// to drain (up to ENSEMBLE_STAGE_FLUSH_TIMEOUT seconds), then
         /// POSTs a completed status. Must be called from within a tokio
-        /// context (use `runtime.block_on(sink.shutdown_async())`).
-        pub async fn shutdown_async(&self) -> u64 {
+        /// context (use `runtime.block_on(sink.shutdown_async(scores))`).
+        pub async fn shutdown_async(&self, scores: Option<serde_json::Value>) -> u64 {
             {
                 let mut buf = self.buffer.lock().expect("stage buffer lock");
                 buf.shutdown = true;
@@ -154,7 +156,8 @@ mod inner {
             }
 
             let failed = self.buffer.lock().expect("stage buffer lock").events.len() as u64;
-            let _ = post_status(&self.config, &self.run_id, "completed", failed).await;
+            let wall_ms = wall_time_ms().saturating_sub(self.created_at_ms) as i64;
+            let _ = post_status(&self.config, &self.run_id, "completed", failed, scores, wall_ms).await;
             failed
         }
     }
@@ -229,6 +232,10 @@ mod inner {
         }
     }
 
+    fn log_traffic() -> bool {
+        std::env::var("ENSEMBLE_STAGE_LOG_TRAFFIC").map(|v| v == "1").unwrap_or(false)
+    }
+
     async fn post_events(
         config: &StageConfig,
         run_id: &str,
@@ -256,6 +263,11 @@ mod inner {
             })
             .collect();
         let body = serde_json::json!({ "events": events_json });
+        if log_traffic() {
+            let body_str = serde_json::to_string(&body).unwrap_or_default();
+            eprintln!("[stage-traffic] POST {url}");
+            eprintln!("[stage-traffic] request body ({}B): {}", body_str.len(), &body_str[..body_str.len().min(2000)]);
+        }
         let resp = client
             .post(&url)
             .bearer_auth(&config.api_key)
@@ -263,25 +275,48 @@ mod inner {
             .send()
             .await
             .map_err(|e| anyhow!("stage: post_events request: {e}"))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if log_traffic() {
+            eprintln!("[stage-traffic] response {status}: {}", &text[..text.len().min(500)]);
+        }
+        if !status.is_success() {
             return Err(anyhow!("stage: post_events HTTP {status}: {text}"));
         }
         Ok(())
     }
 
-    async fn post_status(config: &StageConfig, run_id: &str, status: &str, failed: u64) -> Result<()> {
+    async fn post_status(
+        config: &StageConfig,
+        run_id: &str,
+        status: &str,
+        failed: u64,
+        scores: Option<serde_json::Value>,
+        wall_time_ms: i64,
+    ) -> Result<()> {
         let client = client();
         let url = format!(
             "{}/v1/runs/{}/status",
             config.base_url.trim_end_matches('/'),
             run_id
         );
+        let outcome = scores.unwrap_or_else(|| {
+            if failed == 0 {
+                serde_json::json!({})
+            } else {
+                serde_json::json!({ "flush_failed_count": failed })
+            }
+        });
         let body = serde_json::json!({
             "status": status,
-            "outcome": if failed == 0 { "success" } else { "partial" },
+            "outcome": outcome,
+            "wall_time_ms": wall_time_ms,
         });
+        if log_traffic() {
+            let body_str = serde_json::to_string(&body).unwrap_or_default();
+            eprintln!("[stage-traffic] POST {url}");
+            eprintln!("[stage-traffic] request body: {body_str}");
+        }
         let resp = client
             .post(&url)
             .bearer_auth(&config.api_key)
@@ -289,9 +324,12 @@ mod inner {
             .send()
             .await
             .map_err(|e| anyhow!("stage: post_status request: {e}"))?;
-        if !resp.status().is_success() {
-            let status_code = resp.status();
-            let text = resp.text().await.unwrap_or_default();
+        let status_code = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if log_traffic() {
+            eprintln!("[stage-traffic] response {status_code}: {}", &text[..text.len().min(500)]);
+        }
+        if !status_code.is_success() {
             return Err(anyhow!("stage: post_status HTTP {status_code}: {text}"));
         }
         Ok(())
@@ -311,6 +349,13 @@ mod inner {
                 .expect("stage blocking HTTP client")
         });
 
+        let do_log = std::env::var("ENSEMBLE_STAGE_LOG_TRAFFIC").map(|v| v == "1").unwrap_or(false);
+        if do_log {
+            let body_str = serde_json::to_string(body).unwrap_or_default();
+            eprintln!("[stage-traffic] POST {url}");
+            eprintln!("[stage-traffic] request body: {body_str}");
+        }
+
         let resp = BLOCKING_CLIENT
             .post(url)
             .header("Authorization", format!("Bearer {api_key}"))
@@ -321,6 +366,10 @@ mod inner {
 
         let status = resp.status();
         let resp_body = resp.text().unwrap_or_default();
+
+        if do_log {
+            eprintln!("[stage-traffic] response {status}: {}", &resp_body[..resp_body.len().min(500)]);
+        }
 
         if !status.is_success() {
             return Err(anyhow!("HTTP {}: {resp_body}", status.as_u16()));
@@ -376,7 +425,7 @@ pub mod inner_stub {
 
     impl StageSink {
         pub fn emit(&self, _event: &Event) {}
-        pub async fn shutdown_async(&self) -> u64 { 0 }
+        pub async fn shutdown_async(&self, _scores: Option<serde_json::Value>) -> u64 { 0 }
     }
 }
 

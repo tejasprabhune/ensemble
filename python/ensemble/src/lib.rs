@@ -372,15 +372,16 @@ impl World {
     }
 
     /// Flush remaining events and POST run status=completed to Stage.
-    fn finalize_stage(&self, py: Python<'_>, _scores_json: &str) -> PyResult<()> {
+    fn finalize_stage(&self, py: Python<'_>, scores_json: &str) -> PyResult<()> {
         let sink = self.inner.lock().stage_sink.clone();
         let Some(sink) = sink else {
             return Ok(());
         };
+        let scores: Option<serde_json::Value> = serde_json::from_str(scores_json).ok();
         let rt = global_runtime();
         // Release the GIL so the background flush task can complete its
         // HTTP calls to Stage (which may be a Python mock in tests).
-        let failed = py.detach(|| rt.block_on(sink.shutdown_async()));
+        let failed = py.detach(|| rt.block_on(sink.shutdown_async(scores)));
         if failed > 0 {
             eprintln!("stage: {failed} events failed to flush before shutdown");
         }
