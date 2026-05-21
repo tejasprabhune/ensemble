@@ -156,10 +156,16 @@ def cmd_login(args) -> int:
             api_keys = params.get("api_key", [])
             if api_keys:
                 result["api_key"] = api_keys[0]
+            redirect_target = f"{base_url}/auth/cli/done"
+            body = (
+                f'<html><head><meta http-equiv="refresh" content="0;url={redirect_target}"></head>'
+                f'<body>Redirecting...</body></html>'
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(b"<h1>Logged in! You can close this tab.</h1>")
+            self.wfile.write(body)
             done.set()
 
         def log_message(self, fmt, *a):
